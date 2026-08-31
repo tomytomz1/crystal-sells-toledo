@@ -57,22 +57,25 @@ Nine things are placeholders. Replace them and the site is live-ready.
 
 Search and replace across `src/` and `assets/js/main.js`, then rebuild:
 
+Crystal's phone number — **(419) 245-4655** — is already in place across the site, the
+`tel:` links, the JSON-LD and the mailto fallback. These are still placeholders:
+
 | Placeholder | Replace with |
 |---|---|
-| `(419) 555-0100` | Crystal's real phone |
-| `+14195550100` | the same number, `tel:` format |
 | `crystal@crystalsellstoledo.com` | her real email |
 | `— add license number —` (in `src/pages/about.html`) | her Ohio license number |
 | `Perrysburg, Ohio 43551` (in `src/partials/footer.html`, `src/pages/contact.html`) | the Key Realty office address |
 
 ```bash
-sed -i 's/(419) 555-0100/(419) 867-5309/g; s/+14195550100/+14198675309/g' \
+sed -i 's/crystal@crystalsellstoledo\.com/her.real@email.com/g' \
   src/pages/*.html src/partials/*.html assets/js/main.js
 npm run build && npm run check
 ```
 
-`npm run check` warns on every page that still contains the placeholder phone number, so it
-tells you when you are done.
+`npm run check` warns on every page that still contains a known placeholder, so it tells you
+when you are done. If the phone number ever changes, it appears in `src/pages/`,
+`src/partials/` and `assets/js/main.js` in three formats — display, `tel:` and the
+hyphenated JSON-LD form.
 
 ### Photography
 

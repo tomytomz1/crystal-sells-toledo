@@ -20,7 +20,7 @@
   var CONFIG = {
     formEndpoint: null,
     email: "crystal@crystalsellstoledo.com",
-    phone: "+14195550100"
+    phone: "+14192454655"
   };
   window.CRYSTAL_CONFIG = CONFIG;
 

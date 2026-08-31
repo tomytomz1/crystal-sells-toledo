@@ -14,6 +14,13 @@ const warnings = [];
 const fail = (f, m) => errors.push(`${f}: ${m}`);
 const warn = (f, m) => warnings.push(`${f}: ${m}`);
 
+/* Details that must be swapped for Crystal's real ones before launch.
+   Delete a row once it is genuinely resolved site-wide. */
+const PLACEHOLDERS = [
+  [/crystal@crystalsellstoledo\.com/, "the crystal@crystalsellstoledo.com email address"],
+  [/add license number/i, "the Ohio license number on /about"],
+];
+
 const pages = readdirSync(ROOT).filter((f) => f.endsWith(".html"));
 if (!pages.length) fail("build", "no HTML pages found — run `npm run build` first");
 
@@ -82,8 +89,9 @@ for (const file of pages) {
   if (!/<html lang="en">/.test(html)) fail(file, "missing lang attribute on <html>");
   if (!/name="viewport"/.test(html)) fail(file, "missing viewport meta");
 
-  /* --- placeholder contact details still in place ----------------- */
-  if (/555-0100/.test(html)) warn(file, "still contains the placeholder phone number (419) 555-0100");
+  /* --- placeholder details still in place -------------------------- */
+  for (const [pattern, label] of PLACEHOLDERS)
+    if (pattern.test(html)) warn(file, `still contains a placeholder: ${label}`);
 }
 
 /* --- required root files -------------------------------------------- */
