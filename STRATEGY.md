@@ -261,8 +261,10 @@ Protect the hours by declining:
 
 - **Floor duty and open houses for other agents' listings.** Hours spent building someone
   else's business.
-- **Any area outside 43551 that is not a personal referral.** Depth beats reach; a referral
-  is always worth taking.
+- **Marketing spend outside the farm.** Take every deal that comes to you, anywhere in greater
+  Toledo — turning away business is not the goal, and referrals are always worth having. What
+  should stay disciplined is where the *money and the prospecting hours* go: the mailers, the
+  content and the farm work stay pointed at 43551. Serve widely; market narrowly.
 - **Paid lead portals, for now.** They convert at low single digits and demand instant
   response times that do not survive a school pickup.
 - **Brokerage busywork** that does not produce a listing appointment.
