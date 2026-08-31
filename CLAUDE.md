@@ -22,6 +22,29 @@ repository** and no memory of previous conversations. Include:
 
 Write plainly. State what is unproven as unproven.
 
+## Completion checklist — run this every time, before replying
+
+Work is not finished until all six are done, in order. Do not report completion
+with any of them skipped.
+
+1. **Run the full test suite** — `npm test`. Not a subset, and not "no code
+   changed so it cannot have broken": run it and report the real number.
+2. **Write `docs/updates/YYYY-MM-DD-<slug>.md`** per the agreement above, even
+   for documentation-only work.
+3. **Update `docs/PHASE-1-HANDOFF.md`** if any contract changed — the endpoint,
+   the CRM payload, field limits, environment variables, or section 6.
+4. **Commit** everything, with a message explaining *why*, not just what.
+5. **Push** the branch, and merge to `main` if the work is meant to deploy.
+6. **Report** in the final reply, explicitly:
+   - commit SHA
+   - update-document path
+   - test result
+   - whether anything remains blocked
+   - whether human action is required
+
+If something is blocked or unproven, say so plainly in that report. Never let
+"tests pass" imply "this works in production" when no live call has been made.
+
 ## Project facts
 
 | | |
