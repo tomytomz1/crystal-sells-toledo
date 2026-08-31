@@ -537,7 +537,10 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
    whether or not the source files ever gain a transparent background. */
 .brandchip {
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--cream); border-radius: var(--radius);
+  /* White, not cream: the supplied logo and badge have an opaque white
+     ground baked in, which would show as a paler rectangle on any other
+     colour. On white it disappears. */
+  background: #fff; border-radius: var(--radius);
   padding: .55rem .75rem;
 }
 .brandchip--logo { padding: .9rem 1.1rem; margin-bottom: 1.35rem; }
