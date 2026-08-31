@@ -11,7 +11,7 @@
             single directory also means only the site ships — STRATEGY.md,
             the market research and the page sources stay out of it.
    ===================================================================== */
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, cpSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,6 +92,29 @@ const ASSET_VERSIONS = {
   js_v: assetHash("assets/js/main.js"),
 };
 
+/* ---------------------------------------------------------------------
+   Homepage hero image
+   ---------------------------------------------------------------------
+   The hero is the primary conversion surface, so a development
+   placeholder must never render there. Every other image on the site
+   keeps the runtime data-fallback safety net; this one is resolved at
+   BUILD time instead:
+
+     photo present -> emit the <img>, fingerprinted, fetchpriority=high
+     photo absent  -> emit nothing; the branded ink gradient stands in
+
+   That means no broken image, no placeholder artwork, no layout shift,
+   and no JavaScript deciding what the LCP element is. Drop a real
+   assets/img/hero-perrysburg.jpg in and the next build picks it up with
+   no markup change.
+   --------------------------------------------------------------------- */
+const HERO_IMAGE = "assets/img/hero-perrysburg.jpg";
+const heroImageTag = existsSync(join(ROOT, HERO_IMAGE))
+  ? `<img src="/${HERO_IMAGE}?v=${assetHash(HERO_IMAGE)}" alt=""` +
+    ` width="1800" height="1200" fetchpriority="high" decoding="async">`
+  : "";
+if (!heroImageTag) console.log("  i hero photo absent - using the branded gradient");
+
 const shell = partial("_shell");
 const pagesDir = join(ROOT, "src/pages");
 const built = [];
@@ -114,6 +137,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     updated: CONTENT_UPDATED,
     css_v: ASSET_VERSIONS.css_v,
     js_v: ASSET_VERSIONS.js_v,
+    heroImage: heroImageTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",

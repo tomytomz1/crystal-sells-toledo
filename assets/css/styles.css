@@ -147,7 +147,10 @@ p:last-child { margin-bottom: 0; }
 .btn--gold { background: var(--gold); color: var(--ink); }
 .btn--gold:hover { background: var(--gold-lt); box-shadow: var(--shadow-md); }
 
-.btn--ghost { border-color: currentColor; color: var(--ink); }
+/* Explicitly transparent. Without this a <button class="btn btn--ghost">
+   falls back to the UA `buttonface` (#efefef), which is not a ghost button
+   anywhere and is unreadable when the label is light. */
+.btn--ghost { background: transparent; border-color: currentColor; color: var(--ink); }
 .btn--ghost:hover { background: var(--ink); border-color: var(--ink); color: var(--white); }
 
 .btn--light { border-color: rgba(255,255,255,.55); color: var(--white); }
@@ -305,6 +308,126 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   background: linear-gradient(to bottom, var(--gold), transparent);
 }
 @media (max-width: 780px) { .hero__scroll { display: none; } }
+
+/* ============================================================
+   Capture hero - homepage only
+   ============================================================
+   Additive: .hero keeps its existing rules for any other use.
+   The composition stays left-aligned and editorial; only the
+   content changes from two buttons to a live first step. */
+.hero--capture {
+  align-items: center;
+  min-height: auto;                    /* grows when step 2 opens */
+  padding-top: clamp(5.6rem, 14vw, 9.5rem);
+  padding-bottom: clamp(2.5rem, 7vw, 5.5rem);
+}
+/* Very small screens: reclaim vertical space from spacing rather than from
+   type size or touch targets, so the address field and CTA sit as close to
+   the fold as they can without hurting legibility or tap accuracy. */
+@media (max-width: 380px) {
+  .hero--capture h1 { font-size: 1.82rem; margin-bottom: .45em; }
+  .hero--capture .eyebrow { margin-bottom: .7rem; font-size: .66rem; }
+  .hero--capture .hero__lede { margin-bottom: 1.25rem; font-size: .97rem; }
+  .hero--capture .hv-form .form__step { margin-bottom: .55rem; }
+  .hero--capture .hv-form__micro { margin-top: .65rem; }
+}
+/* Branded ground. Present whether or not a photograph exists, so the
+   hero is never blank and never shows placeholder artwork. */
+.hero--capture .hero__bg {
+  background:
+    radial-gradient(120% 90% at 12% 8%, #241f18 0%, rgba(36,31,24,0) 60%),
+    linear-gradient(160deg, #1b1813 0%, #12100d 55%, #0d0b09 100%);
+}
+.hero--capture .hero__bg::after {
+  /* Only needed to darken a photograph; harmless over the gradient. */
+  background:
+    linear-gradient(to top, rgba(10,9,7,.86) 0%, rgba(10,9,7,.58) 45%, rgba(10,9,7,.5) 100%),
+    linear-gradient(to right, rgba(10,9,7,.78) 0%, rgba(10,9,7,.28) 70%);
+}
+.hero--capture .hero__inner { padding-bottom: 0; }
+.hero--capture .hero__content { max-width: 54rem; }
+.hero--capture .eyebrow {
+  text-wrap: balance;                  /* never breaks awkwardly on 43551 */
+  margin-bottom: 1rem;
+}
+.hero--capture h1 {
+  font-size: clamp(1.95rem, 6.4vw, 3.35rem);
+  line-height: 1.1;
+  max-width: 17ch;
+  margin-bottom: .55em;
+}
+.hero--capture .hero__lede {
+  max-width: 46ch;
+  font-size: clamp(1rem, 1.5vw, 1.14rem);
+  margin-bottom: clamp(1.6rem, 3vw, 2.1rem);
+}
+
+/* ---- the form inside the hero ---- */
+.hero .hv-form { max-width: 40rem; }
+.hero .hv-form .form__step {
+  color: var(--gold-lt);
+  margin-bottom: .8rem;
+}
+.hero .hv-form .field > label { color: rgba(255,255,255,.82); }
+.hero .hv-form .field input,
+.hero .hv-form .field select,
+.hero .hv-form .field textarea {
+  background: rgba(255,255,255,.97);
+  border-color: rgba(255,255,255,.28);
+}
+.hero .hv-form .form__note { color: rgba(255,255,255,.62); }
+.hero .hv-form .form__note a { color: var(--gold-lt); }
+.hero .hv-form .btn--primary { background: var(--gold); color: var(--ink); }
+.hero .hv-form .btn--primary:hover { background: var(--gold-lt); }
+.hero .hv-form .btn--ghost { background: transparent; border-color: rgba(255,255,255,.5); color: #fff; }
+.hero .hv-form .btn--ghost:hover { background: #fff; color: var(--ink); border-color: #fff; }
+
+/* Address + CTA share a row once there is room for both. */
+/* Vertical rhythm inside a step. The form's own grid gap only applies
+   between the step containers, not within them.
+
+   `:not([hidden])` is load-bearing: an explicit `display` would override
+   the UA stylesheet's `[hidden] { display: none }` and the inactive step
+   would become visible and focusable again. */
+[data-step]:not([hidden]) { display: grid; gap: 1.15rem; }
+
+.hv-form__lead { display: grid; gap: .85rem; }
+.hv-form__go { white-space: nowrap; }
+@media (min-width: 640px) {
+  .hero .hv-form__lead {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: .75rem;
+  }
+  .hero .hv-form__go { padding-inline: 1.9rem; }
+}
+@media (max-width: 639px) {
+  .hero .hv-form__go { width: 100%; }
+}
+/* Comfortable touch targets; taller than the 48px floor. */
+.hero .hv-form .field input,
+.hero .hv-form .btn { min-height: 3.4rem; }
+
+.hv-form__micro {
+  margin-top: .85rem;
+  font-size: .82rem;
+  letter-spacing: .01em;
+}
+
+/* Subordinate by construction: a quiet text link, never a second button. */
+.hero__secondary { margin-top: clamp(1.5rem, 3vw, 2rem); }
+.hero__secondary a {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-size: .88rem; color: rgba(255,255,255,.62);
+  border-bottom: 1px solid rgba(255,255,255,.22);
+  padding-bottom: .2rem;
+  transition: color .25s var(--ease), border-color .25s var(--ease), gap .25s var(--ease);
+}
+.hero__secondary a:hover { color: #fff; border-color: var(--gold); gap: .8rem; }
+
+/* On /home-value the form sits inside a light card and keeps the stacked
+   layout - the card is too narrow for a side-by-side field and button. */
+.form-card .hv-form__go { width: 100%; }
 
 /* Compact hero for interior pages */
 .pagehead {

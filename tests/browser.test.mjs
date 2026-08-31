@@ -231,6 +231,249 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.close();
   });
 
+  /* ------------------------------------------- homepage hero (CRO) ---- */
+
+  async function fillHomeStep1(p, addr = "55 Louisiana Ave, Perrysburg, OH 43551") {
+    await p.fill("#v-address", addr);
+    await p.locator("[data-step-next]").click();
+    await p.waitForTimeout(350);
+  }
+
+  test("homepage hero carries the home_value form, not a link to it", async () => {
+    const p = await page();
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    const form = p.locator("form[data-form]");
+    assert.equal(await form.count(), 1, "expected exactly one form on the homepage");
+    assert.equal(await form.getAttribute("data-form-type"), "home_value");
+    assert.equal(await p.locator("#v-address").count(), 1);
+    /* The form must live inside the hero, not merely on the page. */
+    const inHero = await p.evaluate(() =>
+      Boolean(document.querySelector(".hero--capture .hero__content form[data-form]")));
+    assert.ok(inHero, "form is not inside the hero content column");
+    await p.close();
+  });
+
+  test("homepage h1 is the control copy and has no salesperson name", async () => {
+    const p = await page();
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    const h1s = p.locator("h1");
+    assert.equal(await h1s.count(), 1);
+    assert.equal((await h1s.textContent()).trim(), "What could your Perrysburg home sell for?");
+    assert.ok(!/Crystal\s+Saylor/.test(await h1s.textContent()));
+    await p.close();
+  });
+
+  test("homepage step 2 is hidden until step 1 completes", async () => {
+    const p = await page();
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    assert.equal(await p.locator('[data-step="2"]').isVisible(), false);
+    assert.ok(await p.locator('[data-step="2"]').getAttribute("hidden") !== null,
+      "step 2 must use the hidden attribute so it leaves the a11y tree");
+    await fillHomeStep1(p);
+    assert.equal(await p.locator('[data-step="2"]').isVisible(), true);
+    assert.equal(await p.inputValue("#v-address"), "55 Louisiana Ave, Perrysburg, OH 43551",
+      "address was not preserved across the step change");
+    await p.close();
+  });
+
+  test("homepage hero is keyboard operable and moves focus into step 2", async () => {
+    const p = await page();
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    await p.focus("#v-address");
+    await p.keyboard.type("9 Elm St, Perrysburg, OH");
+    await p.keyboard.press("Tab");
+    assert.ok(await p.evaluate(() => document.activeElement?.hasAttribute("data-step-next")),
+      "Tab from the address field does not reach the advance button");
+    await p.keyboard.press("Enter");
+    await p.waitForTimeout(350);
+    assert.equal(await p.evaluate(() => document.activeElement?.id), "v-first");
+    await p.locator("[data-step-back]").click();
+    await p.waitForTimeout(250);
+    assert.equal(await p.inputValue("#v-address"), "9 Elm St, Perrysburg, OH");
+    await p.close();
+  });
+
+  test("homepage lead posts to /api/lead with attribution and page '/'", async () => {
+    const p = await page({ apiBody: { ok: true, submission_id: "csv_home" } });
+    let sent = null, urls = [];
+    p.on("request", (r) => {
+      if (/\/api\//.test(r.url())) urls.push(new URL(r.url()).pathname);
+      if (r.url().includes("/api/lead")) sent = JSON.parse(r.postData() || "{}");
+    });
+    await p.goto(`${base}/?utm_source=google&utm_medium=cpc&gclid=HOMEQA`, { waitUntil: "load" });
+    await fillHomeStep1(p);
+    await p.fill("#v-first", "Sam"); await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    await p.locator('form[data-form] button[type=submit]').click();
+    await p.waitForTimeout(600);
+
+    assert.deepEqual([...new Set(urls)], ["/api/lead"], "a second API endpoint was contacted");
+    assert.equal(sent.form_type, "home_value");
+    assert.equal(sent.page, "/");
+    assert.equal(sent.attribution.utm_source, "google");
+    assert.equal(sent.attribution.gclid, "HOMEQA");
+    assert.ok(sent.property_address.startsWith("55 Louisiana"));
+    /* The address must never travel in the URL. */
+    assert.ok(!p.url().includes("Louisiana"), "property address leaked into the URL");
+    await p.close();
+  });
+
+  test("homepage success resets only after server acceptance", async () => {
+    const p = await page({ apiBody: { ok: true, submission_id: "csv_ok9" } });
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    await p.evaluate(() => { window.__ok = []; window.addEventListener("lead_submit_success", (e) => window.__ok.push(e.detail)); });
+    await fillHomeStep1(p);
+    await p.fill("#v-first", "Sam"); await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    await p.locator('form[data-form] button[type=submit]').click();
+    await p.waitForTimeout(600);
+    assert.match(await p.getAttribute(".form-status", "class"), /form-status--ok/);
+    assert.equal((await p.evaluate(() => window.__ok))[0].submission_id, "csv_ok9");
+    assert.equal(await p.inputValue("#v-address"), "");
+    await p.close();
+  });
+
+  test("homepage failure preserves every field and offers recovery", async () => {
+    const p = await page({ apiStatus: 502, apiBody: { ok: false, code: "DELIVERY_FAILED", message: "Could not submit." } });
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    await fillHomeStep1(p, "9 Elm St");
+    await p.fill("#v-first", "Ann"); await p.fill("#v-last", "Lee");
+    await p.fill("#v-email", "ann@example.com");
+    await p.locator('form[data-form] button[type=submit]').click();
+    await p.waitForTimeout(600);
+    assert.match(await p.getAttribute(".form-status", "class"), /form-status--err/);
+    assert.equal(await p.inputValue("#v-address"), "9 Elm St");
+    assert.equal(await p.inputValue("#v-first"), "Ann");
+    assert.equal(await p.inputValue("#v-email"), "ann@example.com");
+    assert.ok(await p.locator('.form-status a[href^="mailto:"]').count() >= 1);
+    assert.equal(p.url(), `${base}/`);
+    await p.close();
+  });
+
+  test("hero shows no development placeholder and no fake proof", async () => {
+    const p = await page();
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    const heroText = await p.evaluate(() =>
+      document.querySelector(".hero--capture").innerText.replace(/\s+/g, " "));
+    for (const banned of ["HERO IMAGE", "Degnan", "5-star", "top agent", "#1 ", "specialist", "guarantee"])
+      assert.ok(!new RegExp(banned, "i").test(heroText), `hero contains "${banned}"`);
+    const imgs = await p.evaluate(() =>
+      [...document.querySelectorAll(".hero--capture img")].map((i) => i.getAttribute("src")));
+    for (const src of imgs)
+      assert.ok(!/placeholder/i.test(src || ""), `hero uses a placeholder image: ${src}`);
+    await p.close();
+  });
+
+  test("secondary action is subordinate and targets /sell", async () => {
+    const p = await page();
+    await p.goto(`${base}/`, { waitUntil: "load" });
+    const sec = p.locator(".hero__secondary a");
+    assert.equal(await sec.getAttribute("href"), "/sell");
+    const cls = (await sec.getAttribute("class")) || "";
+    assert.ok(!/\bbtn\b/.test(cls), "secondary action is styled as a button");
+    const [secFs, ctaFs] = await p.evaluate(() => [
+      parseFloat(getComputedStyle(document.querySelector(".hero__secondary a")).fontSize),
+      parseFloat(getComputedStyle(document.querySelector("[data-step-next]")).fontSize),
+    ]);
+    assert.ok(secFs > 0 && ctaFs > 0);
+    await p.close();
+  });
+
+  test("no horizontal overflow, no CTA wrap, across every target viewport", async () => {
+    for (const [w, h] of [[320,568],[360,640],[375,667],[390,844],[393,852],[414,896],[430,932],
+                          [1024,768],[1280,800],[1440,900],[1600,900],[1920,1080]]) {
+      const p = await browser.newPage({ viewport: { width: w, height: h } });
+      await p.route("**/*", (r) => r.request().url().startsWith(base) ? r.continue() : r.abort());
+      await p.goto(`${base}/`, { waitUntil: "load" });
+      await p.waitForTimeout(150);
+      const m = await p.evaluate(() => {
+        const de = document.documentElement;
+        const cta = document.querySelector("[data-step-next]");
+        const eb = document.querySelector(".hero--capture .eyebrow");
+        /* body{overflow-x:hidden} clips the document scroll width, so a
+           document-level measurement alone can miss real overflow. Measure
+           the boxes instead. The honeypot is parked off-canvas on purpose. */
+        const vw = de.clientWidth;
+        const escapes = [...document.querySelectorAll(".hero--capture *")]
+          .filter((el) => !el.classList.contains("hp"))
+          .filter((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && (r.right > vw + 1 || r.left < -1);
+          })
+          .map((el) => el.tagName.toLowerCase() + "." + String(el.className || "").split(" ")[0]);
+        return {
+          heroEscapes: escapes,
+          overflow: de.scrollWidth - de.clientWidth,
+          ctaWraps: cta.scrollWidth > cta.clientWidth + 1,
+          ctaNowrap: getComputedStyle(cta).whiteSpace === "nowrap",
+          ctaH: Math.round(cta.getBoundingClientRect().height),
+          ebStartsWithSep: /^\s*[·]/.test(eb.textContent),
+        };
+      });
+      assert.equal(m.overflow, 0, `document horizontal overflow at ${w}x${h}`);
+      assert.deepEqual(m.heroEscapes, [],
+        `hero content escapes the viewport at ${w}x${h}: ${m.heroEscapes.join(", ")}`);
+      assert.ok(!m.ctaWraps, `CTA text wraps at ${w}x${h}`);
+      assert.ok(m.ctaNowrap, `CTA lost white-space:nowrap at ${w}x${h}`);
+      assert.ok(m.ctaH >= 48, `CTA is only ${m.ctaH}px tall at ${w}x${h}`);
+      assert.ok(!m.ebStartsWithSep, `eyebrow starts with a separator at ${w}x${h}`);
+      await p.close();
+    }
+  });
+
+  test("the address field keeps a real label, not placeholder-only UI", async () => {
+    for (const path of ["/", "/home-value"]) {
+      const p = await page();
+      await p.goto(`${base}${path}`, { waitUntil: "load" });
+      const a11y = await p.evaluate(() => {
+        const input = document.querySelector("#v-address");
+        const label = document.querySelector('label[for="v-address"]');
+        return {
+          hasLabel: Boolean(label),
+          labelText: label ? label.textContent.trim() : "",
+          autocomplete: input.getAttribute("autocomplete"),
+        };
+      });
+      assert.ok(a11y.hasLabel, `no <label for="v-address"> on ${path}`);
+      assert.match(a11y.labelText, /Property address/i, `label text wrong on ${path}`);
+      assert.equal(a11y.autocomplete, "street-address", `autocomplete wrong on ${path}`);
+      await p.close();
+    }
+  });
+
+  test("address and CTA are reachable near the fold on mainstream phones", async () => {
+    for (const [w, h] of [[375,667],[390,844],[393,852],[414,896],[430,932]]) {
+      const p = await browser.newPage({ viewport: { width: w, height: h } });
+      await p.route("**/*", (r) => r.request().url().startsWith(base) ? r.continue() : r.abort());
+      await p.goto(`${base}/`, { waitUntil: "load" });
+      await p.waitForTimeout(150);
+      const ok = await p.evaluate(() => {
+        const b = (s) => document.querySelector(s).getBoundingClientRect().bottom;
+        return b("#v-address") <= innerHeight && b("[data-step-next]") <= innerHeight;
+      });
+      assert.ok(ok, `address + CTA are below the fold at ${w}x${h}`);
+      await p.close();
+    }
+  });
+
+  test("/home-value still runs the identical funnel", async () => {
+    const p = await page({ apiBody: { ok: true, submission_id: "csv_hv" } });
+    let sent = null;
+    p.on("request", (r) => { if (r.url().includes("/api/lead")) sent = JSON.parse(r.postData() || "{}"); });
+    await p.goto(`${base}/home-value`, { waitUntil: "load" });
+    assert.equal(await p.locator('[data-step="2"]').isVisible(), false);
+    await fillHomeStep1(p, "1 Front St, Perrysburg, OH");
+    assert.equal(await p.locator('[data-step="2"]').isVisible(), true);
+    await p.fill("#v-first", "Jo"); await p.fill("#v-last", "Kim");
+    await p.fill("#v-email", "jo@example.com");
+    await p.locator('form[data-form] button[type=submit]').click();
+    await p.waitForTimeout(600);
+    assert.equal(sent.form_type, "home_value");
+    assert.equal(sent.page, "/home-value");
+    assert.match(await p.getAttribute(".form-status", "class"), /form-status--ok/);
+    await p.close();
+  });
+
   /* -------------------------------------------------------- analytics - */
 
   test("CTA and contact-intent events fire", async () => {

@@ -55,24 +55,43 @@
   }
 } -->
 
-<section class="hero">
-  <div class="hero__bg">
-    <img src="/assets/img/hero-perrysburg.jpg" data-fallback="/assets/img/placeholder-hero.svg"
-         alt="A tree-lined street of homes in Perrysburg, Ohio" width="1800" height="1200" fetchpriority="high">
-  </div>
+<!-- =====================================================================
+     Homepage hero - seller-first, valuation-first.
+     =====================================================================
+     The hero's job is not to introduce Crystal; it is to let a homeowner
+     begin the highest-value seller action immediately. The address field
+     is the offer, not a link to the offer.
+
+     The form below is the shared home-value-form partial - the same one
+     /home-value uses. One form_type, one endpoint, one contract. Do not
+     inline a copy here.
+
+     Never write an include token inside a comment: the build expands
+     includes anywhere in the file, and a partial carrying its own comment
+     block will terminate the enclosing comment early and hoist its markup
+     out of position.
+
+     The background image is emitted by tools/build.mjs ONLY when the real
+     photograph exists on disk. Absent it, the branded ink gradient below
+     stands in - a development placeholder must never reach production in
+     the primary conversion surface.
+     ===================================================================== -->
+<section class="hero hero--capture">
+  <div class="hero__bg">{{heroImage}}</div>
   <div class="hero__inner wrap">
     <div class="hero__content">
-      <p class="eyebrow">Toledo &middot; Perrysburg &middot; Northwest Ohio</p>
-      <h1>Your home deserves more than <em>a sign in the yard.</em></h1>
-      <p class="hero__lede">I sell homes across greater Toledo with real marketing, real preparation
-        and real availability &mdash; and I answer my own phone.</p>
-      <div class="btn-row">
-        <a class="btn btn--gold btn--lg" href="/home-value">What&rsquo;s My Home Worth?</a>
-        <a class="btn btn--light btn--lg" href="/sell">See How I Sell</a>
-      </div>
+      <p class="eyebrow">Perrysburg&nbsp;&middot; 43551&nbsp;&middot; Greater Toledo</p>
+      <h1>What could your Perrysburg home sell for?</h1>
+      <p class="hero__lede">Get a local, human valuation built from recent nearby sales and the
+        details of your property &mdash; not an instant automated estimate.</p>
+
+      {{> home-value-form}}
+
+      <p class="hero__secondary">
+        <a href="/sell">See how the selling process works <span aria-hidden="true">&rarr;</span></a>
+      </p>
     </div>
   </div>
-  <span class="hero__scroll">Scroll</span>
 </section>
 
 <section class="section--tight">

@@ -172,6 +172,93 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (/Zoho-oauthtoken/i.test(text)) fail(file, "contains a Zoho OAuth token header in client output");
 }
 
+/* --- homepage hero CRO contract --------------------------------------- */
+{
+  const home = readFileSync(join(ROOT, "index.html"), "utf8");
+  const H1 = "What could your Perrysburg home sell for?";
+
+  const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(home);
+  if (!h1) fail("index.html", "no h1");
+  else if (h1[1].replace(/<[^>]+>/g, "").trim() !== H1)
+    fail("index.html", `hero h1 is not the control copy: "${h1[1].replace(/<[^>]+>/g, "").trim()}"`);
+
+  /* The hero must carry the real form, not a link to it. */
+  if (!/<form[^>]*data-form-type="home_value"/.test(home))
+    fail("index.html", "hero has no home_value form");
+  if (!/name="property_address"[^>]*required/.test(home) &&
+      !/required[^>]*name="property_address"/.test(home))
+    fail("index.html", "hero address field is not required");
+  if (!/name="property_address"[^>]*maxlength="200"/.test(home))
+    fail("index.html", "hero address field lost maxlength=200");
+
+  /* One form per page: a second would mean a duplicated contract. */
+  const formCount = (home.match(/<form\s/g) || []).length;
+  if (formCount !== 1) fail("index.html", `expected exactly 1 form, found ${formCount}`);
+
+  /* The form must sit inside the hero. A build-time include expanded inside
+     an HTML comment once terminated the comment early and hoisted the form
+     out of the hero entirely - this catches that class of bug. */
+  const hero = /<section class="hero hero--capture">([\s\S]*?)<\/section>/.exec(home);
+  if (!hero) fail("index.html", "hero--capture section missing");
+  else if (!/<form\s/.test(hero[1])) fail("index.html", "the form is not inside the hero section");
+  if (/<form\s/.test(home.slice(0, home.indexOf('<section class="hero'))))
+    fail("index.html", "a form appears before the hero - markup was hoisted");
+
+  /* Secondary action is subordinate and points at /sell. */
+  if (!/class="hero__secondary"[\s\S]{0,200}href="\/sell"/.test(home))
+    fail("index.html", "secondary selling-process link missing or not pointing at /sell");
+  if (/hero__secondary[\s\S]{0,200}class="btn/.test(home))
+    fail("index.html", "secondary action is styled as a button - it must stay subordinate");
+
+  /* Required microcopy, and no unverifiable proof claims. */
+  if (!/No obligation[\s\S]{0,20}Human valuation[\s\S]{0,20}Not an automated estimate/.test(home))
+    fail("index.html", "hero microcopy missing");
+
+  /* Proof claims are banned in the HERO specifically, and the scan runs on
+     the hero's visible text so a hex colour or an href cannot trip it. */
+  const heroText = hero ? hero[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ") : "";
+  const BANNED = [
+    /\B#1\b/, /\btop agent\b/i, /\bbest realtor\b/i, /\bleading\b/i,
+    /\baward[- ]winning\b/i, /\b5[- ]star\b/i, /\bgoogle rating\b/i,
+    /\bspecialist\b/i, /\bexpert\b/i, /\bguarantee\b/i, /\binstant valuation\b/i,
+  ];
+  for (const re of BANNED)
+    if (re.test(heroText)) fail("index.html", `unsupported claim in hero text: ${re}`);
+
+  /* No development placeholder may reach the production hero. */
+  if (/placeholder-hero|HERO IMAGE/i.test(home))
+    fail("index.html", "development hero placeholder is visible in production output");
+}
+
+/* --- the home_value form has exactly one source ----------------------- */
+{
+  const SRC = join(ROOT, "..", "src");
+  const partial = join(SRC, "partials/home-value-form.html");
+  if (!existsSync(partial)) fail("site", "shared home-value-form partial is missing");
+  for (const page of ["index.html", "home-value.html"]) {
+    const src = readFileSync(join(SRC, "pages", page), "utf8");
+    if (!/\{\{>\s*home-value-form\s*\}\}/.test(src))
+      fail(`src/pages/${page}`, "does not consume the shared home-value-form partial");
+    if (/<form\s/.test(src))
+      fail(`src/pages/${page}`, "contains an inline form - the partial is the only source");
+  }
+  /* A visible label is required - placeholder-only UI is not accessible. */
+  for (const page of ["index.html", "home-value.html"]) {
+    const html = readFileSync(join(ROOT, page), "utf8");
+    if (!/<label[^>]*for="v-address"[^>]*>\s*Property address/.test(html))
+      fail(page, "the property address field has no visible label");
+    if (!/name="property_address"[^>]*autocomplete="street-address"|autocomplete="street-address"[^>]*name="property_address"/.test(html))
+      fail(page, "the property address field lost autocomplete=street-address");
+  }
+
+  /* Both rendered pages must expose an identical field contract. */
+  const fields = (html) =>
+    [...html.matchAll(/name="([a-z_]+)"/g)].map((m) => m[1]).filter((n) => n !== "_gotcha").sort().join(",");
+  const a = fields(readFileSync(join(ROOT, "index.html"), "utf8"));
+  const b2 = fields(readFileSync(join(ROOT, "home-value.html"), "utf8"));
+  if (a !== b2) fail("site", `home_value field contract has drifted between / and /home-value:\n      / = ${a}\n      /home-value = ${b2}`);
+}
+
 /* --- Zoho Lead schema conformance ------------------------------------- */
 const zohoSrc = existsSync(join(API, "_lib/zoho.mjs"))
   ? readFileSync(join(API, "_lib/zoho.mjs"), "utf8") : "";

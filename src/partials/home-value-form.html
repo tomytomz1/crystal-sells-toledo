@@ -1,0 +1,111 @@
+<!-- =====================================================================
+     SHARED home_value form — the single source of the valuation funnel.
+     =====================================================================
+     Consumed by BOTH the homepage hero and /home-value. There must never
+     be a second copy: the lead contract (form_type, field names, limits,
+     step behaviour) lives here once.
+
+     Contains only the form element. Surrounding chrome — headings, cards, hero
+     copy — belongs to each page. Context styling is by ancestor selector
+     (.hero .hv-form vs .form-card .hv-form), so this markup stays
+     unparameterised and cannot drift between the two pages.
+
+     Behaviour comes from assets/js/main.js: initForms() binds any
+     form[data-form]; initSteps() binds any [data-steps]. Nothing here is
+     homepage-specific.
+     ===================================================================== -->
+<form class="form hv-form" data-form data-form-type="home_value" data-steps="2"
+      data-subject="Home valuation request" novalidate>
+  <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+  <p class="form__step" data-step-indicator aria-live="polite">Step 1 of 2</p>
+
+  <!-- Step 1 — address only.
+       The one field a valuation cannot be produced without, and a far
+       smaller ask than a seven-field form. Steps toggle with the `hidden`
+       attribute rather than CSS, so an inactive step leaves the tab order
+       and the accessibility tree instead of sitting invisible but
+       focusable. With JS off, both steps render and submit in one pass. -->
+  <div data-step="1">
+    <div class="hv-form__lead">
+      <div class="field">
+        <label for="v-address">Property address <span class="req" aria-hidden="true">*</span></label>
+        <input id="v-address" name="property_address" type="text" autocomplete="street-address"
+               placeholder="123 Main St, Perrysburg, OH" maxlength="200" required>
+      </div>
+      <button class="btn btn--gold btn--lg hv-form__go" type="button" data-step-next>
+        Get My Home Value
+      </button>
+    </div>
+
+    <p class="form__note hv-form__micro">No obligation &middot; Human valuation &middot;
+      Not an automated estimate</p>
+  </div>
+
+  <!-- Step 2 — contact details -->
+  <div data-step="2">
+    <div class="form__row">
+      <div class="field">
+        <label for="v-first">First name <span class="req" aria-hidden="true">*</span></label>
+        <input id="v-first" name="first_name" type="text" autocomplete="given-name" required maxlength="40">
+      </div>
+      <div class="field">
+        <label for="v-last">Last name <span class="req" aria-hidden="true">*</span></label>
+        <input id="v-last" name="last_name" type="text" autocomplete="family-name" required maxlength="80">
+      </div>
+    </div>
+
+    <div class="form__row">
+      <div class="field">
+        <label for="v-email">Email <span class="req" aria-hidden="true">*</span></label>
+        <input id="v-email" name="email" type="email" autocomplete="email" required maxlength="100">
+      </div>
+      <div class="field">
+        <label for="v-phone">Phone</label>
+        <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000" maxlength="30">
+      </div>
+    </div>
+
+    <div class="form__row">
+      <div class="field">
+        <label for="v-timing">When might you sell?</label>
+        <select id="v-timing" name="timeline">
+          <option value="">Select&hellip;</option>
+          <option>Just curious about the value</option>
+          <option>Within 3 months</option>
+          <option>3&ndash;6 months</option>
+          <option>6&ndash;12 months</option>
+          <option>More than a year out</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="v-condition">Condition</label>
+        <select id="v-condition" name="condition">
+          <option value="">Select&hellip;</option>
+          <option>Recently updated throughout</option>
+          <option>Well maintained, some updates</option>
+          <option>Original but solid</option>
+          <option>Needs work</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="v-notes">Anything I should know?</label>
+      <textarea id="v-notes" name="notes"
+        placeholder="New roof in 2022, finished basement, backs onto the woods, planning to buy in Perrysburg after&hellip;"></textarea>
+    </div>
+
+    <div class="form-status" aria-live="polite"></div>
+
+    <button class="btn btn--primary btn--block btn--lg" type="submit">Send My Valuation Request</button>
+
+    <button class="btn btn--ghost btn--block" type="button" data-step-back
+            style="margin-top:.75rem">Back to address</button>
+
+    <p class="form__note">Your details are used only to prepare and send your valuation. They are
+      never sold, and are shared only with the service providers that run this site and
+      Crystal&rsquo;s contact records. See the <a href="/privacy">privacy note</a>. By submitting
+      you agree that Crystal may contact you about this request.</p>
+  </div>
+</form>
