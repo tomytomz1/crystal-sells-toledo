@@ -19,6 +19,24 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "public");
 const SITE = "https://www.crystalsellstoledo.com";
 
+/* ---------------------------------------------------------------------
+   CONTENT REVIEW DATE — OAC 1301:5-1-02(E)
+   ---------------------------------------------------------------------
+   Ohio requires that a licensee's website "disclose the date upon which
+   the information contained therein was most recently updated", and that
+   information which becomes outdated be corrected within fourteen days.
+
+   THIS IS MAINTAINED BY HAND. Update it whenever substantive site
+   information changes — contact details, licence status, brokerage,
+   service areas, market claims, neighbourhood copy.
+
+   It is deliberately NOT `new Date()` or a build timestamp. The rule asks
+   when the INFORMATION was last reviewed, not when the site was last
+   deployed; an automatic date would silently assert a review that never
+   happened every time an unrelated CSS tweak shipped.
+   --------------------------------------------------------------------- */
+const CONTENT_UPDATED = "August 31, 2026";
+
 const partial = (name) => readFileSync(join(ROOT, "src/partials", name + ".html"), "utf8");
 const PARTIALS = Object.fromEntries(
   readdirSync(join(ROOT, "src/partials"))
@@ -76,6 +94,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     canonical: url,
     ogImage: meta.ogImage ?? `${SITE}/assets/img/og-default.jpg`,
     bodyClass: meta.bodyClass ?? "",
+    updated: CONTENT_UPDATED,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",

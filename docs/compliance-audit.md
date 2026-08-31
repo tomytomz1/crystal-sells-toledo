@@ -3,8 +3,8 @@
 **Licensee** Crystal Saylor · Ohio licence #2025003655
 **Brokerage** Key Realty LTD · 6800 W. Central Ave, Unit B, Toledo, OH 43617
 **Scope** 9 published pages, shared header/footer, structured data, social share card
-**Revision** 2 — reclassified 31 August 2026
-**Status** Site is live. Two REQUIRED items remain open.
+**Revision** 3 — R-1 and R-4 implemented 31 August 2026
+**Status** Site is live. R-1 and R-4 closed. R-7 remains open pending Crystal.
 
 > **Not legal advice.** This is an engineering review of what the site actually renders,
 > prepared to be handed to Key Realty's compliance contact. Rule text below was retrieved via
@@ -63,17 +63,17 @@ straightforward failure — see **R-1**.
 
 | ID | Finding | Class | Authority | Site status |
 |---|---|---|---|---|
-| **R-1** | Website must disclose the date its information was last updated | REQUIRED | OAC 1301:5-1-02(E) | **FAIL** — no date site-wide |
+| **R-1** | Website must disclose the date its information was last updated | REQUIRED | OAC 1301:5-1-02(E) | **CLOSED** — footer, all 9 pages |
 | **R-2** | Outdated information updated within 14 days | REQUIRED | OAC 1301:5-1-02(E) | Process duty; no breach evident |
 | **R-3** | Brokerage name on every viewable web page | REQUIRED | OAC 1301:5-1-02 | **PASS** — all 9 pages |
-| **R-4** | Brokerage ≥ equal prominence with the salesperson's name | REQUIRED | OAC 1301:5-1-02(B) | **FAIL, `/about` only** |
+| **R-4** | Brokerage ≥ equal prominence with the salesperson's name | REQUIRED | OAC 1301:5-1-02(B) | **CLOSED** — lockup site-wide, `/about` h1 restructured |
 | **R-5** | No statement indicating protected-class preference | REQUIRED | 42 U.S.C. §3604(c); R.C. 4112.02(H) | **FIXED & deployed** |
 | **R-6** | No fabricated endorsements | REQUIRED | FTC Act §5; 16 CFR Part 255; R.C. 1345.02 | **FIXED & deployed** |
 | **R-7** | No misrepresentation in advertising | REQUIRED | ORC 4735.18; R.C. 1345.02 | **OPEN** — `/about` biography |
 | **R-8** | Advertise under the licensed name | REQUIRED | OAC 1301:5-1-02 | **PASS** — "Crystal Saylor" |
 | **A-1** | Team advertising requirements | REQUIRED IF APPLICABLE | OAC 1301:5-1-21 | **Not applicable** — solo licensee |
 | **A-2** | Degnan Group relationship | REQUIRED IF APPLICABLE | OAC 1301:5-1-21 | **UNRESOLVED** |
-| **A-3** | REALTOR® mark usage | REQUIRED IF APPLICABLE | NAR trademark licence — members only | **UNVERIFIED** — used on all 9 pages |
+| **A-3** | REALTOR® mark usage and representation of membership | REQUIRED IF APPLICABLE | NAR trademark licence; **ORC 4735.18(A)(12)** | **UNRESOLVED** — retained pending confirmation |
 | **A-4** | NAR Code of Ethics, Articles 11 & 12 | REQUIRED IF APPLICABLE | Binds NAR members only | Contingent on A-3 |
 | **A-5** | MLS / IDX display and attribution | REQUIRED IF APPLICABLE | NORIS rules | Not applicable — no IDX feed |
 | **B-1** | Marketing-name approval / registration | BROKERAGE POLICY | No authority found for a solo brand | Confirm with Key Realty |
@@ -217,13 +217,22 @@ engaged.** Two consequences worth recording:
 
 ### A-3 / A-4 · REALTOR® and the NAR Code
 
-The REALTOR® mark is licensed to members in good standing. **It currently appears on all nine
-pages** — footer legal, page titles, meta descriptions, JSON-LD `jobTitle`, the share card, and
+REALTOR® use is not only a trademark question. Ohio treats false representation of membership
+in a real estate professional association as a ground for disciplinary action:
+
+> ORC **4735.18(A)(12)** — falsely representing membership in a real estate professional
+> association.
+
+So an unverified REALTOR® claim carries licence exposure, not merely a private trademark
+dispute. **It currently appears on all nine pages** — footer legal, page titles, meta descriptions, JSON-LD `jobTitle`, the share card, and
 the REALTOR® ∣ MLS badge image. This is therefore not a question of whether to *add* it, but
 whether existing use is authorised.
 
 - **If membership is current:** on-site usage format is correct — full capitals with the ®.
 - **If it is not:** every instance must be removed, and the badge image with it.
+
+**Per instruction, REALTOR® is retained for now and A-3 stays open** pending Crystal's
+confirmation of current membership. Nothing was removed in this revision.
 
 This gates more than itself. The NAR Code of Ethics binds members. If Crystal is not a member,
 Articles 11 and 12 do not apply to her, and findings P-1 and P-2 rest instead on the Ohio
@@ -267,8 +276,8 @@ Requirements for the implementation:
 |---|---|---|---|
 | 1 | ~~Delete placeholder testimonials~~ | R-6 | **Done** |
 | 2 | ~~Replace protected-class phrasing~~ | R-5 | **Done** |
-| 3 | Add site-wide last-updated date | R-1 | Site — decide date source first |
-| 4 | Add legal identity lockup | R-4 | Site + broker sign-off |
+| 3 | ~~Add site-wide last-updated date~~ | R-1 | **Done** — manual constant |
+| 4 | ~~Add legal identity lockup + fix `/about` h1~~ | R-4 | **Done** |
 | 5 | Crystal rewrites `/about` in verified facts | R-7 | Crystal |
 | 6 | Confirm NAR membership | A-3 | Crystal — gates A-4, P-1, P-2 |
 | 7 | Confirm Degnan Group status | A-2 | Key Realty |

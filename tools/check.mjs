@@ -82,6 +82,22 @@ for (const file of pages) {
     }
   }
 
+  /* --- OAC 1301:5-1-02(E): displayed content-review date ----------- */
+  if (!/Website information last updated:\s*\w+ \d{1,2}, \d{4}/.test(html))
+    fail(file, "no content-review date disclosed — OAC 1301:5-1-02(E)");
+
+  /* --- OAC 1301:5-1-02(B): legal identity lockup ------------------- */
+  const names = [...html.matchAll(/<span class="legalid__name">([^<]+)<\/span>/g)].map((m) => m[1]);
+  if (!names.includes("Crystal Saylor") || !names.includes("Key Realty LTD"))
+    fail(file, "legal identity lockup missing — OAC 1301:5-1-02(B)");
+
+  /* The licensed name must never be set at display scale. The brokerage
+     appears at body scale, so an h1/h2 carrying the salesperson's name is
+     an equal-prominence failure by construction. */
+  for (const m of html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/g))
+    if (/Crystal\s+Saylor/.test(m[1]))
+      fail(file, `licensed name in a display heading — equal prominence risk: "${m[1].trim().slice(0, 60)}"`);
+
   /* --- lang + viewport -------------------------------------------- */
   if (!/<html lang="en">/.test(html)) fail(file, "missing lang attribute on <html>");
   if (!/name="viewport"/.test(html)) fail(file, "missing viewport meta");

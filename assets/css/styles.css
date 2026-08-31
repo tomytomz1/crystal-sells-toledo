@@ -522,6 +522,41 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .cta-band h2 { color: var(--white); }
 .cta-band .lede { color: rgba(255,255,255,.72); }
 
+/* ------------------------------------------------- legal identity -- */
+/* OAC 1301:5-1-02(B) — the brokerage name must be displayed at least in
+   equal prominence with the SALESPERSON'S name.
+
+   Both names carry the single class .legalid__name and are styled by the
+   ONE rule below. Never add a selector that targets only one of them, and
+   never set a size, weight, colour, opacity or breakpoint behaviour on one
+   without the other — that is precisely the violation this lockup exists
+   to prevent. There is deliberately no media query here: the pair scales
+   together because neither is given a size of its own anywhere else. */
+.legalid { margin: 1.35rem 0 1.15rem; line-height: 1.5; }
+.legalid__name {
+  font-family: var(--sans);
+  font-size: .95rem;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: .01em;
+  text-transform: none;
+  color: #e8e4de;
+  opacity: 1;
+}
+.legalid__sep { padding: 0 .55rem; color: #e8e4de; opacity: .4; }
+.legalid__lic {
+  display: block; margin-top: .3rem;
+  font-size: .68rem; font-weight: 600; letter-spacing: .17em;
+  text-transform: uppercase; color: var(--gold-lt);
+}
+/* On the dark page head the lockup sits under the h1 */
+.pagehead .legalid { margin: 1.5rem 0 0; }
+
+/* OAC 1301:5-1-02(E) — displayed content-review date. */
+.footer__updated {
+  margin-top: .85rem; font-size: .78rem; color: #948d83;
+}
+
 /* --------------------------------------------------------------- footer -- */
 .site-footer { background: #0f0e0c; color: #948d83; padding-block: clamp(3.5rem, 6vw, 5rem) 0; font-size: .92rem; }
 .footer__grid {
@@ -559,7 +594,7 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   border-top: 1px solid rgba(255,255,255,.1); padding-block: 2rem;
   display: flex; flex-wrap: wrap; gap: 1.25rem 2rem;
   align-items: center; justify-content: space-between;
-  font-size: .78rem; color: #6d675e; line-height: 1.6;
+  font-size: .78rem; color: #948d83; line-height: 1.6;
 }
 .footer__badges { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
 .footer__badges img { height: 30px; width: auto; display: block; }
