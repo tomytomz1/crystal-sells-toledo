@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 150" role="img" aria-label="Key Realty | Crystal Sells Toledo">
+  <rect x="14" y="34" width="44" height="66" fill="#14120f"/>
+  <ellipse cx="36" cy="55" rx="9" ry="10" fill="#fff"/>
+  <path d="M32 60 L40 60 L43 84 L29 84 Z" fill="#fff"/>
+  <text x="70" y="82" font-family="Georgia,serif" font-style="italic" font-size="46" fill="#14120f">Key</text>
+  <text x="72" y="106" font-family="Helvetica,Arial,sans-serif" font-size="20" letter-spacing="5" fill="#14120f">REALTY</text>
+  <rect x="216" y="22" width="2.5" height="106" fill="#14120f"/>
+  <g fill="none" stroke="#b8863b" stroke-width="2.4" stroke-linejoin="round">
+    <path d="M370 20 L392 38 L392 62 L348 62 L348 38 Z"/>
+    <path d="M370 20 L370 62"/><path d="M348 38 L359 38 L359 62"/><path d="M392 38 L381 38 L381 62"/>
+  </g>
+  <text x="370" y="106" text-anchor="middle" font-family="Georgia,serif" font-size="42" fill="#14120f">Crystal Sells</text>
+  <text x="370" y="130" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="17" letter-spacing="9" fill="#b8863b">TOLEDO</text>
+</svg>

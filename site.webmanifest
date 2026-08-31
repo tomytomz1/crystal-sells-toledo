@@ -1,0 +1,12 @@
+{
+  "name": "Crystal Sells Toledo",
+  "short_name": "Crystal Sells",
+  "description": "Perrysburg & 43551 real estate — Key Realty",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf8f5",
+  "theme_color": "#14120f",
+  "icons": [
+    { "src": "/assets/img/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

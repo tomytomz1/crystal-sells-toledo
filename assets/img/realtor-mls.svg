@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 90" role="img" aria-label="REALTOR MLS">
+  <rect x="4" y="6" width="56" height="56" fill="#14120f"/>
+  <rect x="14" y="16" width="13" height="36" fill="#fff"/>
+  <path d="M32 16 L50 16 L50 52 L32 34 Z" fill="#fff"/>
+  <text x="4" y="82" font-family="Helvetica,Arial,sans-serif" font-size="15" letter-spacing="2.5" fill="#14120f">REALTOR®</text>
+  <rect x="78" y="10" width="2" height="66" fill="#8b8b8b"/>
+  <text x="98" y="56" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="52" fill="#14120f">MLS</text>
+  <rect x="98" y="64" width="196" height="20" fill="#14120f"/>
+  <text x="196" y="79" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-weight="bold" font-size="13" letter-spacing="1" fill="#fff">MULTIPLE LISTING SERVICE</text>
+</svg>
