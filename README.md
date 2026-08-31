@@ -133,6 +133,12 @@ replaces its branded placeholder — no code change needed.
 | `hero-perrysburg.jpg` | Homepage hero — a Perrysburg street or home | 1800 × 1200, landscape |
 | `logo-lockup.png` | The Key Realty ∣ Crystal Sells Toledo lockup, **transparent PNG** | ~600px wide |
 | `realtor-mls.png` | The REALTOR® ∣ MLS badge, transparent PNG | ~300px wide |
+| `hood-old-west-end.jpg` | The Old West End, Toledo | 800 × 600 |
+| `hood-ottawa-hills.jpg` | Ottawa Hills | 800 × 600 |
+| `hood-sylvania.jpg` | Sylvania | 800 × 600 |
+| `hood-maumee.jpg` | Maumee | 800 × 600 |
+| `hood-west-toledo.jpg` | West Toledo / Point Place | 800 × 600 |
+| `hood-oregon.jpg` | Oregon & Northwood | 800 × 600 |
 | `hood-downtown.jpg` | Historic Downtown Perrysburg | 800 × 600 |
 | `hood-riverbend.jpg` | Village at Riverbend | 800 × 600 |
 | `hood-three-meadows.jpg` | Three Meadows | 800 × 600 |
