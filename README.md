@@ -58,31 +58,49 @@ npm run build
 
 ## 2. Make it Crystal's (the only required step)
 
-Nine things are placeholders. Replace them and the site is live-ready.
+### Already in place
 
-### Contact details
-
-Search and replace across `src/` and `assets/js/main.js`, then rebuild:
-
-Crystal's phone number — **(419) 245-4655** — is already in place across the site, the
-`tel:` links, the JSON-LD and the mailto fallback. These are still placeholders:
-
-| Placeholder | Replace with |
+| Detail | Value |
 |---|---|
-| `crystal@crystalsellstoledo.com` | her real email |
-| `— add license number —` (in `src/pages/about.html`) | her Ohio license number |
-| `Perrysburg, Ohio 43551` (in `src/partials/footer.html`, `src/pages/contact.html`) | the Key Realty office address |
+| Name | **Crystal Saylor**, REALTOR® |
+| Phone | **(419) 245-4655** — display text, `tel:` links, JSON-LD and the mailto fallback |
+| Ohio license | **2025003655** — footer, /about and /privacy |
+| Brokerage | **Key Realty LTD** in the legal disclosures, "Key Realty" in the casual copy |
+| Email | **crystal@crystalsellstoledo.com** |
+
+> **Verify the license number** against the [Ohio eLicense system](https://elicense.ohio.gov/)
+> before launch. It is published on every page as a legal disclosure, and a wrong digit is a
+> compliance problem, not a typo.
+
+### The email
+
+`crystal@crystalsellstoledo.com` is wired through the site — the footer, the contact page, the
+valuation page and the mailto fallback in `assets/js/main.js`. **Create that mailbox in Zoho
+before launch**, or the fallback sends mail into a void.
+
+Worth adding as a *free alias* on the same Zoho mailbox, not as separate accounts:
+
+- `hello@crystalsellstoledo.com` — the friendly one to put on signs, cards and social bios
+- `crystal.saylor@crystalsellstoledo.com` — catches anyone who guesses the full-name form
+
+Aliases deliver into the one inbox, so there is still only ever one place to check. Set
+`crystal@` as the default *send-from* address so replies stay consistent.
+
+If the primary address ever changes, it appears in `src/pages/`, `src/partials/` and
+`assets/js/main.js`:
 
 ```bash
-sed -i 's/crystal@crystalsellstoledo\.com/her.real@email.com/g' \
+sed -i 's/crystal@crystalsellstoledo\.com/new@address.com/g' \
   src/pages/*.html src/partials/*.html assets/js/main.js
 npm run build && npm run check
 ```
 
-`npm run check` warns on every page that still contains a known placeholder, so it tells you
-when you are done. If the phone number ever changes, it appears in `src/pages/`,
-`src/partials/` and `assets/js/main.js` in three formats — display, `tel:` and the
-hyphenated JSON-LD form.
+### Still placeholder
+
+- The **Key Realty office address** on `/contact`
+- **Photography** (below) and the **form endpoint** (below)
+
+`npm run check` names each one that is still outstanding, so it tells you when you are done.
 
 ### Photography
 

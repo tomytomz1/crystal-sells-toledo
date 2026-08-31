@@ -14,11 +14,10 @@ const warnings = [];
 const fail = (f, m) => errors.push(`${f}: ${m}`);
 const warn = (f, m) => warnings.push(`${f}: ${m}`);
 
-/* Details that must be swapped for Crystal's real ones before launch.
-   Delete a row once it is genuinely resolved site-wide. */
+/* Copy still standing in for something real. Delete a row once it is
+   genuinely resolved site-wide. */
 const PLACEHOLDERS = [
-  [/crystal@crystalsellstoledo\.com/, "the crystal@crystalsellstoledo.com email address"],
-  [/add license number/i, "the Ohio license number on /about"],
+  [/Toledo &amp; Perrysburg, Ohio<\/p>/, "the Key Realty office address on /contact"],
 ];
 
 const pages = readdirSync(ROOT).filter((f) => f.endsWith(".html"));
@@ -94,9 +93,24 @@ for (const file of pages) {
     if (pattern.test(html)) warn(file, `still contains a placeholder: ${label}`);
 }
 
-/* --- required root files -------------------------------------------- */
+/* --- required files --------------------------------------------------- */
 for (const f of ["robots.txt", "sitemap.xml", "site.webmanifest", "assets/css/styles.css", "assets/js/main.js"])
   if (!existsSync(join(ROOT, f))) fail("site", `missing required file: ${f}`);
+
+/* --- real photography still to be supplied ---------------------------- */
+const missingArt = new Set();
+for (const file of pages)
+  for (const tag of readFileSync(join(ROOT, file), "utf8").match(/<img\b[^>]*data-fallback[^>]*>/g) || []) {
+    const src = tag.match(/\ssrc="([^"]+)"/)?.[1];
+    if (src && !existsSync(join(ROOT, src.replace(/^\//, "")))) missingArt.add(src);
+  }
+if (missingArt.size)
+  warn("site", `still showing placeholder art for ${missingArt.size} image(s): ${[...missingArt].sort().join(", ")}`);
+
+/* --- forms actually deliver ------------------------------------------- */
+const js = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
+if (/formEndpoint:\s*null/.test(js))
+  warn("site", "formEndpoint is not set — forms fall back to opening the visitor's email client");
 
 /* --- report ---------------------------------------------------------- */
 const uniqWarn = [...new Set(warnings)];
