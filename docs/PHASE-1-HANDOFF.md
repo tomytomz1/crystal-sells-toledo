@@ -1,8 +1,13 @@
 # crystalsellstoledo.com — Phase 1 Handoff
 
-Paste-ready context for another assistant. Everything below reflects the repo at
-commit `9489b72` on branch `claude/crystal-perrysburg-realtor-site-so38qa`
-(also merged to `main`, which is what Vercel deploys).
+Paste-ready context for another assistant. Everything below reflects the repo as
+of **`dc2d618`**, the most recent commit to change production code (the Zoho Lead
+schema correction pass), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
+and merged to `main`, which is what Vercel deploys.
+
+Later commits on this branch may be documentation-only; this reference is
+deliberately pinned to the last code change so it does not go stale every time a
+note is written. Per-pass write-ups live in `docs/updates/`.
 
 ---
 
@@ -33,7 +38,7 @@ api/lead.js             POST /api/lead  (Vercel serverless function)
 api/_lib/*.mjs          validate, security, zoho, description, log
 tools/build.mjs         assembles src/ + assets/ into public/
 tools/check.mjs         static validation, run by npm run check
-tests/*.test.mjs        node:test suites (40 tests)
+tests/*.test.mjs        node:test suites (62 tests)
 docs/                   strategy + compliance docs (NOT deployed)
 public/                 GENERATED. gitignored. Never edit by hand.
 ```
@@ -43,10 +48,11 @@ public/                 GENERATED. gitignored. Never edit by hand.
 ### Commands
 
 ```bash
-npm run build     # src/ + assets/ -> public/
-npm run check     # static validation
-npm test          # build + check + 40 automated tests
-npm run dev       # build, then serve public/ on :3000
+npm run build        # src/ + assets/ -> public/
+npm run check        # static validation
+npm test             # build + check + 62 automated tests
+npm run zoho:verify  # confirm Zoho picklists against the real account
+npm run dev          # build, then serve public/ on :3000
 ```
 
 ---
