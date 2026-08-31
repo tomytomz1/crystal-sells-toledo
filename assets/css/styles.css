@@ -531,7 +531,17 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 @media (max-width: 900px) { .footer__grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .footer__grid { grid-template-columns: 1fr; } }
-.footer__logo { height: 54px; width: auto; margin-bottom: 1.25rem; filter: invert(1) brightness(1.6); }
+/* Brand marks are supplied as black-and-gold artwork on a white ground.
+   Rather than inverting them — which would turn the gold in the Crystal
+   Sells mark blue — they sit on a light chip, so they read correctly
+   whether or not the source files ever gain a transparent background. */
+.brandchip {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--cream); border-radius: var(--radius);
+  padding: .55rem .75rem;
+}
+.brandchip--logo { padding: .9rem 1.1rem; margin-bottom: 1.35rem; }
+.footer__logo { height: 48px; width: auto; display: block; }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
@@ -548,9 +558,8 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   align-items: center; justify-content: space-between;
   font-size: .78rem; color: #6d675e; line-height: 1.6;
 }
-.footer__badges { display: flex; align-items: center; gap: 1.25rem; }
-.footer__badges img, .footer__badges svg { height: 34px; width: auto; opacity: .75; }
-.footer__badges img { filter: invert(1) brightness(1.7); }
+.footer__badges { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.footer__badges img { height: 30px; width: auto; display: block; }
 .footer__disclaimer { max-width: 60ch; }
 
 /* ------------------------------------------------------- sticky mobile -- */
@@ -572,7 +581,9 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .sticky-cta svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; }
 @media (max-width: 780px) {
   .sticky-cta { display: grid; }
-  body { padding-bottom: 0; }
+  /* Reserve room under the footer so the fixed call bar never covers the
+     affiliation badges or the license and fair-housing disclosures. */
+  .site-footer { padding-bottom: calc(3.75rem + env(safe-area-inset-bottom)); }
 }
 
 /* ------------------------------------------------------------- article -- */
