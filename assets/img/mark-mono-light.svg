@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img"
+     aria-label="Crystal Sells Toledo">
+  <!-- Reversal of mark-mono.svg, for placing on ink or photography. -->
+  <g fill="none" stroke="#f7f2e8" stroke-width="4.2"
+     stroke-linejoin="round" stroke-linecap="round">
+    <path d="M20 46 L33 31 L33 93 L20 93 Z"/>
+    <path d="M41 27 L50 8 L59 27 L59 93 L41 93 Z"/>
+    <path d="M80 46 L67 31 L67 93 L80 93 Z"/>
+  </g>
+</svg>

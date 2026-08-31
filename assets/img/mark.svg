@@ -1,7 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Crystal Sells Toledo mark">
-  <g fill="none" stroke="#b8863b" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M50 8 L94 44 L94 92 L6 92 L6 44 Z"/>
-    <path d="M6 44 L94 44"/>
-    <path d="M38 92 L38 62 L62 62 L62 92"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img"
+     aria-label="Crystal Sells Toledo">
+  <g stroke-linejoin="round">
+    <path d="M20 46 L33 31 L33 93 L20 93 Z" fill="#e0c78f"/>
+    <path d="M41 27 L50 8 L50 93 L41 93 Z"  fill="#c9a259"/>
+    <path d="M50 8 L59 27 L59 93 L50 93 Z"  fill="#b8863b"/>
+    <path d="M67 31 L80 46 L80 93 L67 93 Z" fill="#7a5620"/>
   </g>
 </svg>

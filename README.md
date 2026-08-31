@@ -107,6 +107,21 @@ npm run build && npm run check
 > Google Business Profile. The 43551 focus lives in `areaServed` and in the page content, which
 > is where it belongs — the two do not compete.
 
+### The mark
+
+The crystal mark is four SVG files, all drawn from the same geometry. Nothing else needs
+touching to change it site-wide — the header, favicon and manifest all point at these.
+
+| File | Use |
+|---|---|
+| `assets/img/mark.svg` | **Primary.** Four tones of gold, lit from the upper left. Header, and anywhere it can print in colour. |
+| `assets/img/favicon.svg` | The mark on brand ink, tones lifted so all four facets separate at 16px. Browser tab and home-screen icon. |
+| `assets/img/mark-mono.svg` | **Single-colour master**, drawn in brand ink. Give this one to a sign shop, embroiderer or stamp maker — recolour the stroke as needed. |
+| `assets/img/mark-mono-light.svg` | The same reversal in cream, for placing on ink or over photography. |
+
+Send a sign printer `mark-mono.svg` plus the hex values `#e0c78f · #c9a259 · #b8863b · #7a5620`
+(light to dark, left to right) and they have everything they need.
+
 ### Photography
 
 Drop real files into `assets/img/` using **exactly these names**. Each one automatically
