@@ -2,12 +2,14 @@
   "name": "crystal-sells-toledo",
   "version": "1.0.0",
   "private": true,
-  "description": "Marketing site for Crystal Sells Toledo — Perrysburg / 43551 real estate, Key Realty.",
+  "description": "Marketing site for Crystal Sells Toledo \u2014 Perrysburg / 43551 real estate, Key Realty.",
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
-    "dev": "node tools/build.mjs && npx --yes serve@14 . -l 3000",
+    "dev": "node tools/build.mjs && npx --yes serve@14 public -l 3000",
     "check": "node tools/check.mjs"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

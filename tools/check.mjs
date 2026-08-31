@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 const errors = [];
 const warnings = [];
 const fail = (f, m) => errors.push(`${f}: ${m}`);
@@ -22,7 +22,7 @@ const PLACEHOLDERS = [
 ];
 
 const pages = readdirSync(ROOT).filter((f) => f.endsWith(".html"));
-if (!pages.length) fail("build", "no HTML pages found — run `npm run build` first");
+if (!pages.length) fail("build", "no HTML pages found in public/ — run `npm run build` first");
 
 const titles = new Map();
 const descs = new Map();

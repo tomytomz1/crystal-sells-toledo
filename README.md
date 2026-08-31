@@ -10,14 +10,21 @@ can edit it.
 
 ## 1. Deploy it (5 minutes)
 
-The site is plain HTML at the repo root — any static host works. On Vercel:
+`npm run build` produces a `public/` directory of plain HTML — any static host works. On
+Vercel:
 
 1. **Import the repo** at [vercel.com/new](https://vercel.com/new).
-2. **Framework preset:** `Other`. **Root directory:** `./`. Leave build & output empty.
-3. **Deploy.**
+2. **Framework preset:** `Other`. **Root directory:** `./`.
+3. Leave the build and output fields alone — `vercel.json` already declares
+   `buildCommand: npm run build` and `outputDirectory: public`.
+4. **Deploy.**
 
-`vercel.json` already sets clean URLs (`/sell`, not `/sell.html`), security headers and asset
+`vercel.json` also sets clean URLs (`/sell`, not `/sell.html`), security headers and asset
 caching.
+
+Publishing `public/` rather than the repo root is deliberate: only the site ships.
+`STRATEGY.md`, the market research in `docs/` and the page sources stay off the live
+domain.
 
 ### "Project *crystal-sells-toledo* already exists, please use a new name"
 
@@ -142,19 +149,21 @@ own policies and Ohio Division of Real Estate advertising rules before launch.
 ```bash
 npm run build     # rebuild the HTML from src/
 npm run check     # validate links, alt text, meta, JSON-LD
-npm run dev       # build, then serve on http://localhost:3000
+npm run dev       # build, then serve public/ on http://localhost:3000
 ```
 
-**Edit the files in `src/`, not the HTML at the root.** Root `.html` files are generated and
-get overwritten on every build.
+**Edit the files in `src/`, never the HTML in `public/`.** The build wipes and regenerates
+`public/` every time, so anything edited there is lost. It is not committed — Vercel rebuilds
+it on every push.
 
 ```
 src/partials/     header, footer, CTA band, page shell   ← shared chrome, edit once
 src/pages/        one file per page (content + SEO metadata)
 assets/css/       the whole design system, one file
 assets/js/        nav, scroll reveals, forms, FAQ
-tools/build.mjs   assembles src/ into root HTML + sitemap.xml
-tools/check.mjs   pre-flight validation
+tools/build.mjs   assembles src/ + assets/ into public/
+tools/check.mjs   pre-flight validation, runs against public/
+public/           generated — the only thing that gets deployed
 ```
 
 ### Adding a page
