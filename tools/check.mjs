@@ -172,6 +172,44 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (/Zoho-oauthtoken/i.test(text)) fail(file, "contains a Zoho OAuth token header in client output");
 }
 
+/* --- Zoho Lead schema conformance ------------------------------------- */
+const zohoSrc = existsSync(join(API, "_lib/zoho.mjs"))
+  ? readFileSync(join(API, "_lib/zoho.mjs"), "utf8") : "";
+if (!zohoSrc) fail("site", "api/_lib/zoho.mjs is missing");
+else {
+  /* Company is mandatory on a Zoho Lead; omitting it fails every create. */
+  if (!/Company:/.test(zohoSrc)) fail("api/_lib/zoho.mjs", "Lead record has no mandatory Company field");
+  for (const form of ["home_value", "contact"])
+    if (!new RegExp(form + ":").test(zohoSrc))
+      fail("api/_lib/zoho.mjs", `no Company mapping for form type ${form}`);
+  /* Picklist values must come from configuration, never a hardcoded guess. */
+  if (/Lead_Status:\s*"/.test(zohoSrc))
+    fail("api/_lib/zoho.mjs", "Lead_Status is hardcoded — it is a picklist and must be configured or omitted");
+  if (!/withoutPicklists/.test(zohoSrc))
+    fail("api/_lib/zoho.mjs", "no picklist-free retry — an unconfirmed picklist value could lose a lead");
+}
+
+/* Client maxlength must not drift from the server limits. */
+const limitsSrc = existsSync(join(API, "_lib/validate.mjs"))
+  ? readFileSync(join(API, "_lib/validate.mjs"), "utf8") : "";
+const ZOHO_MAX = { first_name: 40, last_name: 80, email: 100, phone: 30 };
+for (const [field, max] of Object.entries(ZOHO_MAX)) {
+  const m = new RegExp(field + ":\\s*(\\d+)").exec(limitsSrc);
+  if (!m) fail("api/_lib/validate.mjs", `no limit declared for ${field}`);
+  else if (Number(m[1]) > max)
+    fail("api/_lib/validate.mjs", `${field} limit ${m[1]} exceeds Zoho's ${max} — Zoho would reject`);
+}
+for (const file of pages.filter((f) => ["contact.html", "home-value.html"].includes(f))) {
+  const html = readFileSync(join(ROOT, file), "utf8");
+  for (const [field, max] of Object.entries(ZOHO_MAX)) {
+    const tag = new RegExp(`<input[^>]*name="${field}"[^>]*>`).exec(html);
+    if (!tag) continue;
+    const ml = /maxlength="(\d+)"/.exec(tag[0]);
+    if (!ml) fail(file, `${field} input has no maxlength`);
+    else if (Number(ml[1]) !== max) fail(file, `${field} maxlength ${ml[1]} disagrees with the server limit ${max}`);
+  }
+}
+
 /* --- asset cache busting ---------------------------------------------- */
 for (const file of pages) {
   const html = readFileSync(join(ROOT, file), "utf8");

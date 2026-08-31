@@ -10,7 +10,8 @@
     "check": "node tools/check.mjs",
     "test": "node tools/build.mjs && node tools/check.mjs && node --test tests/*.test.mjs",
     "test:unit": "node --test tests/api.test.mjs",
-    "test:browser": "node --test tests/browser.test.mjs"
+    "test:browser": "node --test tests/browser.test.mjs",
+    "zoho:verify": "node tools/zoho-verify.mjs"
   },
   "engines": {
     "node": ">=18"

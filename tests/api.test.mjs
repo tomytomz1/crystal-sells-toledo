@@ -7,6 +7,7 @@ import { join, dirname } from "node:path";
 import handler from "../api/lead.js";
 import { validateLead, FieldError, normalizePhone } from "../api/_lib/validate.mjs";
 import { buildDescription, DESCRIPTION_LABELS } from "../api/_lib/description.mjs";
+import { toLeadRecord, withoutPicklists, COMPANY_BY_FORM } from "../api/_lib/zoho.mjs";
 import { _resetRateLimit } from "../api/_lib/security.mjs";
 import { safeShape } from "../api/_lib/log.mjs";
 import { mockReq, mockRes, validContact, validHomeValue } from "./helpers.mjs";
@@ -215,5 +216,170 @@ describe("Contact points are stable", () => {
     const js = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
     assert.match(js, /leadEndpoint:\s*"\/api\/lead"/);
     assert.ok(!/leadEndpoint:\s*null/.test(js));
+  });
+});
+
+
+/* =====================================================================
+   Zoho Lead schema conformance
+   =====================================================================
+   Zoho rejects a Lead with no Company (MANDATORY_NOT_FOUND) and rejects
+   values longer than the standard field maximums. Anything this layer
+   accepts but Zoho refuses becomes a 502 for a visitor who already
+   filled the form, so the two schemas must agree.
+   ===================================================================== */
+describe("Zoho Lead payload", () => {
+  const build = (raw) => {
+    const payload = validateLead(raw);
+    payload.meta.submission_id = "csv_test";
+    return toLeadRecord(payload);
+  };
+
+  test("Company is present for home_value", () => {
+    const rec = build(validHomeValue);
+    assert.equal(rec.Company, "Residential Seller");
+  });
+
+  test("Company is present for contact", () => {
+    const rec = build(validContact);
+    assert.equal(rec.Company, "Residential Real Estate Lead");
+  });
+
+  test("Company is never empty for any known form type", () => {
+    for (const form of Object.keys(COMPANY_BY_FORM)) {
+      assert.ok(COMPANY_BY_FORM[form] && COMPANY_BY_FORM[form].trim().length > 0,
+        form + " has no Company value");
+    }
+  });
+
+  test("mandatory Zoho fields are all populated", () => {
+    for (const rec of [build(validHomeValue), build(validContact)]) {
+      for (const field of ["Last_Name", "Company"])
+        assert.ok(rec[field] && String(rec[field]).length > 0, field + " missing");
+    }
+  });
+
+  test("standard field mapping is exact", () => {
+    const rec = build(validHomeValue);
+    assert.equal(rec.First_Name, "Sam");
+    assert.equal(rec.Last_Name, "Rivera");
+    assert.equal(rec.Email, "sam@example.com");
+    assert.equal(rec.Phone, "(419) 555-0000");
+    assert.equal(rec.Street, "123 Louisiana Ave, Perrysburg, OH 43551");
+    assert.ok(rec.Description.startsWith("FORM: home_value"));
+  });
+
+  test("no field exceeds its Zoho maximum", () => {
+    const MAX = { First_Name: 40, Last_Name: 80, Email: 100, Phone: 30, Street: 250 };
+    for (const rec of [build(validHomeValue), build(validContact)])
+      for (const [field, max] of Object.entries(MAX))
+        if (rec[field]) assert.ok(rec[field].length <= max,
+          field + " is " + rec[field].length + ", over Zoho's " + max);
+  });
+});
+
+describe("Zoho picklists are never invented", () => {
+  const build = (raw) => {
+    const payload = validateLead(raw);
+    payload.meta.submission_id = "csv_test";
+    return toLeadRecord(payload);
+  };
+
+  test("Lead_Status is omitted unless explicitly configured", () => {
+    const before = process.env.ZOHO_LEAD_STATUS;
+    delete process.env.ZOHO_LEAD_STATUS;
+    const rec = build(validContact);
+    assert.ok(!("Lead_Status" in rec),
+      "Lead_Status must not be sent with an unconfirmed picklist value");
+    if (before !== undefined) process.env.ZOHO_LEAD_STATUS = before;
+  });
+
+  test("Lead_Status is sent when configured", () => {
+    const before = process.env.ZOHO_LEAD_STATUS;
+    process.env.ZOHO_LEAD_STATUS = "Not Contacted";
+    assert.equal(build(validContact).Lead_Status, "Not Contacted");
+    if (before === undefined) delete process.env.ZOHO_LEAD_STATUS;
+    else process.env.ZOHO_LEAD_STATUS = before;
+  });
+
+  test("Lead_Source defaults to Website and is overridable", () => {
+    const before = process.env.ZOHO_LEAD_SOURCE;
+    delete process.env.ZOHO_LEAD_SOURCE;
+    assert.equal(build(validContact).Lead_Source, "Website");
+    process.env.ZOHO_LEAD_SOURCE = "Web Download";
+    assert.equal(build(validContact).Lead_Source, "Web Download");
+    if (before === undefined) delete process.env.ZOHO_LEAD_SOURCE;
+    else process.env.ZOHO_LEAD_SOURCE = before;
+  });
+
+  test("the picklist-free retry keeps every lead-bearing field", () => {
+    const rec = build(validHomeValue);
+    const retry = withoutPicklists(rec);
+    assert.ok(!("Lead_Source" in retry));
+    assert.ok(!("Lead_Status" in retry));
+    /* The point of the fallback: an unconfirmed dropdown value must cost a
+       classification, never the lead itself. */
+    for (const field of ["First_Name", "Last_Name", "Company", "Email", "Phone", "Street", "Description"])
+      assert.ok(field in retry, "retry dropped " + field);
+    assert.equal(retry.Description, rec.Description);
+  });
+});
+
+describe("Overlength values are rejected, never truncated", () => {
+  beforeEach(() => _resetRateLimit());
+
+  const cases = [
+    ["first_name", 40], ["last_name", 80], ["email", 100], ["phone", 30],
+    ["property_address", 200],
+  ];
+
+  for (const [field, max] of cases) {
+    test(`${field} over ${max} is rejected`, async () => {
+      const base = field === "property_address" ? validHomeValue : validContact;
+      let value;
+      if (field === "email") value = "a".repeat(max) + "@example.com";
+      else if (field === "phone") value = "1".repeat(max + 5);
+      else value = "A".repeat(max + 1);
+      const res = await call({ body: { ...base, [field]: value } });
+      assert.equal(res.statusCode, 422, field + " should be rejected");
+      assert.equal(res.json().code, "FIELD_TOO_LONG");
+    });
+
+    test(`${field} at exactly ${max} is accepted`, () => {
+      const base = field === "property_address" ? validHomeValue : validContact;
+      let value;
+      if (field === "email") value = "a".repeat(max - 12) + "@example.com";
+      else if (field === "phone") value = "1".repeat(max);
+      else value = "A".repeat(max);
+      const out = validateLead({ ...base, [field]: value });
+      assert.ok(out.lead[field].length <= max);
+    });
+  }
+
+  test("nothing is silently shortened", () => {
+    const name = "A".repeat(41);
+    assert.throws(() => validateLead({ ...validContact, first_name: name }),
+      (e) => e.code === "FIELD_TOO_LONG");
+    /* A truncating implementation would have returned a 40-char name and a
+       200. Confirm a value one under the cap survives byte for byte. */
+    const ok = validateLead({ ...validContact, first_name: "B".repeat(40) });
+    assert.equal(ok.lead.first_name, "B".repeat(40));
+    assert.equal(ok.lead.first_name.length, 40);
+  });
+
+  test("client maxlength matches the server limit on every form", () => {
+    const dir = join(ROOT, "public");
+    const expected = { first_name: 40, last_name: 80, email: 100, phone: 30 };
+    for (const file of ["contact.html", "home-value.html"]) {
+      const html = readFileSync(join(dir, file), "utf8");
+      for (const [name, max] of Object.entries(expected)) {
+        const tag = new RegExp('<input[^>]*name="' + name + '"[^>]*>').exec(html);
+        assert.ok(tag, name + " input missing from " + file);
+        const ml = /maxlength="(\d+)"/.exec(tag[0]);
+        assert.ok(ml, name + " has no maxlength in " + file);
+        assert.equal(Number(ml[1]), max,
+          name + " maxlength in " + file + " disagrees with the server limit");
+      }
+    }
   });
 });

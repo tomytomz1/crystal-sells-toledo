@@ -83,18 +83,25 @@ POST /api/lead     JSON only · 16 KB cap · same-origin
 
 Responses never contain exception text, stack traces or credential material.
 
-### Field limits (server-enforced)
+### Field limits (server-enforced, aligned to Zoho)
 
 ```
-form_type 32 · first_name 80 · last_name 80 · email 254 · phone 40
+first_name 40 · last_name 80 · email 100 · phone 30      <- Zoho Lead maximums
 property_address 200 · topic 120 · timeline 120 · condition 120
-message 4000 · notes 4000 · page 300
+message 4000 · notes 4000 · page 300 · form_type 32
 landing_page 500 · referrer 500 · first_touch_at 40
 utm_* 200 · gclid/gbraid/wbraid/fbclid/msclkid 300
 ```
 
-Normalisation: whitespace collapsed, control characters stripped, email lowercased,
-US phone numbers formatted `(419) 555-1234`, international numbers left as typed.
+Overlength values are **rejected with 422 FIELD_TOO_LONG, never truncated** -
+silently shortening a name or email corrupts the record and can produce an
+address that does not deliver. The same maximums are mirrored as `maxlength`
+on the inputs, so a visitor is stopped as they type rather than after
+submitting.
+
+Normalisation: whitespace collapsed, control characters stripped, email
+lowercased, US phone numbers formatted `(419) 555-1234`, international numbers
+left as typed.
 
 ### Forms
 
@@ -148,8 +155,8 @@ the build if it is reintroduced. The form resets **only** after the server accep
 
 1. Go to <https://api-console.zoho.com> → **Self Client** → Create.
 2. Scopes: `ZohoCRM.modules.leads.CREATE`, `ZohoCRM.modules.leads.UPDATE`,
-   `ZohoCRM.modules.notes.CREATE`
-   (or simply `ZohoCRM.modules.ALL`).
+   `ZohoCRM.modules.notes.CREATE`, `ZohoCRM.settings.fields.READ`
+   (or simply `ZohoCRM.modules.ALL` plus `ZohoCRM.settings.ALL`).
 3. Time duration: 10 minutes. Scope description: your domain.
 4. Copy the generated **code** (single use, expires fast).
 
@@ -180,15 +187,30 @@ they reach the browser.
 | `ZOHO_ACCOUNTS_DOMAIN` | no | `https://accounts.zoho.com` |
 | `ZOHO_API_DOMAIN` | no | `https://www.zohoapis.com` |
 | `ALLOWED_ORIGINS` | no | comma-separated extra hostnames |
+| `ZOHO_LEAD_SOURCE` | no | picklist value, default `Website` |
+| `ZOHO_LEAD_STATUS` | no | picklist value; **omitted entirely if unset** |
 
 Redeploy after setting them.
+
+### Step 3b — Confirm the picklists BEFORE the first live lead
+
+```bash
+ZOHO_CLIENT_ID=... ZOHO_CLIENT_SECRET=... ZOHO_REFRESH_TOKEN=... npm run zoho:verify
+```
+
+Prints the account's real `Lead_Source` and `Lead_Status` values, flags any
+configured value that does not exist, confirms `Company` is mandatory, and
+suggests the closest status to "new / uncontacted". Needs
+`ZohoCRM.settings.fields.READ` (covered by `ZohoCRM.modules.ALL`).
+
+Set `ZOHO_LEAD_STATUS` in Vercel only to a value this command actually lists.
 
 ### Step 4 — Verify end to end
 
 1. Submit a real test lead through `/home-value`.
 2. Confirm the success panel appears (not the recovery panel).
-3. In Zoho CRM confirm: a Lead exists, `Lead_Source = Website`,
-   `Lead_Status = New Lead`, and **a Note is attached** carrying the full detail.
+3. In Zoho CRM confirm: a Lead exists, `Company` is set, `Lead_Source` is as
+   configured, and **a Note is attached** carrying the full detail.
 4. Submit a second lead with the same email → the Lead should update and a
    **second Note** should appear. No duplicate Lead.
 
@@ -209,15 +231,61 @@ NAP across site / GBP / Zillow / Realtor.com is a strong local ranking signal.
 Zoho Free has no custom fields, so everything beyond the standard set goes into
 `Description` in a fixed order.
 
-| Zoho field | Source |
+| Zoho field | Source | Notes |
+|---|---|---|
+| `First_Name` | form | max 40 |
+| `Last_Name` | form | max 80, **mandatory in Zoho** |
+| `Company` | constant by form type | **mandatory in Zoho** |
+| `Email` | form, lowercased | max 100, upsert key |
+| `Phone` | form, normalised | max 30, omitted when blank |
+| `Street` | property address | omitted when blank |
+| `Lead_Source` | `ZOHO_LEAD_SOURCE`, default `Website` | **picklist** |
+| `Lead_Status` | `ZOHO_LEAD_STATUS` | **picklist, omitted unless set** |
+| `Description` | the 22-row block below | |
+
+**Company values** (business classification, not a claim about the person):
+
+| form_type | Company |
 |---|---|
-| `First_Name` / `Last_Name` | form |
-| `Email` | form, lowercased |
-| `Phone` | form, normalised |
-| `Street` | property address, when supplied |
-| `Lead_Source` | literal `Website` |
-| `Lead_Status` | literal `New Lead` |
-| `Description` | the block below |
+| `home_value` | `Residential Seller` |
+| `contact` | `Residential Real Estate Lead` |
+| `buyer_inquiry` | `Residential Real Estate Lead` |
+
+### Exact payload
+
+```json
+{
+  "First_Name": "Sam",
+  "Last_Name": "Rivera",
+  "Company": "Residential Seller",
+  "Email": "sam@example.com",
+  "Phone": "(419) 555-0000",
+  "Street": "123 Louisiana Ave, Perrysburg, OH 43551",
+  "Lead_Source": "Website",
+  "Description": "FORM: home_value\nSELLING TIMELINE: ...\n(22 rows)"
+}
+```
+
+Sent to `POST /crm/v5/Leads/upsert` with `duplicate_check_fields: ["Email"]`,
+followed by `POST /crm/v5/Notes` carrying the same block.
+
+### Picklists are never invented
+
+`Lead_Source` and `Lead_Status` are Zoho **picklists**. A value the account does
+not hold is rejected with `INVALID_DATA`, which would fail the whole lead. Three
+safeguards:
+
+1. **`Lead_Status` is omitted unless `ZOHO_LEAD_STATUS` is set.** Zoho's stock
+   statuses are `Not Contacted`, `Contacted`, `Pre-Qualified`, ... - **`New Lead`
+   is not among them** on a default account. The desired semantics are
+   "new / uncontacted"; `Not Contacted` is usually the right value, but it must
+   be confirmed, not assumed.
+2. **`npm run zoho:verify`** reads the account's real field metadata and prints
+   the actual picklist values, flagging any configured value that does not exist.
+3. **Picklist-free retry.** If Zoho still rejects a picklist value, the lead is
+   retried once without `Lead_Source` and `Lead_Status`. A lead that lands
+   unclassified is a small annoyance; a lead lost to an assumed dropdown entry is
+   not acceptable. The retry is logged loudly with the remediation command.
 
 Description rows, always all 22, blanks rendered as `-`:
 
@@ -232,11 +300,9 @@ FIRST TOUCH · SUBMITTED · SUBMISSION ID
 **Duplicate strategy:** upsert on `Email` (no duplicate Leads) **plus a Note on
 every submission** (nothing a person said is ever overwritten).
 
----
-
 ## 5. Tests
 
-`npm test` → build + check + **40 tests, all passing**.
+`npm test` → build + check + **62 tests, all passing**.
 
 29 endpoint tests (method allowlist, origin, size, rate limit, honeypot, email
 validation, length caps, normalisation, description determinism, secret leakage,
@@ -245,7 +311,8 @@ payload, success state + reset + event, failure retains values, `ok:false` treat
 as failure, step hiding, keyboard operation, step validation, indicator, analytics).
 
 **Every guard was negative-tested** — deliberately broken once to prove the suite
-catches it. 18 of 18 caught, zero no-ops. Preserve this practice.
+catches it. 18 of 18 in the first pass, 16 of 16 in the schema-correction pass,
+zero no-ops. Preserve this practice.
 
 ---
 

@@ -77,7 +77,7 @@
             <div class="field">
               <label for="v-address">Property address <span class="req" aria-hidden="true">*</span></label>
               <input id="v-address" name="property_address" type="text" autocomplete="street-address"
-                     placeholder="123 Main St, Toledo, OH" required>
+                     placeholder="123 Main St, Toledo, OH" required maxlength="200">
             </div>
 
             <button class="btn btn--primary btn--block btn--lg" type="button" data-step-next>
@@ -93,22 +93,22 @@
             <div class="form__row">
               <div class="field">
                 <label for="v-first">First name <span class="req" aria-hidden="true">*</span></label>
-                <input id="v-first" name="first_name" type="text" autocomplete="given-name" required>
+                <input id="v-first" name="first_name" type="text" autocomplete="given-name" required maxlength="40">
               </div>
               <div class="field">
                 <label for="v-last">Last name <span class="req" aria-hidden="true">*</span></label>
-                <input id="v-last" name="last_name" type="text" autocomplete="family-name" required>
+                <input id="v-last" name="last_name" type="text" autocomplete="family-name" required maxlength="80">
               </div>
             </div>
 
             <div class="form__row">
               <div class="field">
                 <label for="v-email">Email <span class="req" aria-hidden="true">*</span></label>
-                <input id="v-email" name="email" type="email" autocomplete="email" required>
+                <input id="v-email" name="email" type="email" autocomplete="email" required maxlength="100">
               </div>
               <div class="field">
                 <label for="v-phone">Phone</label>
-                <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000">
+                <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000" maxlength="30">
               </div>
             </div>
 

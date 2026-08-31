@@ -10,8 +10,13 @@ export const ATTRIBUTION_KEYS = [
   "landing_page", "referrer", "first_touch_at",
 ];
 
+/* Aligned to Zoho's standard Lead field maximums. Anything longer would be
+   accepted here and then rejected downstream, turning a good lead into a
+   502 after the visitor had already filled the form. Overlength values are
+   REJECTED, never truncated - silently shortening someone's name or email
+   corrupts their data and produces an address that does not deliver. */
 const LIMITS = {
-  form_type: 32, first_name: 80, last_name: 80, email: 254, phone: 40,
+  form_type: 32, first_name: 40, last_name: 80, email: 100, phone: 30,
   property_address: 200, topic: 120, message: 4000, timeline: 120,
   condition: 120, notes: 4000, page: 300,
   landing_page: 500, referrer: 500, first_touch_at: 40,
