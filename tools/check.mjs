@@ -98,6 +98,15 @@ for (const file of pages) {
     if (/Crystal\s+Saylor/.test(m[1]))
       fail(file, `licensed name in a display heading — equal prominence risk: "${m[1].trim().slice(0, 60)}"`);
 
+  /* --- every lead form carries a stable identifier ----------------- */
+  for (const tag of html.match(/<form\b[^>]*data-form\b[^>]*>/g) || []) {
+    const type = tag.match(/data-form-type="([a-z_]+)"/);
+    if (!type) fail(file, "a data-form form has no data-form-type");
+    else if (!["home_value", "contact", "buyer_inquiry"].includes(type[1]))
+      fail(file, `unknown data-form-type: ${type[1]}`);
+    if (!/novalidate/.test(tag)) warn(file, "form is missing novalidate");
+  }
+
   /* --- lang + viewport -------------------------------------------- */
   if (!/<html lang="en">/.test(html)) fail(file, "missing lang attribute on <html>");
   if (!/name="viewport"/.test(html)) fail(file, "missing viewport meta");
@@ -121,10 +130,54 @@ for (const file of pages)
 if (missingArt.size)
   warn("site", `still showing placeholder art for ${missingArt.size} image(s): ${[...missingArt].sort().join(", ")}`);
 
-/* --- forms actually deliver ------------------------------------------- */
+/* --- lead pipeline ---------------------------------------------------- */
 const js = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
-if (/formEndpoint:\s*null/.test(js))
-  warn("site", "formEndpoint is not set — forms fall back to opening the visitor's email client");
+
+/* The production bundle must post to the server endpoint. A null or absent
+   destination would silently return the site to mailto-only delivery. */
+if (/leadEndpoint:\s*(null|""|'')/.test(js))
+  fail("site", "leadEndpoint is null — forms would fall back to mailto as the normal path");
+if (!/leadEndpoint:\s*"\/api\/lead"/.test(js))
+  fail("site", "main.js does not post to /api/lead");
+
+/* mailto must never be triggered for the visitor automatically. */
+if (/window\.location\.href\s*=\s*(href|mailto)/.test(js))
+  fail("site", "main.js navigates the visitor to a mailto: URL automatically");
+
+/* Attribution + analytics must be present in the shipped bundle. */
+for (const needle of ["csv_attr_v1", "lead_submit_success", "lead_submit_error",
+                      "lead_form_start", "lead_form_step_complete",
+                      "cta_home_value_click", "cta_sell_click", "phone_click", "email_click"])
+  if (!js.includes(needle)) fail("site", `main.js is missing analytics/attribution hook: ${needle}`);
+
+/* Contact points must not drift. */
+if (!js.includes("+14192454655")) fail("site", "main.js lost the +14192454655 phone number");
+if (!js.includes("crystal@crystalsellstoledo.com"))
+  fail("site", "main.js lost the crystal@crystalsellstoledo.com address");
+
+/* --- server endpoint -------------------------------------------------- */
+const API = join(ROOT, "..", "api");
+if (!existsSync(join(API, "lead.js"))) fail("site", "api/lead.js is missing");
+else {
+  const api = readFileSync(join(API, "lead.js"), "utf8");
+  if (!/req\.method\s*!==\s*"POST"/.test(api)) fail("api/lead.js", "does not restrict method to POST");
+}
+
+/* No secret may ever appear in anything that ships to the browser. */
+const SECRET_NAMES = ["ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "ZOHO_CLIENT_ID"];
+for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
+  const text = readFileSync(join(ROOT, file), "utf8");
+  for (const name of SECRET_NAMES)
+    if (text.includes(name)) fail(file, `references server secret ${name} in client-delivered output`);
+  if (/Zoho-oauthtoken/i.test(text)) fail(file, "contains a Zoho OAuth token header in client output");
+}
+
+/* --- asset cache busting ---------------------------------------------- */
+for (const file of pages) {
+  const html = readFileSync(join(ROOT, file), "utf8");
+  if (!/main\.js\?v=[a-f0-9]{6,}/.test(html))
+    fail(file, "main.js is not fingerprinted — immutable caching would pin old form code");
+}
 
 /* --- report ---------------------------------------------------------- */
 const uniqWarn = [...new Set(warnings)];

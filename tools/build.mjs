@@ -12,6 +12,7 @@
             the market research and the page sources stay out of it.
    ===================================================================== */
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, cpSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,6 +76,22 @@ function parsePage(raw, file) {
   return { meta, body: raw.slice(m[0].length) };
 }
 
+/* ---------------------------------------------------------------------
+   Asset fingerprints
+   ---------------------------------------------------------------------
+   vercel.json serves /assets/* with `max-age=31536000, immutable`, so a
+   returning visitor would keep an old stylesheet or, far worse, old form
+   JavaScript forever. Appending a content hash makes each deploy a new URL
+   the moment the file actually changes, and unchanged files stay cached.
+   --------------------------------------------------------------------- */
+const assetHash = (rel) =>
+  createHash("sha256").update(readFileSync(join(ROOT, rel))).digest("hex").slice(0, 10);
+
+const ASSET_VERSIONS = {
+  css_v: assetHash("assets/css/styles.css"),
+  js_v: assetHash("assets/js/main.js"),
+};
+
 const shell = partial("_shell");
 const pagesDir = join(ROOT, "src/pages");
 const built = [];
@@ -95,6 +112,8 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     ogImage: meta.ogImage ?? `${SITE}/assets/img/og-default.jpg`,
     bodyClass: meta.bodyClass ?? "",
     updated: CONTENT_UPDATED,
+    css_v: ASSET_VERSIONS.css_v,
+    js_v: ASSET_VERSIONS.js_v,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",

@@ -474,6 +474,13 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .form__note a { color: var(--gold-dk); text-decoration: underline; text-underline-offset: 2px; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 
+/* Progressive form step indicator */
+.form__step {
+  font-family: var(--sans); font-size: .68rem; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--gold-dk);
+  margin: 0 0 1.25rem;
+}
+
 .form-status {
   padding: 1rem 1.2rem; border-radius: var(--radius); font-size: .93rem; line-height: 1.55;
   border: 1px solid; display: none;

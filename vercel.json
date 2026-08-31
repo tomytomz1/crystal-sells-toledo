@@ -38,6 +38,25 @@
           "value": "public, max-age=31536000, immutable"
         }
       ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex"
+        }
+      ]
     }
-  ]
+  ],
+  "functions": {
+    "api/lead.js": {
+      "maxDuration": 15,
+      "memory": 256
+    }
+  }
 }

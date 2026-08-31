@@ -154,18 +154,73 @@ Compress everything at [squoosh.app](https://squoosh.app) before committing — 
 
 ### Make the forms deliver
 
-Right now, submitting a form opens the visitor's email client with the details pre-filled.
-That works, but it loses some leads. To capture every one:
+Leads POST to `/api/lead`, a same-origin Vercel function. The browser never
+sees a credential. Until the Zoho variables below are set the endpoint returns
+`503 NOT_CONFIGURED` and the form shows a recovery panel with Crystal's phone,
+email and a pre-filled mailto - it never claims a lead was received when it
+was not.
 
-1. Create a free form at [formspree.io](https://formspree.io) with Crystal's email.
-2. Open `assets/js/main.js` and set the endpoint:
+**Environment variables** (Vercel -> Settings -> Environment Variables). Never
+prefix any of these so they reach the browser. See `.env.example`.
 
-```js
-var CONFIG = {
-  formEndpoint: "https://formspree.io/f/xxxxxxxx",   // ← paste it here
+| Variable | Required | Notes |
+|---|---|---|
+| `ZOHO_CLIENT_ID` | yes | Self-client from the Zoho API console |
+| `ZOHO_CLIENT_SECRET` | yes | |
+| `ZOHO_REFRESH_TOKEN` | yes | Generated once, does not expire |
+| `ZOHO_ACCOUNTS_DOMAIN` | no | Default `https://accounts.zoho.com`; change for .eu / .in / .com.au / .jp / .ca |
+| `ZOHO_API_DOMAIN` | no | Default `https://www.zohoapis.com` |
+| `ALLOWED_ORIGINS` | no | Extra hostnames permitted to POST |
+
+**Zoho scope required:** `ZohoCRM.modules.leads.CREATE`,
+`ZohoCRM.modules.leads.UPDATE`, `ZohoCRM.modules.notes.CREATE`. The simplest
+grant that covers all three is `ZohoCRM.modules.ALL`.
+
+**Getting the refresh token**
+
+1. <https://api-console.zoho.com> -> Self Client -> Create.
+2. Generate a code with the scopes above, a 10-minute expiry, and your own
+   domain as the scope description.
+3. Exchange the code once, from a terminal:
+
+```bash
+curl -X POST https://accounts.zoho.com/oauth/v2/token \
+  -d grant_type=authorization_code \
+  -d client_id=YOUR_ID -d client_secret=YOUR_SECRET \
+  -d code=THE_CODE
 ```
 
-Every form on the site starts working immediately. Test one before you trust it.
+4. Copy `refresh_token` from the response into Vercel. The `access_token` is
+   short-lived and is not stored - the endpoint refreshes it and caches it in
+   memory.
+
+**What lands in the CRM.** A Lead upserted on `Email` (so repeat enquiries do
+not create duplicates), plus a **Note on every submission** carrying the full
+detail - so a second enquiry updates the record without overwriting what the
+person said the first time.
+
+| Zoho field | Source |
+|---|---|
+| `First_Name` / `Last_Name` | form |
+| `Email` | form, lowercased |
+| `Phone` | form, normalised to `(419) 555-1234` where it is a US number |
+| `Street` | property address, when supplied |
+| `Lead_Source` | `Website` |
+| `Lead_Status` | `New Lead` |
+| `Description` | fixed-order block: form, timeline, condition, topic, message, notes, landing page, current page, referrer, all UTM/click IDs, first touch, submitted, submission ID |
+
+Everything beyond the standard fields goes in `Description` because Zoho Free
+has no custom fields.
+
+### Rate limiting
+
+`api/_lib/security.mjs` holds a 5-per-10-minutes-per-IP window in module
+memory. Vercel may run several warm instances, so this is a floor, not a hard
+global ceiling - it stops naive floods cheaply and with no dependencies. For a
+strict limit, move the store to Vercel KV or Upstash; the interface is one
+function.
+
+
 
 ### Words to review
 
@@ -192,7 +247,8 @@ own policies and Ohio Division of Real Estate advertising rules before launch.
 
 ```bash
 npm run build     # rebuild the HTML from src/
-npm run check     # validate links, alt text, meta, JSON-LD
+npm run check     # validate links, alt text, meta, JSON-LD, lead pipeline
+npm test          # build + check + 40 automated tests
 npm run dev       # build, then serve public/ on http://localhost:3000
 ```
 

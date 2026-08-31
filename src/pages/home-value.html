@@ -58,74 +58,102 @@
         <p style="color:var(--muted);font-size:.95rem">Takes about a minute. I reply personally, usually
           the same day.</p>
 
-        <form class="form" data-form data-subject="Home valuation request" novalidate style="margin-top:1.75rem">
+        <form class="form" data-form data-form-type="home_value" data-steps="2"
+              data-subject="Home valuation request" novalidate style="margin-top:1.75rem">
           <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
 
-          <div class="form__row">
+          <p class="form__step" data-step-indicator aria-live="polite">Step 1 of 2</p>
+
+          <!-- Step 1 ------------------------------------------------------
+               Address first. It is the one field the valuation cannot be
+               produced without, and asking for it alone is a smaller ask
+               than a seven-field form.
+
+               Steps are toggled with the `hidden` attribute, not CSS, so an
+               inactive step leaves the tab order and the accessibility tree
+               rather than sitting invisible but focusable. With JS off both
+               steps render and the form submits in one pass. -->
+          <div data-step="1">
             <div class="field">
-              <label for="v-first">First name <span class="req" aria-hidden="true">*</span></label>
-              <input id="v-first" name="first_name" type="text" autocomplete="given-name" required>
+              <label for="v-address">Property address <span class="req" aria-hidden="true">*</span></label>
+              <input id="v-address" name="property_address" type="text" autocomplete="street-address"
+                     placeholder="123 Main St, Toledo, OH" required>
             </div>
-            <div class="field">
-              <label for="v-last">Last name <span class="req" aria-hidden="true">*</span></label>
-              <input id="v-last" name="last_name" type="text" autocomplete="family-name" required>
-            </div>
+
+            <button class="btn btn--primary btn--block btn--lg" type="button" data-step-next>
+              See My Home&rsquo;s Value
+            </button>
+
+            <p class="form__note">Crystal prepares every valuation by hand from recent closed sales
+              near you. This is not an automated estimate.</p>
           </div>
 
-          <div class="field">
-            <label for="v-address">Property address <span class="req" aria-hidden="true">*</span></label>
-            <input id="v-address" name="property_address" type="text" autocomplete="street-address"
-                   placeholder="123 Main St, Toledo, OH" required>
-          </div>
-
-          <div class="form__row">
-            <div class="field">
-              <label for="v-email">Email <span class="req" aria-hidden="true">*</span></label>
-              <input id="v-email" name="email" type="email" autocomplete="email" required>
+          <!-- Step 2 --------------------------------------------------- -->
+          <div data-step="2">
+            <div class="form__row">
+              <div class="field">
+                <label for="v-first">First name <span class="req" aria-hidden="true">*</span></label>
+                <input id="v-first" name="first_name" type="text" autocomplete="given-name" required>
+              </div>
+              <div class="field">
+                <label for="v-last">Last name <span class="req" aria-hidden="true">*</span></label>
+                <input id="v-last" name="last_name" type="text" autocomplete="family-name" required>
+              </div>
             </div>
-            <div class="field">
-              <label for="v-phone">Phone</label>
-              <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000">
+
+            <div class="form__row">
+              <div class="field">
+                <label for="v-email">Email <span class="req" aria-hidden="true">*</span></label>
+                <input id="v-email" name="email" type="email" autocomplete="email" required>
+              </div>
+              <div class="field">
+                <label for="v-phone">Phone</label>
+                <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000">
+              </div>
             </div>
-          </div>
 
-          <div class="form__row">
-            <div class="field">
-              <label for="v-timing">When might you sell?</label>
-              <select id="v-timing" name="timeline">
-                <option value="">Select&hellip;</option>
-                <option>Just curious about the value</option>
-                <option>Within 3 months</option>
-                <option>3&ndash;6 months</option>
-                <option>6&ndash;12 months</option>
-                <option>More than a year out</option>
-              </select>
+            <div class="form__row">
+              <div class="field">
+                <label for="v-timing">When might you sell?</label>
+                <select id="v-timing" name="timeline">
+                  <option value="">Select&hellip;</option>
+                  <option>Just curious about the value</option>
+                  <option>Within 3 months</option>
+                  <option>3&ndash;6 months</option>
+                  <option>6&ndash;12 months</option>
+                  <option>More than a year out</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="v-condition">Condition</label>
+                <select id="v-condition" name="condition">
+                  <option value="">Select&hellip;</option>
+                  <option>Recently updated throughout</option>
+                  <option>Well maintained, some updates</option>
+                  <option>Original but solid</option>
+                  <option>Needs work</option>
+                </select>
+              </div>
             </div>
+
             <div class="field">
-              <label for="v-condition">Condition</label>
-              <select id="v-condition" name="condition">
-                <option value="">Select&hellip;</option>
-                <option>Recently updated throughout</option>
-                <option>Well maintained, some updates</option>
-                <option>Original but solid</option>
-                <option>Needs work</option>
-              </select>
+              <label for="v-notes">Anything I should know?</label>
+              <textarea id="v-notes" name="notes"
+                placeholder="New roof in 2022, finished basement, backs onto the woods, planning to buy in Perrysburg after&hellip;"></textarea>
             </div>
+
+            <div class="form-status" aria-live="polite"></div>
+
+            <button class="btn btn--primary btn--block btn--lg" type="submit">Send My Valuation Request</button>
+
+            <button class="btn btn--ghost btn--block" type="button" data-step-back
+                    style="margin-top:.75rem">Back to address</button>
+
+            <p class="form__note">Your details are used only to prepare and send your valuation. They are
+              never sold, and are shared only with the service providers that run this site and
+              Crystal&rsquo;s contact records. See the <a href="/privacy">privacy note</a>. By submitting
+              you agree that Crystal may contact you about this request.</p>
           </div>
-
-          <div class="field">
-            <label for="v-notes">Anything I should know?</label>
-            <textarea id="v-notes" name="notes"
-              placeholder="New roof in 2022, finished basement, backs onto the woods, planning to buy in Perrysburg after&hellip;"></textarea>
-          </div>
-
-          <div class="form-status" aria-live="polite"></div>
-
-          <button class="btn btn--primary btn--block btn--lg" type="submit">Send My Valuation Request</button>
-
-          <p class="form__note">Your details are used only to prepare and send your valuation. They are never
-            sold or shared. See the <a href="/privacy">privacy note</a>. By submitting you agree that Crystal
-            may contact you about this request.</p>
         </form>
       </div>
 
