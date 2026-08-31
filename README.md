@@ -66,6 +66,7 @@ npm run build
 | Phone | **(419) 245-4655** — display text, `tel:` links, JSON-LD and the mailto fallback |
 | Ohio license | **2025003655** — footer, /about and /privacy |
 | Brokerage | **Key Realty LTD** in the legal disclosures, "Key Realty" in the casual copy |
+| Office | **6800 W. Central Ave, Unit B, Toledo, OH 43617** — footer, /contact and the JSON-LD |
 | Email | **crystal@crystalsellstoledo.com** |
 
 > **Verify the license number** against the [Ohio eLicense system](https://elicense.ohio.gov/)
@@ -97,10 +98,14 @@ npm run build && npm run check
 
 ### Still placeholder
 
-- The **Key Realty office address** on `/contact`
 - **Photography** (below) and the **form endpoint** (below)
 
 `npm run check` names each one that is still outstanding, so it tells you when you are done.
+
+> **A note on the address.** The JSON-LD `address` is the Key Realty office in Toledo 43617,
+> because that is the real business address and search engines will cross-check it against the
+> Google Business Profile. The 43551 focus lives in `areaServed` and in the page content, which
+> is where it belongs — the two do not compete.
 
 ### Photography
 

@@ -16,9 +16,7 @@ const warn = (f, m) => warnings.push(`${f}: ${m}`);
 
 /* Copy still standing in for something real. Delete a row once it is
    genuinely resolved site-wide. */
-const PLACEHOLDERS = [
-  [/Toledo &amp; Perrysburg, Ohio<\/p>/, "the Key Realty office address on /contact"],
-];
+const PLACEHOLDERS = [];
 
 const pages = readdirSync(ROOT).filter((f) => f.endsWith(".html"));
 if (!pages.length) fail("build", "no HTML pages found in public/ — run `npm run build` first");
