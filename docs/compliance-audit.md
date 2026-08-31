@@ -3,8 +3,8 @@
 **Licensee** Crystal Saylor · Ohio licence #2025003655
 **Brokerage** Key Realty LTD · 6800 W. Central Ave, Unit B, Toledo, OH 43617
 **Scope** 9 published pages, shared header/footer, structured data, social share card
-**Revision** 3 — R-1 and R-4 implemented 31 August 2026
-**Status** Site is live. R-1 and R-4 closed. R-7 remains open pending Crystal.
+**Revision** 4 — factual questions resolved by owner, 31 August 2026
+**Status** Site is live. All REQUIRED items closed. No open findings.
 
 > **Not legal advice.** This is an engineering review of what the site actually renders,
 > prepared to be handed to Key Realty's compliance contact. Rule text below was retrieved via
@@ -69,12 +69,12 @@ straightforward failure — see **R-1**.
 | **R-4** | Brokerage ≥ equal prominence with the salesperson's name | REQUIRED | OAC 1301:5-1-02(B) | **CLOSED** — lockup site-wide, `/about` h1 restructured |
 | **R-5** | No statement indicating protected-class preference | REQUIRED | 42 U.S.C. §3604(c); R.C. 4112.02(H) | **FIXED & deployed** |
 | **R-6** | No fabricated endorsements | REQUIRED | FTC Act §5; 16 CFR Part 255; R.C. 1345.02 | **FIXED & deployed** |
-| **R-7** | No misrepresentation in advertising | REQUIRED | ORC 4735.18; R.C. 1345.02 | **OPEN** — `/about` biography |
+| **R-7** | No misrepresentation in advertising | REQUIRED | ORC 4735.18; R.C. 1345.02 | **PASS** — owner confirms biography accurate |
 | **R-8** | Advertise under the licensed name | REQUIRED | OAC 1301:5-1-02 | **PASS** — "Crystal Saylor" |
 | **A-1** | Team advertising requirements | REQUIRED IF APPLICABLE | OAC 1301:5-1-21 | **Not applicable** — solo licensee |
-| **A-2** | Degnan Group relationship | REQUIRED IF APPLICABLE | OAC 1301:5-1-21 | **UNRESOLVED** |
-| **A-3** | REALTOR® mark usage and representation of membership | REQUIRED IF APPLICABLE | NAR trademark licence; **ORC 4735.18(A)(12)** | **UNRESOLVED** — retained pending confirmation |
-| **A-4** | NAR Code of Ethics, Articles 11 & 12 | REQUIRED IF APPLICABLE | Binds NAR members only | Contingent on A-3 |
+| **A-2** | Team advertising, Degnan Group | REQUIRED IF APPLICABLE | OAC 1301:5-1-21(B) | **NOT ENGAGED** — membership confirmed, not advertised |
+| **A-3** | REALTOR® mark usage and representation of membership | REQUIRED IF APPLICABLE | NAR trademark licence; ORC 4735.18(A)(12) | **PASS** — active NAR member confirmed |
+| **A-4** | NAR Code of Ethics, Articles 11 & 12 | **APPLICABLE** | Binds NAR members | **IN FORCE** — governs P-1 and P-2 |
 | **A-5** | MLS / IDX display and attribution | REQUIRED IF APPLICABLE | NORIS rules | Not applicable — no IDX feed |
 | **B-1** | Marketing-name approval / registration | BROKERAGE POLICY | No authority found for a solo brand | Confirm with Key Realty |
 | **B-2** | Consumer Guide link on the website | BROKERAGE POLICY | *Reclassified from REQUIRED* | Optional |
@@ -170,20 +170,17 @@ FTC Act §5; 16 CFR Part 255; Ohio R.C. 1345.02.
 Three placeholder quotation blocks attributed to "Client name · Perrysburg" were removed rather
 than reworded. The section returns when real reviews exist, verbatim and with permission.
 
-### R-7 · Misrepresentation — **OPEN**
+### R-7 · Misrepresentation — **PASS**
 
 ORC 4735.18 (grounds for disciplinary action); Ohio Consumer Sales Practices Act, R.C. 1345.02.
 
-The `/about` page asserts specific checkable facts that were drafted as scaffolding and have
-never been confirmed:
+The `/about` biography previously carried checkable personal assertions that had been drafted as
+scaffolding and never confirmed. **The owner has confirmed all current biography statements are
+factually accurate**, and they are treated as verified for the purposes of this review. No copy
+was invented or substituted; the text stands as written.
 
-```
-"I live in Perrysburg. My kids go to school here."
-"I know which streets flood in a hard spring rain"
-"I did not come to real estate looking for an easy job."
-```
-
-Only Crystal can resolve this. Every sentence must be something she would state under oath.
+This finding rests on the owner's representation. If any statement later proves inaccurate, the
+finding reopens.
 
 ### R-8 · Licensed name — **PASS**
 
@@ -196,47 +193,76 @@ misleading. Not currently engaged.
 
 ## Conditional items
 
-### A-1 / A-2 · Team advertising
+### A-1 / A-2 · Team advertising — **membership confirmed, requirements NOT ENGAGED**
 
 > "'Team' includes any group of **two or more** associated real estate licensees affiliated with
-> the same brokerage and any other non-licensed professionals … who advertise together in a
-> group with a group name."
+> the same brokerage … who advertise together in a group with a group name."
 > — OAC 1301:5-1-21
 
-The site presents one licensee. **"Crystal Sells Toledo" is not a team name and the rule is not
-engaged.** Two consequences worth recording:
+**Owner confirms Crystal is a current member of the Degnan Group.** Membership and *advertising
+as a team* are separate triggers. Under OAC 1301:5-1-21(B) the enhanced requirements attach when
+the licensee **advertises as part of a team**.
 
-- The same rule requires a team name to include the term **"group" or "team"**. *Crystal Sells
-  Toledo* contains neither, so it could not be used as a compliant team name even if she wanted
-  to.
-- Public profiles associate Crystal with **the Degnan Group** at Key Realty. If she advertises
-  with that group anywhere, the rule applies to that advertising and requires the brokerage name
-  in equal or greater prominence with both the team name and the salesperson's name. **Confirm
-  her current relationship before the next sign order or print run.** If she has left, the
-  outside profiles should be corrected so the public record is consistent.
+**Factual finding: this website does not.** An exhaustive scan of every deployed surface returned
+zero occurrences of "Degnan" or any group name:
 
-### A-3 / A-4 · REALTOR® and the NAR Code
+| Surface scanned | Result |
+|---|---|
+| Rendered HTML — visible copy, headings, body | none |
+| `<title>` tags | none |
+| Meta description, author, geo | none |
+| OpenGraph and Twitter card properties | none |
+| JSON-LD structured data | none |
+| Image `alt` text and filenames | none |
+| SVG internals | none |
+| CSS, including `content:` properties | none |
+| JavaScript strings | none |
+| `sitemap.xml`, `robots.txt`, `site.webmanifest` | none |
+| Raw byte scan of all deployed files | none |
 
-REALTOR® use is not only a trademark question. Ohio treats false representation of membership
-in a real estate professional association as a ground for disciplinary action:
+The scan was positive-controlled: a probe file containing "Degnan Group" was written into
+`public/`, detected, and removed — confirming the search would have found a real occurrence.
+
+Supporting evidence that no team is advertised:
+
+- Only one licensee is named anywhere in deployed output: **Crystal Saylor** (36 occurrences).
+  Only one brokerage: **Key Realty LTD** (36 occurrences). No second licensee appears.
+- Seven first-person-plural instances exist. All are agent-and-client ("We walk the house
+  together, room by room. **I** tell you what buyers will notice") or the brokerage fair-housing
+  statement. Surrounding copy is consistently first-person singular. None implies a group of
+  licensees.
+- *Crystal Sells Toledo* contains neither "group" nor "team", which OAC 1301:5-1-21 requires a
+  team name to include — so it is not being used as one.
+
+**Conclusion.** Team-advertising requirements are not presently engaged by this website. Per
+instruction, the Degnan Group has **not** been added for compliance purposes, and the existing
+Crystal Saylor | Key Realty LTD lockup is preserved unchanged.
+
+**Standing condition.** If the Degnan Group is ever named on this site, OAC 1301:5-1-21(B)(2)
+engages and Key Realty LTD must then be displayed in equal or greater prominence with **both**
+the team name and the salesperson's name. The current lockup would need extending to three
+names at parity, not two.
+
+### A-3 / A-4 · REALTOR® and the NAR Code — **RESOLVED**
+
+**Owner confirms Crystal Saylor is an active REALTOR® and a current NAR member**, and a member
+of the Toledo-area REALTOR® association (TBOR).
+
+Ohio treats false representation of association membership as a disciplinary ground:
 
 > ORC **4735.18(A)(12)** — falsely representing membership in a real estate professional
 > association.
 
-So an unverified REALTOR® claim carries licence exposure, not merely a private trademark
-dispute. **It currently appears on all nine pages** — footer legal, page titles, meta descriptions, JSON-LD `jobTitle`, the share card, and
-the REALTOR® ∣ MLS badge image. This is therefore not a question of whether to *add* it, but
-whether existing use is authorised.
+With membership confirmed, existing REALTOR® usage across the nine pages is authorised and may
+remain. On-site format is correct: full capitals with the ® symbol.
 
-- **If membership is current:** on-site usage format is correct — full capitals with the ®.
-- **If it is not:** every instance must be removed, and the badge image with it.
+Two consequences:
 
-**Per instruction, REALTOR® is retained for now and A-3 stays open** pending Crystal's
-confirmation of current membership. Nothing was removed in this revision.
-
-This gates more than itself. The NAR Code of Ethics binds members. If Crystal is not a member,
-Articles 11 and 12 do not apply to her, and findings P-1 and P-2 rest instead on the Ohio
-Consumer Sales Practices Act and ORC 4735.18.
+- **A-4 moves from conditional to APPLICABLE.** The NAR Code of Ethics binds members, so
+  Articles 11 (competence) and 12 (true picture) now govern this site directly rather than as a
+  fallback to the Ohio CSPA. Findings **P-1** and **P-2** are evaluated under them.
+- **No association branding was added.** TBOR membership is recorded here only; per instruction
+  no TBOR logo or other association mark has been placed on the site.
 
 ### A-5 · MLS / IDX
 
