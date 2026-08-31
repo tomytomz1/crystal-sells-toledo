@@ -221,6 +221,8 @@ Run `npm run build`. It appears at `/whatever` and is added to `sitemap.xml` aut
 - [ ] `npm run check` passes with no errors
 - [ ] [Google Business Profile](https://business.google.com) claimed — see `STRATEGY.md`
 - [ ] Site submitted to [Google Search Console](https://search.google.com/search-console)
+- [ ] **Web Analytics** toggled on in the Vercel project (Analytics tab) — the script ships
+      with every page already, but Vercel only records data once the product is enabled
 
 ---
 
