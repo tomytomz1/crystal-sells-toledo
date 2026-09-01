@@ -44,7 +44,7 @@ api/_lib/*.mjs          validate, security, hubspot, description, log
                         (+ zoho.mjs — dormant rollback path, not imported)
 tools/build.mjs         assembles src/ + assets/ into public/
 tools/check.mjs         static validation, run by npm run check
-tests/*.test.mjs        node:test suites (182 tests)
+tests/*.test.mjs        node:test suites (199 tests)
 docs/                   strategy + compliance docs (NOT deployed)
 public/                 GENERATED. gitignored. Never edit by hand.
 ```
@@ -56,7 +56,7 @@ public/                 GENERATED. gitignored. Never edit by hand.
 ```bash
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
-npm test             # build + check + 182 automated tests
+npm test             # build + check + 199 automated tests
 npm run zoho:verify  # Zoho picklists — only needed if rolling back to Zoho
 npm run dev          # build, then serve public/ on :3000
 ```
@@ -176,7 +176,12 @@ Already done. A HubSpot private-app access token is set in Vercel as
 ```
 crm.objects.contacts.read
 crm.objects.contacts.write
+forms
 ```
+
+`forms` is what lets each submission become a native `Form submitted` activity
+on the contact timeline. Engagement scopes (notes, tasks, calls) are **not
+offered to a Service Key at all**, which is why the Notes API is not used.
 
 This is deliberate least privilege and **no further scope is required**. The
 integration is built to live inside those two, which is why it uses no Notes
@@ -191,7 +196,10 @@ they reach the browser.
 | Variable | Required | Default |
 |---|---|---|
 | `HUBSPOT_ACCESS_TOKEN` | **yes** | — |
+| `HUBSPOT_PORTAL_ID` | **yes** | `247240486` |
+| `HUBSPOT_FORM_GUID` | **yes** | `536a356d-d854-49ec-b204-b76e591cecaa` |
 | `HUBSPOT_API_BASE` | no | `https://api.hubapi.com` |
+| `HUBSPOT_FORMS_BASE` | no | `https://api.hsforms.com` |
 | `ALLOWED_ORIGINS` | no | comma-separated extra hostnames |
 | `GOOGLE_MAPS_API_KEY` | no | unset — address autocomplete stays off |
 
@@ -406,7 +414,7 @@ run against the live Google API** — every test stubs Google.
 
 ## 5. Tests
 
-`npm test` → build + check + **182 tests, all passing**.
+`npm test` → build + check + **199 tests, all passing**.
 
 - `tests/api.test.mjs` — endpoint contract, validation, limits, secret leakage,
   PII redaction, and the dormant Zoho mapping
@@ -473,8 +481,8 @@ These were the result of a compliance review. Breaking them has legal consequenc
 
 | Item | Status |
 |---|---|
-| **`crm.objects.notes.write` scope** | **CONFIRMED UNAVAILABLE** in the Service Key scope picker. |
-| Timeline activity | **NOT SHIPPED.** Decision made: use the HubSpot **Forms Submission API**. See `docs/updates/2026-09-01-timeline-architecture-decision.md`. Needs a form GUID from Tomas. |
+| **`crm.objects.notes.write` scope** | **CONFIRMED UNAVAILABLE** to a Service Key. Notes work retained as tag `hubspot-notes-fallback`. |
+| Timeline activity | **IMPLEMENTED** via the Forms Submission API. See `docs/updates/2026-09-01-hubspot-forms-timeline.md`. **Not production-proven.** |
 | HubSpot `message` property | Assumed present (it is a HubSpot default). Confirm in the portal — section 3 step 3. |
 | Zoho | Dormant. Code retained as a rollback path; env vars no longer read. |
 | Mailbox | `crystal@crystalsellstoledo.com` must exist |

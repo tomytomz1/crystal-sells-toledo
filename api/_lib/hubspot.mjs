@@ -6,14 +6,23 @@
  * a thrown Error here (HubSpot echoes submitted values back in validation
  * errors, so a body can carry both PII and the offending payload).
  *
- * Scope budget: this integration is deliberately least-privilege and has only
+ * Scope budget - a 2026 HubSpot SERVICE KEY with exactly:
  *   crm.objects.contacts.read
  *   crm.objects.contacts.write
- * There is no notes scope, so the Zoho design - a Lead plus one Note per
- * submission - is not available. See DETAIL_PROPERTY below for what replaces it.
+ *   forms
+ *
+ * Delivery is two writes, both mandatory:
+ *   1. the Contact, through the CRM API  (authoritative properties)
+ *   2. a submission to a HubSpot FORM    (the dated timeline activity)
+ *
+ * The form is what makes each enquiry visible as its own "Form submitted"
+ * entry on the contact's timeline. Engagement objects (notes, tasks, calls)
+ * are NOT available to a Service Key - the scope picker exposes none of them -
+ * so the Notes API is not an option here. See
+ * docs/updates/2026-09-01-timeline-architecture-decision.md.
  */
 
-import { buildDescription } from "./description.mjs";
+import { buildDescription, buildSummary } from "./description.mjs";
 import { log, logError } from "./log.mjs";
 
 const API = () => process.env.HUBSPOT_API_BASE || "https://api.hubapi.com";
@@ -40,49 +49,45 @@ export const DETAIL_MAX_BYTES = 60000;
 const SEPARATOR = "----- earlier submission -----";
 const TRIM_NOTICE = "----- older submissions trimmed to fit the HubSpot property limit -----";
 
-/** True when everything needed to reach HubSpot is present. Only the token. */
+const FORMS_API = () => process.env.HUBSPOT_FORMS_BASE || "https://api.hsforms.com";
+const portalId = () => (process.env.HUBSPOT_PORTAL_ID || "").trim();
+const formGuid = () => (process.env.HUBSPOT_FORM_GUID || "").trim();
+
+/* The six fields defined on the HubSpot form. HubSpot validates a submission
+   against the form definition and REJECTS anything carrying a field the form
+   does not define, so this list is a contract with the portal, not a
+   preference. Adding a seventh here without adding it to the form in HubSpot
+   would fail every submission. */
+export const FORM_FIELDS = ["email", "firstname", "lastname", "phone", "address", "message"];
+
+/* HubSpot's object type id for a contact. */
+const CONTACT_OBJECT_TYPE_ID = "0-1";
+
+/* Only used to build the form submission's page context. */
+const SITE_ORIGIN = "https://www.crystalsellstoledo.com";
+const FORM_NAME = "Crystal Sells Toledo - Website Seller Inquiry";
+
+/**
+ * True when everything needed to reach HubSpot is present.
+ *
+ * All three are required, not just the token: the form submission is a
+ * MANDATORY half of delivery, so a missing portal id or form guid means the
+ * enquiry cannot be recorded on the timeline. Refusing up front with a 503 is
+ * honest; accepting the lead and silently skipping the activity is not.
+ */
 export function isConfigured() {
-  return Boolean(process.env.HUBSPOT_ACCESS_TOKEN);
+  return Boolean(process.env.HUBSPOT_ACCESS_TOKEN && portalId() && formGuid());
 }
 
 const bytes = (s) => Buffer.byteLength(s, "utf8");
 
-/**
- * Merge this submission's block with whatever the contact already carries.
- *
- * Without a notes scope an update would otherwise OVERWRITE the previous
- * enquiry - so a returning seller's first message would vanish the moment
- * they submitted a second. The Zoho build prevented that with one Note per
- * submission; this is the equivalent, kept inside the single writable
- * property available to us. Newest first, oldest trimmed only when the value
- * would exceed what HubSpot accepts, and never trimmed silently.
- */
-export function composeDetail(newBlock, existing = "") {
-  const prior = typeof existing === "string" ? existing.trim() : "";
-  const blocks = prior
-    ? [newBlock, ...prior.split(SEPARATOR).map((b) => b.trim()).filter(Boolean)]
-    : [newBlock];
-
-  const join = (list, trimmed) =>
-    list.join("\n\n" + SEPARATOR + "\n\n") + (trimmed ? "\n\n" + TRIM_NOTICE : "");
-
-  const kept = blocks.slice();
-  let trimmed = false;
-  while (kept.length > 1 && bytes(join(kept, trimmed)) > DETAIL_MAX_BYTES) {
-    kept.pop();          // drop the OLDEST, never the submission in hand
-    trimmed = true;
-  }
-
-  let out = join(kept, trimmed);
-  if (bytes(out) > DETAIL_MAX_BYTES) {
-    /* Defensive only: validate.mjs caps every field, so one block cannot
-       reach 60 KB. Cutting on a byte boundary can split a multi-byte
-       character, hence the replacement-char trim. */
-    const room = DETAIL_MAX_BYTES - bytes("\n" + TRIM_NOTICE);
-    out = Buffer.from(out, "utf8").subarray(0, room).toString("utf8")
-      .replace(/�+$/, "") + "\n" + TRIM_NOTICE;
-  }
-  return out;
+/* Defensive byte cap. Validation already bounds every field far below this,
+   so this exists so a value can never be the thing HubSpot rejects. Cutting
+   on a byte boundary can split a multi-byte character, hence the trim. */
+function capBytes(text) {
+  if (bytes(text) <= DETAIL_MAX_BYTES) return text;
+  return Buffer.from(text, "utf8").subarray(0, DETAIL_MAX_BYTES).toString("utf8")
+    .replace(/\uFFFD+$/, "");
 }
 
 /**
@@ -93,7 +98,7 @@ export function composeDetail(newBlock, existing = "") {
  * string would blank a number HubSpot already holds, so a visitor who gave a
  * phone once and not the second time would lose it.
  */
-export function toContactProperties(payload, detail) {
+export function toContactProperties(payload) {
   const { lead } = payload;
   const props = {
     email: lead.email,
@@ -107,8 +112,55 @@ export function toContactProperties(payload, detail) {
      what HubSpot already holds, so a seller who gave an address on the
      home-value form and later used the contact form would lose it. */
   if (lead.property_address) props.address = lead.property_address;
-  props[DETAIL_PROPERTY] = detail;
+  /* The concise LATEST enquiry, replacing whatever was there. It no longer
+     accumulates: the timeline now holds every submission in full and dated,
+     so an append-only blob in a sidebar property would be a second, worse
+     copy of the same history - unbounded and unreadable in the field HubSpot
+     renders it in. */
+  props[DETAIL_PROPERTY] = capBytes(buildSummary(payload));
   return props;
+}
+
+/**
+ * The exact form submission sent to HubSpot.
+ *
+ * Blank optional fields are OMITTED entirely rather than sent empty. A form
+ * submission SETS the properties it carries, so an empty string would blank a
+ * phone or address HubSpot already holds - the same rule the CRM write follows.
+ */
+export function toFormSubmission(payload, { pageUri, pageName } = {}) {
+  const { lead } = payload;
+  const field = (name, value) =>
+    ({ objectTypeId: CONTACT_OBJECT_TYPE_ID, name, value: String(value) });
+
+  const fields = [field("email", lead.email)];
+  if (lead.first_name) fields.push(field("firstname", lead.first_name));
+  if (lead.last_name) fields.push(field("lastname", lead.last_name));
+  if (lead.phone) fields.push(field("phone", lead.phone));
+  if (lead.property_address) fields.push(field("address", lead.property_address));
+  /* The complete 23-row block. This is what makes the timeline activity carry
+     the whole enquiry rather than just a name. */
+  fields.push(field("message", capBytes(buildDescription(payload))));
+
+  const body = {
+    /* Epoch milliseconds, from the server-side submission time, so the
+       activity is dated when the visitor submitted rather than when HubSpot
+       happened to ingest it. */
+    submittedAt: String(Date.parse(payload.meta.submitted_at)),
+    fields,
+  };
+
+  /* Context is metadata, not form fields - it adds nothing to the form
+     definition and cannot trip HubSpot's field validation. `hutk` is
+     deliberately absent: it is a browser cookie set by HubSpot's tracking
+     script, which this site does not load, and inventing one would corrupt
+     attribution rather than improve it. */
+  const context = {};
+  if (pageUri) context.pageUri = pageUri;
+  if (pageName) context.pageName = pageName;
+  if (Object.keys(context).length) body.context = context;
+
+  return body;
 }
 
 async function fetchWithTimeout(url, options = {}) {
@@ -191,7 +243,7 @@ export async function findContactByEmail(email) {
     method: "POST",
     body: JSON.stringify({
       filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }],
-      properties: ["email", DETAIL_PROPERTY],
+      properties: ["email"],
       limit: 1,
     }),
   });
@@ -201,20 +253,7 @@ export async function findContactByEmail(email) {
   const hit = json.results[0];
   if (!hit) return null;
   if (!hit.id) throw new Error("HUBSPOT_SEARCH_MALFORMED_RESPONSE");
-  return { id: String(hit.id), detail: hit.properties?.[DETAIL_PROPERTY] || "" };
-}
-
-/** Read one contact's stored enquiry block, so an update can append to it. */
-async function readDetail(ref, byEmail) {
-  try {
-    const res = await hubspotFetch(contactUrl(ref, { byEmail, properties: [DETAIL_PROPERTY] }));
-    if (!res.ok) return "";
-    const json = await readJson(res);
-    return json?.properties?.[DETAIL_PROPERTY] || "";
-  } catch {
-    /* Best effort. Failing to read history must not lose the enquiry in hand. */
-    return "";
-  }
+  return { id: String(hit.id) };
 }
 
 async function createContact(props) {
@@ -246,42 +285,109 @@ async function updateContact(ref, props, byEmail = false) {
   return { id: String(json.id), action: "update" };
 }
 
+/* A missing `forms` scope is the one failure whose remedy is a person clicking
+   something in HubSpot, so it is detected and named rather than left generic. */
+function isFormsScopeFailure(status) {
+  return status === 401 || status === 403;
+}
+
 /**
- * Deliver one lead as a HubSpot contact.
+ * Submit the enquiry to the HubSpot form. This is what produces the dated
+ * "Form submitted" activity on the contact's timeline.
  *
- * Search by email, then update or create. HubSpot itself enforces email
- * uniqueness on contacts, so the create path can still come back 409 when the
- * search index has not caught up with a very recent write - that conflict is
- * resolved into an update rather than surfaced, which is what keeps a repeat
- * submission from ever becoming a second contact.
+ * Uses the AUTHENTICATED endpoint with the Service Key as a bearer token.
+ * The unauthenticated variant would also work, but authenticating means the
+ * portal id and form guid are not the only thing standing between a stranger
+ * and Crystal's CRM, and it carries higher rate limits.
+ */
+async function submitForm(payload) {
+  const path = "/submissions/v3/integration/secure/submit/" +
+    encodeURIComponent(portalId()) + "/" + encodeURIComponent(formGuid());
+
+  const page = payload.meta.page || "/";
+  const body = toFormSubmission(payload, {
+    pageUri: SITE_ORIGIN + page,
+    pageName: FORM_NAME,
+  });
+
+  const res = await fetchWithTimeout(FORMS_API() + path, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + process.env.HUBSPOT_ACCESS_TOKEN,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await readJson(res);
+
+  if (!res.ok) {
+    if (isFormsScopeFailure(res.status)) {
+      const err = new Error("HUBSPOT_FORMS_SCOPE_OR_AUTH_" + res.status);
+      err.formsScopeProblem = true;
+      throw err;
+    }
+    /* A 400 here is almost always the form definition disagreeing with what
+       was submitted - a field the form does not define, or a renamed one. */
+    if (res.status === 400) {
+      const err = new Error("HUBSPOT_FORM_REJECTED");
+      err.formDefinitionProblem = true;
+      throw err;
+    }
+    throw hubspotError("FORM", res.status, json);
+  }
+
+  /* HubSpot answers a good submission with a JSON body carrying inlineMessage
+     or redirectUri. Anything else is not a confirmed submission, and this
+     system does not report success it did not get. */
+  if (!json || typeof json !== "object" || Array.isArray(json))
+    throw new Error("HUBSPOT_FORM_MALFORMED_RESPONSE");
+
+  return { ok: true };
+}
+
+/**
+ * Deliver one lead: the Contact, then the form submission.
  *
- * Throws on any failure. The caller turns that into a 502 and the visitor
- * sees the recovery panel; nothing here ever reports success it did not get.
+ * Contact first, exactly as the proven path already does - search by email,
+ * then update or create, folding a 409 into an update so a repeat submission
+ * can never become a second contact. Then the form submission, which is what
+ * makes the enquiry visible as its own dated activity on that contact's
+ * timeline. HubSpot matches the submission to the contact by email.
+ *
+ * BOTH must succeed. A contact with no activity behind it is a name with no
+ * enquiry attached and looks perfectly fine, which is exactly the failure this
+ * system exists to prevent.
+ *
+ * PARTIAL WRITES ARE POSSIBLE AND ARE NOT HIDDEN. There is no transaction
+ * across the CRM API and the Forms API. If the contact write succeeds and the
+ * form submission fails, HubSpot is left holding the contact - name, email,
+ * phone, address and the `message` summary - with no timeline activity, and
+ * this throws, so the visitor sees the recovery panel rather than a false
+ * success. A resubmit finds the same contact and updates it (never a
+ * duplicate) and submits the form again. Every submission carries its own
+ * submission id, so a resubmit is a genuinely distinct submission and two
+ * activities is the honest record of two attempts. HubSpot offers no
+ * idempotency key on form submission, so at-least-once is the real guarantee.
  */
 export async function createLead(payload) {
   const sid = payload.meta.submission_id;
   const email = payload.lead.email;
-  const block = buildDescription(payload);
 
   try {
     const found = await findContactByEmail(email);
     let result;
 
     if (found) {
-      result = await updateContact(found.id, toContactProperties(payload, composeDetail(block, found.detail)));
+      result = await updateContact(found.id, toContactProperties(payload));
     } else {
       try {
-        result = await createContact(toContactProperties(payload, composeDetail(block, "")));
+        result = await createContact(toContactProperties(payload));
       } catch (err) {
         if (!err.conflict) throw err;
-
-        /* The contact existed after all - search lag, or two submissions in
-           flight at once. Fold into an update so no duplicate is created. */
         const ref = err.conflictId || email;
         const byEmail = !err.conflictId;
         log("hubspot.create_conflict_resolved", { submission_id: sid, by_email: byEmail });
-        const prior = await readDetail(ref, byEmail);
-        result = await updateContact(ref, toContactProperties(payload, composeDetail(block, prior)), byEmail);
+        result = await updateContact(ref, toContactProperties(payload), byEmail);
       }
     }
 
@@ -290,18 +396,37 @@ export async function createLead(payload) {
       action: result.action,
       has_id: Boolean(result.id),
     });
-    return result;
+
+    /* The timeline activity. Deliberately NOT best-effort. */
+    await submitForm(payload);
+    log("hubspot.form.submitted", { submission_id: sid, contact_action: result.action });
+
+    return { id: result.id, action: result.action, formSubmitted: true };
   } catch (err) {
     if (err.detailPropertyRejected) {
-      /* Deliberately fatal. Saving the name and dropping the address, the
-         timeline and the message would hand Crystal a contact with no
-         enquiry attached and no sign anything was missing. */
       logError("hubspot.detail_property_unavailable", err, {
         submission_id: sid,
         property: DETAIL_PROPERTY,
         action_required:
           "restore the default contact property `message` in HubSpot, or provision an " +
           "equivalent writable text property and map DETAIL_PROPERTY to it",
+      });
+    }
+    if (err.formsScopeProblem) {
+      logError("hubspot.forms_scope_or_auth", err, {
+        submission_id: sid,
+        action_required:
+          "confirm the `forms` scope is on the HubSpot service key and that " +
+          "HUBSPOT_ACCESS_TOKEN in Vercel is that key, then redeploy",
+      });
+    }
+    if (err.formDefinitionProblem) {
+      logError("hubspot.form_rejected", err, {
+        submission_id: sid,
+        expected_fields: FORM_FIELDS.join(","),
+        action_required:
+          "HubSpot validates a submission against the form definition - confirm the " +
+          "form defines exactly these fields and that HUBSPOT_FORM_GUID is correct",
       });
     }
     throw err;

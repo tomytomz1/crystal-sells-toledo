@@ -419,10 +419,12 @@ else {
   else {
     if (!/HUBSPOT_ACCESS_TOKEN/.test(cfg[0]))
       fail("api/_lib/hubspot.mjs", "isConfigured does not require HUBSPOT_ACCESS_TOKEN");
-    const envs = (cfg[0].match(/process\.env\.[A-Z0-9_]+/g) || []);
-    for (const e of envs)
-      if (e !== "process.env.HUBSPOT_ACCESS_TOKEN")
-        fail("api/_lib/hubspot.mjs", `isConfigured requires ${e} — this phase needs only the token`);
+    /* All three are required: the form submission is a mandatory half of
+       delivery, so a missing portal id or form guid must refuse up front
+       rather than accept a lead it cannot record on the timeline. */
+    for (const needed of ["portalId()", "formGuid()"])
+      if (!cfg[0].includes(needed))
+        fail("api/_lib/hubspot.mjs", `isConfigured does not require ${needed}`);
   }
 
   /* The enquiry block goes to a STANDARD HubSpot property. A custom property
@@ -433,11 +435,48 @@ else {
     fail("api/_lib/hubspot.mjs",
       `DETAIL_PROPERTY is "${prop[1]}" — only the standard writable property "message" is confirmed`);
 
-  /* Scope budget: no Notes API, no properties/schema API. */
+  /* Scope budget: no Notes API, no properties/schema API. Engagement objects
+     are not offered to a Service Key at all. */
   if (/\/crm\/v3\/objects\/notes|\/engagements\//.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "uses the Notes/engagements API — this token has no notes scope");
+    fail("api/_lib/hubspot.mjs", "uses the Notes/engagements API — a Service Key has no notes scope");
   if (/\/crm\/v3\/properties\//.test(hubspotSrc))
     fail("api/_lib/hubspot.mjs", "uses the properties API — this token has no schema scope");
+
+  /* Every submission must become a dated timeline activity, via the form. */
+  if (!/\/submissions\/v3\/integration\/secure\/submit\//.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs",
+      "does not submit to the authenticated HubSpot form endpoint — enquiries would leave no activity");
+  if (/integration\/submit\//.test(hubspotSrc) &&
+      !/integration\/secure\/submit\//.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "uses the UNauthenticated form endpoint");
+  if (!/await submitForm\(payload\)/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "the form submission is not awaited in the delivery path");
+  if (/submitForm\(payload\)\s*\.catch|catch[^)]*\{\s*\}\s*\/\* best.effort/i.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "the form submission is treated as best-effort");
+
+  /* HubSpot validates a submission against the form definition and rejects
+     anything carrying a field the form does not define. */
+  const ff = /export const FORM_FIELDS = \[([^\]]*)\]/.exec(hubspotSrc);
+  if (!ff) fail("api/_lib/hubspot.mjs", "FORM_FIELDS is not declared");
+  else {
+    const values = (ff[1].match(/"([^"]+)"/g) || []).map((v) => v.slice(1, -1));
+    const expected = ["email", "firstname", "lastname", "phone", "address", "message"];
+    if (values.join(",") !== expected.join(","))
+      fail("api/_lib/hubspot.mjs",
+        `FORM_FIELDS is [${values}] — the HubSpot form defines exactly [${expected}]`);
+  }
+  /* email is the dedupe key and HubSpot requires it on this form: it must be
+     seeded into the array, never pushed behind a condition. */
+  if (!/const fields = \[field\("email", lead\.email\)\]/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "email is not unconditionally submitted");
+  if (/if \([^)]*\) fields\.push\(field\("email"/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "email is submitted conditionally");
+  for (const [f, prop] of [["phone", "lead.phone"], ["address", "lead.property_address"]])
+    if (!new RegExp(`if \\(${prop.replace(".", "\\.")}\\) fields\\.push\\(field\\("${f}"`).test(hubspotSrc))
+      fail("api/_lib/hubspot.mjs",
+        `${f} is submitted unconditionally — a blank would erase the stored value`);
+  if (!/submittedAt:/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no submittedAt — the activity would be dated on ingest");
 
   /* Dedupe must exist, or repeat submissions pile up duplicate contacts. */
   if (!/\/crm\/v3\/objects\/contacts\/search/.test(hubspotSrc))
