@@ -54,7 +54,7 @@ If something is blocked or unproven, say so plainly in that report. Never let
 | Contact | (419) 245-4655 · crystal@crystalsellstoledo.com |
 | Stack | Static HTML built by `tools/build.mjs`, one Vercel function at `api/lead.js` |
 | Deploy | Vercel, production branch `main` |
-| CRM | **HubSpot** — Contacts + Notes API. Service key scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `crm.objects.notes.write`.
+| CRM | **HubSpot** — Contacts API, scopes `crm.objects.contacts.read/write` only.
 Zoho code is retained but imported by nothing; it is a rollback path, not the live path. |
 
 ## Commands
@@ -88,12 +88,6 @@ Full detail in `docs/PHASE-1-HANDOFF.md` section 6. In short:
 11. The enquiry block is the whole lead. If the CRM rejects the property it is
     written to, fail loudly — never retry without it. A contact saved without
     its address, timeline and message looks fine and is worthless.
-12. Every submission must land as its own timeline Note on the contact. A
-    contact with no activity behind it hides the enquiry. Note failure fails
-    the lead — never best-effort.
-13. `[hidden]` is enforced globally with `!important`. Any class setting an
-    explicit `display` silently defeats the UA rule; that has caused two real
-    bugs already.
 
 ## Testing practice
 

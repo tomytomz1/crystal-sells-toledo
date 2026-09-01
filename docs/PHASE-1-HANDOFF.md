@@ -1,8 +1,8 @@
 # crystalsellstoledo.com — Phase 1 Handoff
 
 Paste-ready context for another assistant. Everything below reflects the repo as
-of **`6286ab3`**, the most recent commit to change production code (the HubSpot
-timeline-activity pass), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
+of **`7be33a1`**, the most recent commit to change production code (Google
+Analytics 4), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
 and merged to `main`, which is what Vercel deploys.
 
 > **CRM: HubSpot.** Leads are delivered to HubSpot Contacts. Zoho was the
@@ -176,17 +176,12 @@ Already done. A HubSpot private-app access token is set in Vercel as
 ```
 crm.objects.contacts.read
 crm.objects.contacts.write
-crm.objects.notes.write      <- REQUIRED, see below
 ```
 
-`crm.objects.notes.write` is what lets each submission appear as its own
-timestamped activity on the contact's timeline. **Without it every submission
-fails with 502** — deliberately, because a contact with no enquiry attached
-looks fine and is worthless.
-
-Still no schema scope and no properties API: the integration writes only
-standard, default HubSpot properties. A static check fails the build if the
-properties/schema API appears.
+This is deliberate least privilege and **no further scope is required**. The
+integration is built to live inside those two, which is why it uses no Notes
+API, no engagements API and no properties/schema API — a static check fails the
+build if any of those appear.
 
 ### Step 2 — Set Vercel environment variables
 
@@ -273,50 +268,11 @@ schema scope is needed.
 | `firstname` | form | max 40 |
 | `lastname` | form | max 80 |
 | `phone` | form, normalised | max 30, **omitted when blank** |
-| `address` | property address | max 200, **omitted when blank** |
-| `message` | short summary of the LATEST enquiry | replaced each time |
+| `message` | the 23-row enquiry block below | everything else lives here |
 
-`phone` and `address` are omitted rather than sent empty because an empty string
-on an update blanks what HubSpot already holds — a visitor who gave a phone or an
-address once and not the second time would lose it.
-
-### The timeline activity — where the full enquiry lives
-
-Every submission creates its own Note, associated to the contact:
-
-```json
-POST /crm/v3/objects/notes
-{
-  "properties": {
-    "hs_timestamp": "2026-09-01T12:00:00.000Z",
-    "hs_note_body": "FORM: home_value\nPROPERTY ADDRESS: ...\n(all 23 rows)"
-  },
-  "associations": [{
-    "to": { "id": "<contactId>" },
-    "types": [{ "associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 202 }]
-  }]
-}
-```
-
-`202` is HubSpot's note-to-contact association type. `hs_timestamp` is required
-and decides where the note sits on the timeline. One contact, one note per
-submission: two submissions from the same email give one contact and **two**
-distinct activities.
-
-### What `message` holds, and why it is not the full block
-
-`message` carries a **short summary of the latest enquiry only** — form type,
-property address, timeline, condition, topic and the visitor's own words — and
-is **replaced** on every submission.
-
-It used to accumulate every enquiry, separated by markers. That was right when
-there was no notes scope and it was the only durable store. It is wrong now: the
-timeline holds every submission in full and timestamped, so an append-only blob
-in a sidebar property is a second, worse copy of the same history — growing
-without bound and unreadable in the field HubSpot renders it in.
-
-Both views are generated from one row list in `api/_lib/description.mjs`, so the
-summary and the note cannot drift apart.
+`phone` is omitted rather than sent empty because an empty string on an update
+would blank a number HubSpot already holds — a visitor who gave a phone once and
+not the second time would lose it.
 
 ### Why `message`
 
@@ -404,37 +360,14 @@ submissions from the same address.
 | 5xx | `HUBSPOT_<stage>_SERVER_<status>` | 502 + recovery panel |
 | 200 with an unusable body | `HUBSPOT_<stage>_MALFORMED_RESPONSE` | 502 + recovery panel |
 | 400 rejecting `message` | `HUBSPOT_DETAIL_PROPERTY_UNAVAILABLE` | 502 + recovery panel |
-| 403 on the note | `HUBSPOT_NOTES_SCOPE_MISSING` | 502 + recovery panel |
-| note created but unassociated | `HUBSPOT_NOTE_NOT_ASSOCIATED` | 502 + recovery panel |
-| any other note failure | `HUBSPOT_NOTE_*` | 502 + recovery panel |
 
-`<stage>` is `SEARCH`, `CREATE`, `UPDATE` or `NOTE`. **No HubSpot response body is ever
+`<stage>` is `SEARCH`, `CREATE` or `UPDATE`. **No HubSpot response body is ever
 attached to a thrown error** — HubSpot echoes submitted values back in validation
 errors, so a body pasted into an Error would put lead PII into the logs.
 
 The `message`-rejected case is deliberately fatal. Saving the name and dropping
 the address, the timeline and the message would hand Crystal a contact with no
 enquiry attached and no sign anything was missing.
-
-### Partial writes — what is actually guaranteed
-
-There is **no transaction across two HubSpot objects.** The contact is written
-first (the note needs its id), then the note. If the contact succeeds and the
-note fails:
-
-- HubSpot holds the contact, updated: name, email, phone, address and the
-  `message` summary
-- HubSpot holds **no activity** for that submission
-- `/api/lead` returns **502** and the visitor sees the recovery panel, so nobody
-  is told their enquiry landed when the enquiry itself did not
-
-A resubmit finds the same contact by email and updates it — **never a duplicate
-contact** — and writes a fresh note. Because every submission carries its own
-`submission_id`, a resubmit is a genuinely distinct submission, and two notes is
-the honest record of two attempts rather than something to deduplicate away.
-
-HubSpot offers no idempotency key on note creation, so at-least-once is the real
-guarantee. That is stated rather than papered over.
 
 ### The Zoho mapping (dormant)
 
@@ -468,28 +401,6 @@ deploy.
 Setup, key restriction and live verification are in
 `docs/updates/2026-09-01-address-autocomplete.md` section 7. **It has never been
 run against the live Google API** — every test stubs Google.
-
----
-
-## 4c. Post-submission success state
-
-A successful submission **replaces the form with a persistent success panel** in
-the same region. It does not redirect and does not reset back to step 1.
-
-The panel ships in the shared partial, so the homepage and `/home-value` cannot
-diverge. Focus moves to its heading, and the panel is scrolled into view when the
-swap leaves it above the fold — a visitor submits from the bottom of a tall
-step 2, so the short panel replacing it usually lands off-screen.
-
-Previously the form was `reset()` on success, which collapsed step 2 back to
-step 1, shrank the document, let the browser clamp the scroll position, and left
-the visitor mid-page — **with the confirmation itself hidden**, because
-`.form-status` lives inside step 2.
-
-`[hidden]` is now enforced globally with `!important`: the UA rule is normal
-specificity, so any class setting an explicit `display` silently defeats it.
-That had already caused a step to render while hidden and the success panel to
-show before it was earned.
 
 ---
 
@@ -563,9 +474,7 @@ These were the result of a compliance review. Breaking them has legal consequenc
 | Item | Status |
 |---|---|
 | **`crm.objects.notes.write` scope** | **CONFIRMED UNAVAILABLE** in the Service Key scope picker. |
-| Timeline activity | Decision made: use the HubSpot **Forms Submission API**. See `docs/updates/2026-09-01-timeline-architecture-decision.md`. Needs a form GUID from Tomas. |
-| Timeline activity | Written and tested, **not deployed**. See `docs/updates/2026-09-01-hubspot-timeline-activity.md`. |
-| **HubSpot timeline verification** | **NOT DONE.** The contact write is proven live; the activity is not. |
+| Timeline activity | **NOT SHIPPED.** Decision made: use the HubSpot **Forms Submission API**. See `docs/updates/2026-09-01-timeline-architecture-decision.md`. Needs a form GUID from Tomas. |
 | HubSpot `message` property | Assumed present (it is a HubSpot default). Confirm in the portal — section 3 step 3. |
 | Zoho | Dormant. Code retained as a rollback path; env vars no longer read. |
 | Mailbox | `crystal@crystalsellstoledo.com` must exist |

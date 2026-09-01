@@ -375,12 +375,7 @@
    * The form is HIDDEN, not reset: a reset would collapse step 2 back to
    * step 1, shrink the document, and let the browser clamp the scroll
    * position - which is what previously dumped the visitor mid-page with no
-   * confirmation in sight.
-   *
-   * The panel is shorter than the completed form, so the document still
-   * shrinks. The scroll position is corrected by the exact difference, which
-   * keeps the region visually anchored where the form was rather than
-   * letting the page jump under the visitor.
+   * confirmation in sight, since .form-status lives inside step 2.
    *
    * Returns false when this form has no panel, so the caller can fall back.
    */
@@ -390,7 +385,6 @@
     if (!panel) return false;
 
     var before = form.getBoundingClientRect().top;
-
     form.hidden = true;
     panel.hidden = false;
 

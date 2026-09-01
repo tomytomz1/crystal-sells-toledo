@@ -433,28 +433,17 @@ else {
     fail("api/_lib/hubspot.mjs",
       `DETAIL_PROPERTY is "${prop[1]}" — only the standard writable property "message" is confirmed`);
 
-  /* Every submission must become its own timeline activity. */
-  if (!/\/crm\/v3\/objects\/notes/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs",
-      "does not create a timeline note — a contact with no activity hides the enquiry");
-  if (!/associationTypeId:\s*NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "the note is not associated to the contact");
-  const assoc = /NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID = (\d+)/.exec(hubspotSrc);
-  if (!assoc) fail("api/_lib/hubspot.mjs", "no note-to-contact association type id");
-  else if (assoc[1] !== "202")
-    fail("api/_lib/hubspot.mjs",
-      `note-to-contact association type id is ${assoc[1]} — HubSpot defines 202`);
-
-  /* The note is the record. Swallowing its failure would report success for
-     a contact carrying no enquiry at all. */
-  if (/logError\("hubspot\.note[^)]*\)[\s\S]{0,200}?\/\* best.effort/i.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "the note failure is treated as best-effort");
-  if (!/const note = await createNote/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "note creation is not awaited in the delivery path");
-
-  /* Still no schema scope. */
+  /* Scope budget: no Notes API, no properties/schema API. */
+  if (/\/crm\/v3\/objects\/notes|\/engagements\//.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "uses the Notes/engagements API — this token has no notes scope");
   if (/\/crm\/v3\/properties\//.test(hubspotSrc))
     fail("api/_lib/hubspot.mjs", "uses the properties API — this token has no schema scope");
+
+  /* Dedupe must exist, or repeat submissions pile up duplicate contacts. */
+  if (!/\/crm\/v3\/objects\/contacts\/search/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no email lookup — repeat submissions would duplicate contacts");
+  if (!/409/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no 409 conflict handling — a search-index lag would duplicate or fail");
 
   /* The seller's address must reach HubSpot's standard visible field, and
      must never be sent blank (that would erase what HubSpot already holds). */
@@ -466,12 +455,6 @@ else {
   if (!/if \(lead\.phone\) props\.phone/.test(hubspotSrc))
     fail("api/_lib/hubspot.mjs",
       "phone is sent unconditionally — a blank would erase the stored phone");
-
-  /* Dedupe must exist, or repeat submissions pile up duplicate contacts. */
-  if (!/\/crm\/v3\/objects\/contacts\/search/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "no email lookup — repeat submissions would duplicate contacts");
-  if (!/409/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "no 409 conflict handling — a search-index lag would duplicate or fail");
 
   /* The enquiry detail must never be quietly dropped to make a write succeed. */
   if (!/detailPropertyRejected/.test(hubspotSrc))

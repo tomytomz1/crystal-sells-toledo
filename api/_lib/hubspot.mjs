@@ -6,41 +6,39 @@
  * a thrown Error here (HubSpot echoes submitted values back in validation
  * errors, so a body can carry both PII and the offending payload).
  *
- * Scope budget - a 2026 HubSpot SERVICE KEY with exactly:
+ * Scope budget: this integration is deliberately least-privilege and has only
  *   crm.objects.contacts.read
  *   crm.objects.contacts.write
- *   crm.objects.notes.write     <- REQUIRED for the timeline activity
- *
- * Every submission becomes its own timestamped Note on the contact's
- * timeline. That is the record. The contact's `message` property carries a
- * short summary of the LATEST enquiry only, for the sidebar.
+ * There is no notes scope, so the Zoho design - a Lead plus one Note per
+ * submission - is not available. See DETAIL_PROPERTY below for what replaces it.
  */
 
-import { buildDescription, buildSummary } from "./description.mjs";
+import { buildDescription } from "./description.mjs";
 import { log, logError } from "./log.mjs";
 
 const API = () => process.env.HUBSPOT_API_BASE || "https://api.hubapi.com";
 const TIMEOUT_MS = 8000;
 
-/* The contact's at-a-glance summary field.
+/* Where the full enquiry goes.
  *
  * `message` is a HubSpot DEFAULT contact property - present in every portal,
  * multi-line text, writable through the CRM API - documented by HubSpot as
  * being "for any message or comments the contact may want to leave on a
- * form". It is NOT invented and NOT custom, so it needs no schema scope.
+ * form". That is exactly this payload. It is NOT invented, and it is NOT a
+ * custom property, so it needs no schema scope to write.
  *
- * It now holds a SHORT summary of the latest enquiry and is REPLACED on each
- * submission. The durable, complete, per-submission record is the timeline
- * note; see createNote below. */
+ * Everything the CRM cannot hold in a standard field - form type, property
+ * address, timeline, condition, every UTM and click ID, first-touch time and
+ * the submission ID - is written here as the same deterministic block the
+ * Zoho integration used. Nothing is dropped. */
 export const DETAIL_PROPERTY = "message";
 
-/* HubSpot caps a property value at 65,536 characters / 64 KB, and caps
-   hs_note_body at 65,536 characters. Bytes, with headroom, because a
-   character count does not bound UTF-8. */
+/* HubSpot caps a property value at 65,536 characters / 64 KB. The cap here is
+   on BYTES with headroom, because a character count does not bound UTF-8. */
 export const DETAIL_MAX_BYTES = 60000;
 
-/* note -> contact. HUBSPOT_DEFINED association type for a note on a contact. */
-export const NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID = 202;
+const SEPARATOR = "----- earlier submission -----";
+const TRIM_NOTICE = "----- older submissions trimmed to fit the HubSpot property limit -----";
 
 /** True when everything needed to reach HubSpot is present. Only the token. */
 export function isConfigured() {
@@ -49,11 +47,42 @@ export function isConfigured() {
 
 const bytes = (s) => Buffer.byteLength(s, "utf8");
 
-/** Defensive byte cap. Validation already bounds every field far below this. */
-function capBytes(text) {
-  if (bytes(text) <= DETAIL_MAX_BYTES) return text;
-  return Buffer.from(text, "utf8").subarray(0, DETAIL_MAX_BYTES).toString("utf8")
-    .replace(/\uFFFD+$/, "");
+/**
+ * Merge this submission's block with whatever the contact already carries.
+ *
+ * Without a notes scope an update would otherwise OVERWRITE the previous
+ * enquiry - so a returning seller's first message would vanish the moment
+ * they submitted a second. The Zoho build prevented that with one Note per
+ * submission; this is the equivalent, kept inside the single writable
+ * property available to us. Newest first, oldest trimmed only when the value
+ * would exceed what HubSpot accepts, and never trimmed silently.
+ */
+export function composeDetail(newBlock, existing = "") {
+  const prior = typeof existing === "string" ? existing.trim() : "";
+  const blocks = prior
+    ? [newBlock, ...prior.split(SEPARATOR).map((b) => b.trim()).filter(Boolean)]
+    : [newBlock];
+
+  const join = (list, trimmed) =>
+    list.join("\n\n" + SEPARATOR + "\n\n") + (trimmed ? "\n\n" + TRIM_NOTICE : "");
+
+  const kept = blocks.slice();
+  let trimmed = false;
+  while (kept.length > 1 && bytes(join(kept, trimmed)) > DETAIL_MAX_BYTES) {
+    kept.pop();          // drop the OLDEST, never the submission in hand
+    trimmed = true;
+  }
+
+  let out = join(kept, trimmed);
+  if (bytes(out) > DETAIL_MAX_BYTES) {
+    /* Defensive only: validate.mjs caps every field, so one block cannot
+       reach 60 KB. Cutting on a byte boundary can split a multi-byte
+       character, hence the replacement-char trim. */
+    const room = DETAIL_MAX_BYTES - bytes("\n" + TRIM_NOTICE);
+    out = Buffer.from(out, "utf8").subarray(0, room).toString("utf8")
+      .replace(/�+$/, "") + "\n" + TRIM_NOTICE;
+  }
+  return out;
 }
 
 /**
@@ -64,38 +93,22 @@ function capBytes(text) {
  * string would blank a number HubSpot already holds, so a visitor who gave a
  * phone once and not the second time would lose it.
  */
-export function toContactProperties(payload) {
+export function toContactProperties(payload, detail) {
   const { lead } = payload;
   const props = {
     email: lead.email,
     firstname: lead.first_name,
     lastname: lead.last_name,
   };
-  /* Blank values are OMITTED, never sent as "". An empty string on a PATCH
-     blanks what HubSpot already holds, so a visitor who gave a phone or an
-     address once and not the second time would lose it. */
   if (lead.phone) props.phone = lead.phone;
+  /* The seller's property address belongs in HubSpot's standard, visible
+     Street Address field, not only inside the enquiry text. Omitted when
+     blank for the same reason as phone: an empty string on a PATCH blanks
+     what HubSpot already holds, so a seller who gave an address on the
+     home-value form and later used the contact form would lose it. */
   if (lead.property_address) props.address = lead.property_address;
-  props[DETAIL_PROPERTY] = capBytes(buildSummary(payload));
+  props[DETAIL_PROPERTY] = detail;
   return props;
-}
-
-/** The exact Note body and association sent to HubSpot. */
-export function toNoteRecord(payload, contactId) {
-  return {
-    properties: {
-      /* Required by HubSpot; it decides where the note sits on the timeline. */
-      hs_timestamp: payload.meta.submitted_at,
-      hs_note_body: capBytes(buildDescription(payload)),
-    },
-    associations: [{
-      to: { id: String(contactId) },
-      types: [{
-        associationCategory: "HUBSPOT_DEFINED",
-        associationTypeId: NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID,
-      }],
-    }],
-  };
 }
 
 async function fetchWithTimeout(url, options = {}) {
@@ -178,7 +191,7 @@ export async function findContactByEmail(email) {
     method: "POST",
     body: JSON.stringify({
       filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }],
-      properties: ["email"],
+      properties: ["email", DETAIL_PROPERTY],
       limit: 1,
     }),
   });
@@ -188,7 +201,20 @@ export async function findContactByEmail(email) {
   const hit = json.results[0];
   if (!hit) return null;
   if (!hit.id) throw new Error("HUBSPOT_SEARCH_MALFORMED_RESPONSE");
-  return { id: String(hit.id) };
+  return { id: String(hit.id), detail: hit.properties?.[DETAIL_PROPERTY] || "" };
+}
+
+/** Read one contact's stored enquiry block, so an update can append to it. */
+async function readDetail(ref, byEmail) {
+  try {
+    const res = await hubspotFetch(contactUrl(ref, { byEmail, properties: [DETAIL_PROPERTY] }));
+    if (!res.ok) return "";
+    const json = await readJson(res);
+    return json?.properties?.[DETAIL_PROPERTY] || "";
+  } catch {
+    /* Best effort. Failing to read history must not lose the enquiry in hand. */
+    return "";
+  }
 }
 
 async function createContact(props) {
@@ -220,95 +246,42 @@ async function updateContact(ref, props, byEmail = false) {
   return { id: String(json.id), action: "update" };
 }
 
-/* A missing notes scope is the one failure whose remedy is a person clicking
-   something in HubSpot, so it is detected and named rather than left as a
-   generic 403. */
-function isNotesScopeFailure(status, json) {
-  if (status !== 403) return false;
-  let blob = String(json?.message || "") + " " + String(json?.category || "");
-  return /scope|permission|forbidden/i.test(blob) || status === 403;
-}
-
 /**
- * Create the timeline activity for one submission and associate it to the
- * contact in the same call.
+ * Deliver one lead as a HubSpot contact.
  *
- * This is the durable record of what the visitor actually said. If it fails,
- * the lead fails - see createLead.
- */
-async function createNote(payload, contactId) {
-  const res = await hubspotFetch("/crm/v3/objects/notes", {
-    method: "POST",
-    body: JSON.stringify(toNoteRecord(payload, contactId)),
-  });
-  const json = await readJson(res);
-
-  if (!res.ok) {
-    if (isNotesScopeFailure(res.status, json)) {
-      const err = new Error("HUBSPOT_NOTES_SCOPE_MISSING");
-      err.notesScopeMissing = true;
-      throw err;
-    }
-    throw hubspotError("NOTE", res.status, json);
-  }
-  if (!json?.id) throw new Error("HUBSPOT_NOTE_MALFORMED_RESPONSE");
-
-  /* HubSpot echoes the associations it actually made. An unassociated note is
-     invisible on the contact's timeline, which is the whole point of writing
-     it, so a note that came back unassociated is a failure, not a success. */
-  const associated = Array.isArray(json.associations?.contacts?.results)
-    ? json.associations.contacts.results.some((r) => String(r.id) === String(contactId))
-    : null;
-  if (associated === false) {
-    const err = new Error("HUBSPOT_NOTE_NOT_ASSOCIATED");
-    err.noteUnassociated = true;
-    throw err;
-  }
-
-  return { id: String(json.id), associated };
-}
-
-/**
- * Deliver one lead: a contact, then a timeline note.
+ * Search by email, then update or create. HubSpot itself enforces email
+ * uniqueness on contacts, so the create path can still come back 409 when the
+ * search index has not caught up with a very recent write - that conflict is
+ * resolved into an update rather than surfaced, which is what keeps a repeat
+ * submission from ever becoming a second contact.
  *
- * Contact first, because the note has to be associated to its id. Search by
- * email, then update or create. HubSpot itself enforces email uniqueness on
- * contacts, so the create path can still come back 409 when the search index
- * has not caught up with a very recent write - that conflict is resolved into
- * an update, which is what keeps a repeat submission from ever becoming a
- * second contact.
- *
- * PARTIAL WRITES ARE POSSIBLE AND ARE NOT HIDDEN. There is no transaction
- * across two HubSpot objects. If the contact write succeeds and the note
- * fails, HubSpot is left holding the contact - name, email, phone, address
- * and the `message` summary - with no timeline activity, and this throws, so
- * the visitor sees the recovery panel rather than a false success. A resubmit
- * finds the same contact and updates it (never a duplicate) and writes a
- * fresh note. Because every submission carries its own submission id, a
- * resubmit is a genuinely distinct submission and two notes is the honest
- * record of two attempts.
- *
- * Throws on any failure. Nothing here reports success it did not get.
+ * Throws on any failure. The caller turns that into a 502 and the visitor
+ * sees the recovery panel; nothing here ever reports success it did not get.
  */
 export async function createLead(payload) {
   const sid = payload.meta.submission_id;
   const email = payload.lead.email;
+  const block = buildDescription(payload);
 
   try {
     const found = await findContactByEmail(email);
     let result;
 
     if (found) {
-      result = await updateContact(found.id, toContactProperties(payload));
+      result = await updateContact(found.id, toContactProperties(payload, composeDetail(block, found.detail)));
     } else {
       try {
-        result = await createContact(toContactProperties(payload));
+        result = await createContact(toContactProperties(payload, composeDetail(block, "")));
       } catch (err) {
         if (!err.conflict) throw err;
+
+        /* The contact existed after all - search lag, or two submissions in
+           flight at once. Fold into an update so no duplicate is created. */
         const ref = err.conflictId || email;
         const byEmail = !err.conflictId;
         log("hubspot.create_conflict_resolved", { submission_id: sid, by_email: byEmail });
-        result = await updateContact(ref, toContactProperties(payload), byEmail);
+        const prior = await readDetail(ref, byEmail);
+        result = await updateContact(ref, toContactProperties(payload, composeDetail(block, prior)), byEmail);
       }
     }
 
@@ -317,41 +290,18 @@ export async function createLead(payload) {
       action: result.action,
       has_id: Boolean(result.id),
     });
-
-    /* The enquiry itself. Deliberately NOT best-effort: a contact with no
-       activity behind it is a name with no enquiry attached, and looks fine. */
-    const note = await createNote(payload, result.id);
-    log("hubspot.note.created", {
-      submission_id: sid,
-      contact_action: result.action,
-      associated: note.associated,
-    });
-
-    return { id: result.id, action: result.action, noteId: note.id };
+    return result;
   } catch (err) {
     if (err.detailPropertyRejected) {
+      /* Deliberately fatal. Saving the name and dropping the address, the
+         timeline and the message would hand Crystal a contact with no
+         enquiry attached and no sign anything was missing. */
       logError("hubspot.detail_property_unavailable", err, {
         submission_id: sid,
         property: DETAIL_PROPERTY,
         action_required:
           "restore the default contact property `message` in HubSpot, or provision an " +
           "equivalent writable text property and map DETAIL_PROPERTY to it",
-      });
-    }
-    if (err.notesScopeMissing) {
-      logError("hubspot.notes_scope_missing", err, {
-        submission_id: sid,
-        action_required:
-          "add the scope crm.objects.notes.write to the HubSpot service key " +
-          "(Settings > Integrations > Service keys), then redeploy",
-      });
-    }
-    if (err.noteUnassociated) {
-      logError("hubspot.note_not_associated", err, {
-        submission_id: sid,
-        action_required:
-          "the note was created but not linked to the contact - check the " +
-          "note-to-contact association type id",
       });
     }
     throw err;
