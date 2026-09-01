@@ -102,6 +102,9 @@ p:last-child { margin-bottom: 0; }
 .wrap--narrow { max-width: var(--wrap-narrow); }
 .section { padding-block: var(--section-y); }
 .section--tight { padding-block: clamp(3rem, 6vw, 5rem); }
+/* The buyer pathway is one sentence. It was carrying a full section's worth
+   of air above and below it. */
+.section--buyer { padding-block: clamp(2rem, 4vw, 3.25rem); }
 .section--cream { background: var(--cream-dk); }
 .section--ink { background: var(--ink); color: #cfc9bf; }
 .section--ink h2, .section--ink h3 { color: var(--white); }
@@ -363,7 +366,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .hero--capture h1 {
   font-size: clamp(1.95rem, 6.4vw, 3.35rem);
   line-height: 1.1;
-  max-width: 17ch;
+  /* 17ch forced "for?" onto a line of its own at desktop widths. The
+     measure is opened up and the browser is asked to even the lines out,
+     so the break lands after "Perrysburg" instead of before the last word.
+     The type size is unchanged. */
+  max-width: 21ch;
+  text-wrap: balance;
   margin-bottom: .55em;
 }
 .hero--capture .hero__lede {
@@ -417,6 +425,10 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 /* Comfortable touch targets; taller than the 48px floor. */
 .hero .hv-form .field input,
 .hero .hv-form .btn { min-height: 3.4rem; }
+
+/* Step 2 runs long inside the hero; the note field does not need to be the
+   tallest thing on the screen to invite a sentence or two. */
+.hero .hv-form .field textarea { min-height: 6.25rem; }
 
 .hv-form__micro {
   margin-top: .85rem;
@@ -584,7 +596,11 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 @media (max-width: 620px) { .form__row { grid-template-columns: 1fr; } }
 .field { display: grid; gap: .45rem; }
 .field > label {
-  font-size: .69rem; font-weight: 600; letter-spacing: .16em;
+  /* Was .69rem (about 11px). Uppercase, letterspaced text loses legibility
+     far faster than sentence case as it shrinks, so the smallest labels on
+     the page were the hardest to read. Slightly larger, slightly tighter
+     tracking - roughly the same footprint, easier to scan. */
+  font-size: .75rem; font-weight: 600; letter-spacing: .13em;
   text-transform: uppercase; color: var(--muted);
 }
 .field .req { color: var(--gold-dk); }
@@ -599,9 +615,26 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236d665c' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 1.05rem center; padding-right: 2.75rem;
 }
+/* Focus.
+   `outline: none` here previously suppressed the global :focus-visible ring
+   for every input, select and textarea on the site, leaving a 14% gold glow
+   as the only indicator - far weaker than the ring buttons and nav links
+   get. The ring is now kept; the border and glow reinforce it rather than
+   replacing it. */
 .field input:focus, .field select:focus, .field textarea:focus {
-  outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(184,134,59,.14);
+  border-color: var(--gold-dk);
+  box-shadow: 0 0 0 3px rgba(184, 134, 59, .3);
 }
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  outline: 2px solid var(--gold-dk);
+  outline-offset: 2px;
+}
+/* On the dark hero the fields sit on near-black; the lighter gold reads. */
+.hero .hv-form .field input:focus-visible,
+.hero .hv-form .field select:focus-visible,
+.hero .hv-form .field textarea:focus-visible { outline-color: var(--gold-lt); }
 .field input:user-invalid, .field textarea:user-invalid { border-color: #b4483c; }
 .form__note {
   /* Was .8rem (12.8px) in --muted-lt, about 3:1 on white - too weak for
@@ -617,7 +650,7 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 
 /* Progressive form step indicator */
 .form__step {
-  font-family: var(--sans); font-size: .68rem; font-weight: 600;
+  font-family: var(--sans); font-size: .74rem; font-weight: 600;
   letter-spacing: .16em; text-transform: uppercase; color: var(--gold-dk);
   margin: 0 0 1.25rem;
 }
@@ -954,6 +987,28 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   /* Slightly wider left: the seller action outranks the explanation. */
   .hero__grid { grid-template-columns: 1.04fr .96fr; gap: clamp(3rem, 5vw, 5rem); align-items: start; }
   .hero--capture .hero__content { max-width: 36rem; }
+
+  /* Step 2 composition.
+     Step 2 is roughly twice the height of step 1, so the panel - sized to
+     its own content and pinned to the top of the row - left a large void
+     beneath it. Two presentational changes, no markup or behaviour touched:
+     the left column takes more of the width so the form is wider and
+     shorter, and the panel tracks the viewport instead of scrolling away
+     from the fields it is there to explain.
+
+     :has() degrades cleanly: where it is unsupported the hero simply keeps
+     its step 1 proportions, which is today's behaviour. */
+  .proof { position: sticky; top: 7rem; }
+
+  .hero__grid:has([data-step="2"]:not([hidden])) {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr);
+  }
+  .hero__grid:has([data-step="2"]:not([hidden])) .hero__content { max-width: none; }
+  .hero__grid:has([data-step="2"]:not([hidden])) .hv-form { max-width: 46rem; }
+  /* Centred rather than pinned to the top of a column twice its height:
+     the leftover space reads as framing instead of as one hole under the
+     panel. */
+  .hero__grid:has([data-step="2"]:not([hidden])) .proof { align-self: center; }
 }
 
 /* --- hero proof panel --------------------------------------------------
@@ -1023,26 +1078,46 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 .assure__d { margin: .45rem 0 0; font-size: .95rem; line-height: 1.55; color: var(--muted); }
 
-/* --- reasoning rows: what a human valuation weighs --------------------- */
-.reasons { margin-top: clamp(.5rem, 2vw, 1rem); }
-.reasons__row {
-  display: grid;
-  gap: .35rem clamp(1.5rem, 4vw, 3.5rem);
-  padding-block: clamp(1.15rem, 2.2vw, 1.6rem);
+/* --- the human valuation: intro beside three grouped points ------------
+   Replaces a five-row full-width stack that repeated the hero panel's
+   rhythm almost line for line and ran to roughly a thousand pixels. The
+   intro column carries the argument and the call to action; the points
+   column carries the three distinctions, with one hairline each instead of
+   six full-bleed rules. */
+.valuation { display: grid; gap: clamp(2rem, 4vw, 3rem); }
+@media (min-width: 900px) {
+  .valuation {
+    grid-template-columns: minmax(0, 21rem) minmax(0, 1fr);
+    gap: clamp(3rem, 6vw, 5.5rem);
+    align-items: start;
+  }
+}
+.valuation__intro h2 { font-size: clamp(1.7rem, 3.1vw, 2.3rem); margin-bottom: .5em; }
+.valuation__intro .lede { font-size: clamp(1rem, 1.4vw, 1.1rem); margin-bottom: 0; }
+.valuation__cta { margin-top: clamp(1.5rem, 3vw, 2rem); }
+
+.vpoint {
+  padding-block: clamp(1.05rem, 2vw, 1.45rem);
   border-top: 1px solid var(--line);
 }
-.reasons__row:last-child { border-bottom: 1px solid var(--line); }
-@media (min-width: 720px) {
-  .reasons__row { grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); align-items: baseline; }
+.vpoint:first-child { padding-top: 0; border-top: 0; }
+@media (min-width: 900px) {
+  .vpoint:first-child { padding-top: .35rem; }
 }
-.reasons__t { margin: 0; font-family: var(--serif); font-size: 1.1rem; font-weight: 500; color: var(--ink); }
-.reasons__d { margin: 0; color: var(--muted); font-size: .97rem; line-height: 1.65; }
+.vpoint__t {
+  margin: 0 0 .3rem;
+  font-family: var(--serif);
+  font-size: 1.12rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+.vpoint__d { margin: 0; color: var(--muted); font-size: .97rem; line-height: 1.65; max-width: 60ch; }
 
 /* --- method: 01 / 02 / 03 as an editorial sequence, not cards ---------- */
 .method__item {
   display: grid;
   gap: .6rem clamp(1.5rem, 4vw, 3.5rem);
-  padding-block: clamp(1.75rem, 3.5vw, 2.75rem);
+  padding-block: clamp(1.35rem, 2.5vw, 2rem);
   border-top: 1px solid var(--line);
 }
 .method__item:last-child { border-bottom: 1px solid var(--line); }
@@ -1073,32 +1148,38 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .desk { margin-top: clamp(.5rem, 2vw, 1rem); }
 .desk__item {
   display: grid;
-  gap: .35rem clamp(1.25rem, 3vw, 2.5rem);
-  padding-block: clamp(1.4rem, 3vw, 2.1rem);
+  gap: .35rem clamp(1.5rem, 4vw, 3.5rem);
+  padding-block: clamp(1.2rem, 2.4vw, 1.7rem);
   border-top: 1px solid var(--line);
   transition: background .25s var(--ease);
 }
 .desk__item:last-of-type { border-bottom: 1px solid var(--line); }
 @media (min-width: 780px) {
-  .desk__item { grid-template-columns: 3rem minmax(0, 18rem) minmax(0, 1fr); align-items: baseline; }
-}
-.desk__n {
-  font-size: .76rem;
-  letter-spacing: .14em;
-  font-variant-numeric: tabular-nums;
-  color: var(--gold-dk);
+  /* Unnumbered: these are four places, not four steps. The 01/02/03 rhythm
+     belongs to the listing sequence above, and running it here read as the
+     same component twice. */
+  .desk__item { grid-template-columns: minmax(0, 18rem) minmax(0, 1fr); align-items: baseline; }
 }
 .desk__name {
   margin: 0;
   font-family: var(--serif);
-  font-size: clamp(1.3rem, 2.4vw, 1.75rem);
+  font-size: clamp(1.25rem, 2.2vw, 1.6rem);
   font-weight: 500;
   color: var(--ink);
-  transition: color .2s var(--ease);
+  /* A link affordance at rest. Without one the rows read as headings and
+     nothing invited the click until the pointer was already on them. */
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: .18em;
+  transition: color .2s var(--ease), text-decoration-color .2s var(--ease);
 }
 .desk__note { margin: 0; color: var(--muted); font-size: .96rem; line-height: 1.6; }
 a.desk__item:hover .desk__name,
-a.desk__item:focus-visible .desk__name { color: var(--gold-dk); }
+a.desk__item:focus-visible .desk__name {
+  color: var(--gold-dk);
+  text-decoration-color: var(--gold);
+}
 a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
 .desk__served {
@@ -1117,7 +1198,10 @@ a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px
   font-size: 1rem;
   line-height: 1.7;
   color: var(--muted);
-  max-width: var(--measure);
+  /* 62ch broke this one sentence one word short of its end, leaving the
+     link's last word and arrow stranded on a line of their own. */
+  max-width: min(100%, 44rem);
+  text-wrap: pretty;
 }
 .buyer-note a {
   color: var(--ink);
@@ -1126,3 +1210,5 @@ a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px
   transition: border-color .2s var(--ease);
 }
 .buyer-note a:hover { border-color: var(--gold-dk); }
+/* Keeps the trailing arrow bound to the last word of the link. */
+.nowrap { white-space: nowrap; }
