@@ -854,7 +854,9 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 /* =============================================================
    Post-submission success panel
    =============================================================
-   Replaces the form in place after the server accepts a lead. */
+   Replaces the form in place. Sized so the swap does not collapse the
+   region to nothing — a large height change is what let the browser clamp
+   the scroll and strand the visitor mid-page. */
 .form-region { position: relative; }
 
 .success-panel {
@@ -888,6 +890,8 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .success-panel__call { margin: 0; font-size: .95rem; }
 .success-panel__call a { font-weight: 600; }
 
+/* On the dark hero the panel is light-on-dark; on the light card it is
+   ink-on-cream. Same ancestor-selector approach as the form itself. */
 .hero .success-panel { color: #fff; }
 .hero .success-panel__lede { color: rgba(255, 255, 255, .86); }
 .hero .success-panel__call { color: rgba(255, 255, 255, .72); }

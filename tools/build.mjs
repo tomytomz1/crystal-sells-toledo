@@ -161,6 +161,45 @@ function csvMapsReady() { window.__csvMapsResolve(true); }
 if (mapsLoaderTag) console.log("  i Google Places autocomplete enabled");
 else console.log("  i no GOOGLE_MAPS_API_KEY - address field stays a plain text input");
 
+/* ---------------------------------------------------------------------
+   Google Analytics 4
+   ---------------------------------------------------------------------
+   A GA4 measurement ID is not a credential - it is public by design and
+   identifies the property. It is hardcoded here rather than kept in an
+   env var so the site needs no extra configuration step to work.
+
+   What IS gated is WHERE it runs. The tag is emitted only for a Vercel
+   PRODUCTION build. Preview deploys and local `npm run dev` emit nothing,
+   so test submissions and layout fiddling never land in the numbers
+   Crystal will judge her marketing by. Vercel sets VERCEL_ENV itself;
+   locally it is unset, which is why the default is off.
+
+   Set GA4_FORCE=1 to emit it anyway when verifying the tag itself.
+
+   assets/js/main.js already forwards every analytics event to gtag when
+   gtag exists, so cta_home_value_click, phone_click, lead_form_start,
+   lead_submit_success and the rest start reporting with no further work. */
+const GA4_ID = (process.env.GA4_MEASUREMENT_ID || "G-GFW8ER1Q85").trim();
+if (!/^G-[A-Z0-9]{6,12}$/.test(GA4_ID))
+  throw new Error("GA4 measurement ID is not plausible - refusing to emit it: " + GA4_ID);
+
+const GA4_ON = process.env.VERCEL_ENV === "production" || process.env.GA4_FORCE === "1";
+
+const analyticsTag = GA4_ON
+  ? `\n<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=${GA4_ID}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '${GA4_ID}');
+</script>`
+  : "";
+
+console.log(GA4_ON
+  ? `  i Google Analytics enabled (${GA4_ID})`
+  : "  i Google Analytics omitted - not a Vercel production build");
+
 const shell = partial("_shell");
 const pagesDir = join(ROOT, "src/pages");
 const built = [];
@@ -185,6 +224,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     js_v: ASSET_VERSIONS.js_v,
     heroImage: heroImageTag,
     mapsLoader: mapsLoaderTag,
+    analytics: analyticsTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",

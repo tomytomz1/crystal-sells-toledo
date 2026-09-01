@@ -284,6 +284,42 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (a !== b2) fail("site", `home_value field contract has drifted between / and /home-value:\n      / = ${a}\n      /home-value = ${b2}`);
 }
 
+/* --- Google Analytics 4 ------------------------------------------------ */
+{
+  const buildSrc = readFileSync(join(ROOT, "..", "tools/build.mjs"), "utf8");
+
+  /* The measurement ID is public, but WHERE it runs is not incidental:
+     preview deploys and local builds must not pollute the numbers. */
+  if (!/VERCEL_ENV === "production"/.test(buildSrc))
+    fail("tools/build.mjs", "the analytics tag is not limited to production builds");
+  if (!/\^G-\[A-Z0-9\]/.test(buildSrc))
+    fail("tools/build.mjs", "the GA4 measurement ID is not validated before being emitted");
+
+  for (const file of pages) {
+    const html = readFileSync(join(ROOT, file), "utf8");
+    const tags = (html.match(/googletagmanager\.com\/gtag\/js/g) || []).length;
+    /* Google is explicit: never more than one Google tag on a page. */
+    if (tags > 1) fail(file, `has ${tags} Google tags — a page must carry at most one`);
+    if (tags === 1) {
+      if (!/<script async src="https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=G-/.test(html))
+        fail(file, "the Google tag is not the documented async gtag.js snippet");
+      if (!/gtag\('config', 'G-/.test(html))
+        fail(file, "the Google tag loads but never configures a measurement ID");
+      /* A blocking tag in the head would cost the LCP the hero pass bought. */
+      if (/<script src="https:\/\/www\.googletagmanager\.com/.test(html))
+        fail(file, "the Google tag is render-blocking — it must be async");
+    }
+  }
+
+  /* Analytics must never become the reason an event exists. The site's own
+     event layer stays vendor-neutral and simply forwards when gtag is there. */
+  const mainJs = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
+  if (/googletagmanager|G-[A-Z0-9]{6,12}/.test(mainJs))
+    fail("assets/js/main.js", "hardcodes an analytics vendor — the build injects the tag");
+  if (!/typeof window\.gtag === "function"/.test(mainJs))
+    fail("assets/js/main.js", "no longer forwards events to gtag when present");
+}
+
 /* --- Google Places address autocomplete -------------------------------- */
 {
   const mainJs = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
@@ -397,17 +433,28 @@ else {
     fail("api/_lib/hubspot.mjs",
       `DETAIL_PROPERTY is "${prop[1]}" — only the standard writable property "message" is confirmed`);
 
-  /* Scope budget: no Notes API, no properties/schema API. */
-  if (/\/crm\/v3\/objects\/notes|\/engagements\//.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "uses the Notes/engagements API — this token has no notes scope");
+  /* Every submission must become its own timeline activity. */
+  if (!/\/crm\/v3\/objects\/notes/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs",
+      "does not create a timeline note — a contact with no activity hides the enquiry");
+  if (!/associationTypeId:\s*NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "the note is not associated to the contact");
+  const assoc = /NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID = (\d+)/.exec(hubspotSrc);
+  if (!assoc) fail("api/_lib/hubspot.mjs", "no note-to-contact association type id");
+  else if (assoc[1] !== "202")
+    fail("api/_lib/hubspot.mjs",
+      `note-to-contact association type id is ${assoc[1]} — HubSpot defines 202`);
+
+  /* The note is the record. Swallowing its failure would report success for
+     a contact carrying no enquiry at all. */
+  if (/logError\("hubspot\.note[^)]*\)[\s\S]{0,200}?\/\* best.effort/i.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "the note failure is treated as best-effort");
+  if (!/const note = await createNote/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "note creation is not awaited in the delivery path");
+
+  /* Still no schema scope. */
   if (/\/crm\/v3\/properties\//.test(hubspotSrc))
     fail("api/_lib/hubspot.mjs", "uses the properties API — this token has no schema scope");
-
-  /* Dedupe must exist, or repeat submissions pile up duplicate contacts. */
-  if (!/\/crm\/v3\/objects\/contacts\/search/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "no email lookup — repeat submissions would duplicate contacts");
-  if (!/409/.test(hubspotSrc))
-    fail("api/_lib/hubspot.mjs", "no 409 conflict handling — a search-index lag would duplicate or fail");
 
   /* The seller's address must reach HubSpot's standard visible field, and
      must never be sent blank (that would erase what HubSpot already holds). */
@@ -419,6 +466,12 @@ else {
   if (!/if \(lead\.phone\) props\.phone/.test(hubspotSrc))
     fail("api/_lib/hubspot.mjs",
       "phone is sent unconditionally — a blank would erase the stored phone");
+
+  /* Dedupe must exist, or repeat submissions pile up duplicate contacts. */
+  if (!/\/crm\/v3\/objects\/contacts\/search/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no email lookup — repeat submissions would duplicate contacts");
+  if (!/409/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no 409 conflict handling — a search-index lag would duplicate or fail");
 
   /* The enquiry detail must never be quietly dropped to make a write succeed. */
   if (!/detailPropertyRejected/.test(hubspotSrc))
