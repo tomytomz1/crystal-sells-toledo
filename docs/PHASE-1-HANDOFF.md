@@ -1,17 +1,17 @@
 # crystalsellstoledo.com — Phase 1 Handoff
 
-Paste-ready context for another assistant. Everything below reflects the repo as
-of **`08ac686`**, the most recent commit to change production code (the live UX closeout), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
-and merged to `main`, which is what Vercel deploys.
+Paste-ready context for another assistant. It describes the **current
+production state** of `main`, which is what Vercel deploys.
+
+It deliberately carries **no commit SHA**. Pinning one forced a second,
+self-referential commit after every production change just to update this line,
+and it went stale the moment anything else landed. Git history records the exact
+commits; the task report gives the production SHA.
 
 > **CRM: HubSpot.** Leads are delivered to HubSpot Contacts. Zoho was the
 > original target and its code is still in the repo, wired to nothing, kept as a
-> rollback path until HubSpot is proven with a live submission. Where this
+> rollback path. HubSpot delivery is now proven live. Where this
 > document describes Zoho it is describing that dormant fallback, and says so.
-
-Later commits on this branch may be documentation-only; this reference is
-deliberately pinned to the last code change so it does not go stale every time a
-note is written. Per-pass write-ups live in `docs/updates/`.
 
 ---
 
