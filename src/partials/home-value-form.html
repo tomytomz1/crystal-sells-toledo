@@ -14,6 +14,7 @@
      form[data-form]; initSteps() binds any [data-steps]. Nothing here is
      homepage-specific.
      ===================================================================== -->
+<div class="form-region" data-form-region>
 <form class="form hv-form" data-form data-form-type="home_value" data-steps="2"
       data-subject="Home valuation request" novalidate>
   <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
@@ -109,3 +110,22 @@
       you agree that Crystal may contact you about this request.</p>
   </div>
 </form>
+
+<!-- Success state.
+     Replaces the form in place rather than resetting it. Resetting a two-step
+     form on success collapsed a tall step 2 back to a short step 1, which
+     shrank the document, made the browser clamp the scroll position, and left
+     the visitor stranded mid-page - with the confirmation itself hidden,
+     because .form-status lives inside step 2.
+
+     Shipped in the SHARED partial so the homepage and /home-value cannot
+     drift. Focus moves to the heading, which is why it is tabbable. -->
+<div class="success-panel" data-form-success hidden>
+  <p class="success-panel__mark" aria-hidden="true">&check;</p>
+  <h2 class="success-panel__title" data-success-heading tabindex="-1">Your request is in</h2>
+  <p class="success-panel__lede">Crystal will personally review your property and follow up
+    with you shortly.</p>
+  <p class="success-panel__call">If you need to reach her sooner, call
+    <a href="tel:+14192454655">(419)&nbsp;245-4655</a>.</p>
+</div>
+</div>

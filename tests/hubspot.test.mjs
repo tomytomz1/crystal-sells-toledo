@@ -125,7 +125,7 @@ describe("Contact property mapping", () => {
   test("only the agreed standard properties are sent", () => {
     const props = toContactProperties(payloadOf(validHomeValue), "BLOCK");
     assert.deepEqual(Object.keys(props).sort(),
-      ["email", "firstname", "lastname", DETAIL_PROPERTY, "phone"].sort());
+      ["address", "email", "firstname", "lastname", DETAIL_PROPERTY, "phone"].sort());
   });
 
   test("identity fields map to HubSpot's internal names", () => {
@@ -134,6 +134,38 @@ describe("Contact property mapping", () => {
     assert.equal(props.firstname, "Sam");
     assert.equal(props.lastname, "Rivera");
     assert.equal(props.phone, "(419) 555-0000");
+  });
+
+  test("the property address maps to HubSpot's standard `address`", () => {
+    const props = toContactProperties(payloadOf(validHomeValue), "BLOCK");
+    assert.equal(props.address, "123 Louisiana Ave, Perrysburg, OH 43551");
+  });
+
+  test("a form with no address does not send `address` at all", () => {
+    /* Sending "" would blank the address HubSpot already holds. */
+    const props = toContactProperties(payloadOf(validContact), "BLOCK");
+    assert.ok(!("address" in props), "blank address must be omitted, not sent empty");
+  });
+
+  test("a later address-less submission cannot erase a stored address", async () => {
+    const calls = stubFetch({
+      [SEARCH]: hit("77", "PRIOR"),
+      [patchKey("77")]: { json: { id: "77" } },
+    });
+    await createLead(payloadOf(validContact));          // contact form: no address
+    const patch = calls.find((c) => c.method === "PATCH");
+    assert.ok(!("address" in patch.body.properties),
+      "the update carried an address key and would have erased the stored value");
+  });
+
+  test("a later phone-less submission cannot erase a stored phone", async () => {
+    const calls = stubFetch({
+      [SEARCH]: hit("78", "PRIOR"),
+      [patchKey("78")]: { json: { id: "78" } },
+    });
+    await createLead(payloadOf({ ...validContact, phone: "" }));
+    const patch = calls.find((c) => c.method === "PATCH");
+    assert.ok(!("phone" in patch.body.properties));
   });
 
   test("blank phone is omitted, never sent empty", () => {

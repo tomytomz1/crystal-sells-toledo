@@ -321,17 +321,23 @@
             throw Object.assign(new Error(code), { code: code, userMessage: msg });
           }
 
-          setStatus(status, "ok",
-            "<strong>Thank you.</strong> Your request is in - Crystal personally replies to every " +
-            "inquiry, usually within a few hours.");
           analytics.track("lead_submit_success", {
             form_type: formType,
             submission_id: r.json.submission_id
           });
-          /* Reset only after the server accepted it. */
-          form.reset();
+          /* Kept for support, never rendered. */
           form.dataset.submissionId = r.json.submission_id || "";
-          if (form.dataset.steps) resetSteps(form);
+
+          if (!revealSuccess(form)) {
+            /* No success panel in this form's region (the contact page).
+               Fall back to the inline confirmation, which is safe there
+               because that form is a single step and nothing collapses. */
+            setStatus(status, "ok",
+              "<strong>Thank you.</strong> Your request is in - Crystal personally replies to " +
+              "every inquiry, usually within a few hours.");
+            form.reset();
+            if (form.dataset.steps) resetSteps(form);
+          }
         }).catch(function (err) {
           /* Everything the visitor typed is still in the form. */
           var extra = "";
@@ -363,6 +369,46 @@
      tree and from the tab order instead of being merely invisible.
      Without JS every step renders, so the form still works.
      ============================================================= */
+  /**
+   * Swap the submitted form for its success panel, in place.
+   *
+   * The form is HIDDEN, not reset: a reset would collapse step 2 back to
+   * step 1, shrink the document, and let the browser clamp the scroll
+   * position - which is what previously dumped the visitor mid-page with no
+   * confirmation in sight, since .form-status lives inside step 2.
+   *
+   * Returns false when this form has no panel, so the caller can fall back.
+   */
+  function revealSuccess(form) {
+    var region = form.closest("[data-form-region]");
+    var panel = region ? region.querySelector("[data-form-success]") : null;
+    if (!panel) return false;
+
+    var before = form.getBoundingClientRect().top;
+    form.hidden = true;
+    panel.hidden = false;
+
+    /* Read AFTER the swap so the delta reflects real, settled layout. */
+    var after = panel.getBoundingClientRect().top;
+    var drift = after - before;
+    if (drift) window.scrollBy(0, drift);
+
+    var heading = panel.querySelector("[data-success-heading]");
+    if (heading) {
+      /* preventScroll: focusing must not undo the anchoring just applied. */
+      heading.focus({ preventScroll: true });
+      /* A visitor submits from the BOTTOM of a tall step 2, so the panel that
+         replaces it usually lands above the viewport. Anchoring alone would
+         leave them staring at whatever now occupies that space. Bring the
+         confirmation into view whenever it is not already fully visible -
+         this is the last thing that runs, so nothing undoes it. */
+      var box = panel.getBoundingClientRect();
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      if (box.top < 0 || box.bottom > vh) panel.scrollIntoView({ block: "center" });
+    }
+    return true;
+  }
+
   function stepsOf(form) {
     return Array.prototype.slice.call(form.querySelectorAll("[data-step]"));
   }

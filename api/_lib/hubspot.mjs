@@ -101,6 +101,12 @@ export function toContactProperties(payload, detail) {
     lastname: lead.last_name,
   };
   if (lead.phone) props.phone = lead.phone;
+  /* The seller's property address belongs in HubSpot's standard, visible
+     Street Address field, not only inside the enquiry text. Omitted when
+     blank for the same reason as phone: an empty string on a PATCH blanks
+     what HubSpot already holds, so a seller who gave an address on the
+     home-value form and later used the contact form would lose it. */
+  if (lead.property_address) props.address = lead.property_address;
   props[DETAIL_PROPERTY] = detail;
   return props;
 }

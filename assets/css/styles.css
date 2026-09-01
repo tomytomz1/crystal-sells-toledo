@@ -850,3 +850,61 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   .addr-suggest { animation: addrIn .12s ease-out; }
 }
 @keyframes addrIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+
+/* =============================================================
+   Post-submission success panel
+   =============================================================
+   Replaces the form in place after the server accepts a lead. */
+.form-region { position: relative; }
+
+.success-panel {
+  display: grid;
+  gap: .7rem;
+  padding: clamp(1.5rem, 4vw, 2.25rem);
+  border-radius: .75rem;
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .16);
+}
+
+.success-panel__mark {
+  width: 2.5rem; height: 2.5rem; margin: 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--gold); color: var(--ink);
+  font-size: 1.4rem; line-height: 1;
+}
+
+.success-panel__title {
+  margin: 0;
+  font-size: clamp(1.4rem, 3.4vw, 1.9rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+/* Focus is moved here programmatically; it must not read as a stray outline. */
+.success-panel__title:focus { outline: none; }
+.success-panel__title:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+
+.success-panel__lede { margin: 0; font-size: 1.02rem; line-height: 1.55; }
+.success-panel__call { margin: 0; font-size: .95rem; }
+.success-panel__call a { font-weight: 600; }
+
+.hero .success-panel { color: #fff; }
+.hero .success-panel__lede { color: rgba(255, 255, 255, .86); }
+.hero .success-panel__call { color: rgba(255, 255, 255, .72); }
+.hero .success-panel__call a { color: var(--gold-lt); }
+
+.form-card .success-panel {
+  background: rgba(20, 18, 15, .04);
+  border-color: rgba(20, 18, 15, .14);
+  color: var(--ink);
+}
+
+/* =============================================================
+   [hidden] must actually hide
+   =============================================================
+   The UA rule is `[hidden] { display: none }` at normal specificity, so ANY
+   class that sets an explicit `display` silently defeats it. That has now
+   caused two real bugs — a step that rendered while hidden, and a success
+   panel that showed before it was earned. Fixing it once, globally, is
+   safer than remembering `:not([hidden])` on every future component. */
+[hidden] { display: none !important; }

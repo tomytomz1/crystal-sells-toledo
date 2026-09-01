@@ -247,6 +247,26 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
     if (/<form\s/.test(src))
       fail(`src/pages/${page}`, "contains an inline form - the partial is the only source");
   }
+  /* The success state ships in the shared partial so the two pages cannot
+     diverge, and must not be inlined into either page. */
+  const partialSrc = readFileSync(partial, "utf8");
+  if (!/data-form-success/.test(partialSrc))
+    fail("src/partials/home-value-form.html", "no success panel — a submission has no confirmation");
+  if (!/data-form-region/.test(partialSrc))
+    fail("src/partials/home-value-form.html", "no form region wrapper for the success swap");
+  if (!/data-success-heading[^>]*tabindex="-1"|tabindex="-1"[^>]*data-success-heading/.test(partialSrc))
+    fail("src/partials/home-value-form.html", "the success heading cannot receive focus");
+  for (const page of ["index.html", "home-value.html"]) {
+    const src = readFileSync(join(SRC, "pages", page), "utf8");
+    if (/data-form-success/.test(src))
+      fail(`src/pages/${page}`, "inlines a success panel — the partial is the only source");
+    const html = readFileSync(join(ROOT, page), "utf8");
+    const n = (html.match(/data-form-success/g) || []).length;
+    if (n !== 1) fail(page, `has ${n} success panels, expected exactly 1`);
+    if (!/Your request is in/.test(html)) fail(page, "the success panel lost its confirmation heading");
+    if (!/tel:\+14192454655/.test(html)) fail(page, "the success panel lost the phone fallback");
+  }
+
   /* A visible label is required - placeholder-only UI is not accessible. */
   for (const page of ["index.html", "home-value.html"]) {
     const html = readFileSync(join(ROOT, page), "utf8");
@@ -388,6 +408,17 @@ else {
     fail("api/_lib/hubspot.mjs", "no email lookup — repeat submissions would duplicate contacts");
   if (!/409/.test(hubspotSrc))
     fail("api/_lib/hubspot.mjs", "no 409 conflict handling — a search-index lag would duplicate or fail");
+
+  /* The seller's address must reach HubSpot's standard visible field, and
+     must never be sent blank (that would erase what HubSpot already holds). */
+  if (!/props\.address = lead\.property_address/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "property_address is not mapped to the standard `address` field");
+  if (!/if \(lead\.property_address\) props\.address/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs",
+      "address is sent unconditionally — a blank would erase the stored address");
+  if (!/if \(lead\.phone\) props\.phone/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs",
+      "phone is sent unconditionally — a blank would erase the stored phone");
 
   /* The enquiry detail must never be quietly dropped to make a write succeed. */
   if (!/detailPropertyRejected/.test(hubspotSrc))

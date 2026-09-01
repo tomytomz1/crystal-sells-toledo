@@ -318,7 +318,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.close();
   });
 
-  test("homepage success resets only after server acceptance", async () => {
+  test("homepage confirms only after server acceptance", async () => {
     const p = await page({ apiBody: { ok: true, submission_id: "csv_ok9" } });
     await p.goto(`${base}/`, { waitUntil: "load" });
     await p.evaluate(() => { window.__ok = []; window.addEventListener("lead_submit_success", (e) => window.__ok.push(e.detail)); });
@@ -327,9 +327,11 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.fill("#v-email", "sam@example.com");
     await p.locator('form[data-form] button[type=submit]').click();
     await p.waitForTimeout(600);
-    assert.match(await p.getAttribute(".form-status", "class"), /form-status--ok/);
     assert.equal((await p.evaluate(() => window.__ok))[0].submission_id, "csv_ok9");
-    assert.equal(await p.inputValue("#v-address"), "");
+    /* Success is now a persistent panel that REPLACES the form, rather than
+       an inline note beside a form reset back to an empty step 1. */
+    assert.ok(await p.isVisible("[data-form-success]"), "no confirmation after acceptance");
+    assert.ok(await p.isHidden("form[data-form]"), "the form was left in place");
     await p.close();
   });
 
@@ -470,7 +472,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.waitForTimeout(600);
     assert.equal(sent.form_type, "home_value");
     assert.equal(sent.page, "/home-value");
-    assert.match(await p.getAttribute(".form-status", "class"), /form-status--ok/);
+    assert.ok(await p.isVisible("[data-form-success]"), "no confirmation on /home-value");
     await p.close();
   });
 
@@ -814,6 +816,189 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.click('[data-step="2"] button[type=submit]');
     await p.waitForFunction(() => document.querySelector(".form-status")?.textContent?.length > 0);
     assert.equal(sent.property_address, SUGGESTIONS[1]);
+    await p.close();
+  });
+
+  /* =====================================================================
+     Post-submission success state
+     =====================================================================
+     Measured in a real browser: scroll position, document height and focus
+     are exactly the things a DOM-unit assumption gets wrong. The previous
+     behaviour reset a two-step form on success, which collapsed a tall
+     step 2 into a short step 1, shrank the document, let the browser clamp
+     the scroll, and hid the confirmation (it lived inside step 2).
+     ===================================================================== */
+
+  /** Fill and submit the home-value funnel on whichever page is given. */
+  async function submitHomeValue(p, path = "/") {
+    await p.goto(base + path);
+    await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await p.fill("#v-first", "Sam");
+    await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    const before = await p.evaluate(() => ({
+      scrollY: window.scrollY,
+      docHeight: document.documentElement.scrollHeight,
+      formTop: document.querySelector("form[data-form]").getBoundingClientRect().top,
+    }));
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForSelector("[data-form-success]:not([hidden])", { timeout: 5000 });
+    await settleScroll(p);
+    return before;
+  }
+
+  /* `html { scroll-behavior: smooth }` means scrollIntoView ANIMATES. Reading
+     a rect the instant the panel appears samples the scroll mid-flight and
+     reports a position the visitor never actually sees. Wait for it to stop. */
+  async function settleScroll(p) {
+    await p.waitForFunction(() => {
+      const y = window.scrollY;
+      if (window.__lastY === y) return true;
+      window.__lastY = y;
+      return false;
+    }, null, { timeout: 5000, polling: 100 });
+    await p.evaluate(() => { delete window.__lastY; });
+  }
+
+  for (const [label, path] of [["the homepage", "/"], ["/home-value", "/home-value"]]) {
+    test(`a successful submission on ${label} leaves a visible confirmation`, async () => {
+      const p = await page();
+      await submitHomeValue(p, path);
+      const panel = p.locator("[data-form-success]");
+      await panel.waitFor({ state: "visible" });
+      assert.match(await panel.innerText(), /Your request is in/i);
+      assert.match(await panel.innerText(), /\(419\)\s*245-4655/);
+      const box = await panel.boundingBox();
+      assert.ok(box && box.height > 0, "the confirmation has no visible box");
+      await p.close();
+    });
+
+    test(`the form is replaced, not reset to step 1, on ${label}`, async () => {
+      const p = await page();
+      await submitHomeValue(p, path);
+      assert.ok(await p.isHidden("form[data-form]"), "the form should be hidden, not reset");
+      /* The old bug: step 1 came back and the visitor saw an empty address
+         field where their confirmation should have been. */
+      assert.ok(await p.isHidden('[data-step="1"]'), "step 1 was shown again after success");
+      assert.equal(await p.locator("#v-address").count(), 1);
+      assert.ok(!(await p.isVisible("#v-address")), "the address field is visible again");
+      await p.close();
+    });
+
+    test(`the confirmation is in view, not off-screen, on ${label}`, async () => {
+      const p = await page();
+      await submitHomeValue(p, path);
+      const v = await p.evaluate(() => {
+        const el = document.querySelector("[data-form-success]");
+        const r = el.getBoundingClientRect();
+        const vh = window.innerHeight;
+        return { top: r.top, bottom: r.bottom, vh };
+      });
+      assert.ok(v.bottom > 0 && v.top < v.vh,
+        `confirmation is outside the viewport (top ${v.top}, vh ${v.vh})`);
+      await p.close();
+    });
+
+    test(`focus moves to the confirmation heading on ${label}`, async () => {
+      const p = await page();
+      await submitHomeValue(p, path);
+      const focused = await p.evaluate(() => ({
+        hasAttr: document.activeElement.hasAttribute("data-success-heading"),
+        text: document.activeElement.textContent.trim(),
+      }));
+      assert.ok(focused.hasAttr, "focus did not land on the success heading");
+      assert.match(focused.text, /Your request is in/i);
+      await p.close();
+    });
+  }
+
+  test("the visitor is left looking at the confirmation, not stranded mid-page", async () => {
+    /* The reported symptom: after submitting, the visitor was left roughly
+       halfway down the homepage with no confirmation in sight.
+
+       The assertion is NOT that nothing scrolls. A visitor submits from the
+       bottom of a tall step 2, so the short panel that replaces it lands
+       above the viewport and SHOULD be brought into view. What must hold is
+       that the confirmation ends up fully visible and is what they are
+       looking at - not some unrelated section further down the page. */
+    const p = await page();
+    await submitHomeValue(p, "/");
+    const v = await p.evaluate(() => {
+      const panel = document.querySelector("[data-form-success]");
+      const r = panel.getBoundingClientRect();
+      const vh = window.innerHeight;
+      /* What is at the middle of the screen right now? */
+      const mid = document.elementFromPoint(window.innerWidth / 2, vh / 2);
+      return {
+        top: r.top, bottom: r.bottom, vh,
+        midInsidePanel: !!(mid && panel.contains(mid)),
+      };
+    });
+    assert.ok(v.top >= 0 && v.bottom <= v.vh,
+      `the confirmation is not fully visible (top ${Math.round(v.top)}, bottom ` +
+      `${Math.round(v.bottom)}, viewport ${v.vh})`);
+    assert.ok(v.midInsidePanel,
+      "the middle of the screen is not the confirmation — the visitor was left elsewhere");
+    await p.close();
+  });
+
+  test("the submission id is never shown to the visitor", async () => {
+    const p = await page({ apiBody: { ok: true, submission_id: "csv_deadbeefdeadbeefdeadbeef" } });
+    await submitHomeValue(p, "/");
+    const text = await p.innerText("body");
+    assert.ok(!text.includes("csv_deadbeefdeadbeefdeadbeef"), "the submission id is on screen");
+    /* Still recorded on the form for support. */
+    assert.equal(
+      await p.getAttribute("form[data-form]", "data-submission-id"),
+      "csv_deadbeefdeadbeefdeadbeef");
+    await p.close();
+  });
+
+  test("the confirmation survives a later scroll and does not revert", async () => {
+    const p = await page();
+    await submitHomeValue(p, "/");
+    await p.evaluate(() => window.scrollTo(0, 0));
+    await p.waitForTimeout(400);
+    assert.ok(await p.isVisible("[data-form-success]"), "the confirmation disappeared");
+    assert.ok(await p.isHidden("form[data-form]"), "the form came back");
+    await p.close();
+  });
+
+  test("a failed submission keeps the form and everything typed", async () => {
+    const p = await page({ apiStatus: 502, apiBody: { ok: false, code: "DELIVERY_FAILED", message: "nope" } });
+    await p.goto(base + "/");
+    await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await p.fill("#v-first", "Sam");
+    await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForFunction(() => /could not|call|email/i.test(
+      document.querySelector(".form-status")?.textContent || ""));
+
+    assert.ok(await p.isHidden("[data-form-success]"), "a failure must not show the confirmation");
+    assert.ok(await p.isVisible("form[data-form]"), "the form was hidden on a failure");
+    assert.equal(await p.inputValue("#v-first"), "Sam");
+    assert.equal(await p.inputValue("#v-email"), "sam@example.com");
+    assert.equal(await p.inputValue("#v-address"), "123 Louisiana Ave, Perrysburg, OH 43551");
+    await p.close();
+  });
+
+  test("a 200 carrying ok:false is a failure, not a confirmation", async () => {
+    const p = await page({ apiStatus: 200, apiBody: { ok: false, code: "DELIVERY_FAILED" } });
+    await p.goto(base + "/");
+    await p.fill("#v-address", "1 Test St");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await p.fill("#v-first", "Sam");
+    await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForFunction(() => (document.querySelector(".form-status")?.textContent || "").length > 0);
+    assert.ok(await p.isHidden("[data-form-success]"));
     await p.close();
   });
 });
