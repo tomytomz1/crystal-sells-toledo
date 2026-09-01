@@ -105,7 +105,7 @@ a colour change or already-covered deterministic logic.
 | Contact | (419) 245-4655 · crystal@crystalsellstoledo.com |
 | Stack | Static HTML built by `tools/build.mjs`, one Vercel function at `api/lead.js` |
 | Deploy | Vercel, production branch `main` |
-| CRM | **HubSpot** — Contacts API, scopes `crm.objects.contacts.read/write` only.
+| CRM | **HubSpot** — Contacts API + authenticated Forms Submission API. Service Key scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `forms`.
 Zoho code is retained but imported by nothing; it is a rollback path, not the live path. |
 
 ## Commands

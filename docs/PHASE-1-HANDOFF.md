@@ -207,7 +207,7 @@ what would be required if visitor analytics are wanted later.
 ### Step 1 — The HubSpot token
 
 Already done. A HubSpot private-app access token is set in Vercel as
-`HUBSPOT_ACCESS_TOKEN`, with exactly two scopes:
+`HUBSPOT_ACCESS_TOKEN`, with exactly three scopes:
 
 ```
 crm.objects.contacts.read
