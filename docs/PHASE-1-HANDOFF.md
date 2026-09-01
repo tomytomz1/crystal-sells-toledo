@@ -562,7 +562,8 @@ These were the result of a compliance review. Breaking them has legal consequenc
 
 | Item | Status |
 |---|---|
-| **`crm.objects.notes.write` scope** | **NOT AVAILABLE** in the Service Key scope picker. Blocks the timeline activity. |
+| **`crm.objects.notes.write` scope** | **CONFIRMED UNAVAILABLE** in the Service Key scope picker. |
+| Timeline activity | Decision made: use the HubSpot **Forms Submission API**. See `docs/updates/2026-09-01-timeline-architecture-decision.md`. Needs a form GUID from Tomas. |
 | Timeline activity | Written and tested, **not deployed**. See `docs/updates/2026-09-01-hubspot-timeline-activity.md`. |
 | **HubSpot timeline verification** | **NOT DONE.** The contact write is proven live; the activity is not. |
 | HubSpot `message` property | Assumed present (it is a HubSpot default). Confirm in the portal — section 3 step 3. |
