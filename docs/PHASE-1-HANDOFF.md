@@ -1,8 +1,7 @@
 # crystalsellstoledo.com — Phase 1 Handoff
 
 Paste-ready context for another assistant. Everything below reflects the repo as
-of **`7be33a1`**, the most recent commit to change production code (Google
-Analytics 4), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
+of **`ed0003c`**, the most recent commit to change production code (the HubSpot Forms timeline pass), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
 and merged to `main`, which is what Vercel deploys.
 
 > **CRM: HubSpot.** Leads are delivered to HubSpot Contacts. Zoho was the
