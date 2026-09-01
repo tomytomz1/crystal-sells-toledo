@@ -10,11 +10,14 @@ export const ATTRIBUTION_KEYS = [
   "landing_page", "referrer", "first_touch_at",
 ];
 
-/* Aligned to Zoho's standard Lead field maximums. Anything longer would be
-   accepted here and then rejected downstream, turning a good lead into a
-   502 after the visitor had already filled the form. Overlength values are
-   REJECTED, never truncated - silently shortening someone's name or email
-   corrupts their data and produces an address that does not deliver. */
+/* Set to Zoho's standard Lead field maximums, and deliberately UNCHANGED by
+   the move to HubSpot: HubSpot's own contact properties allow far more
+   (65,536 chars), so these limits sit safely inside both and relaxing them
+   would be a contract change for no gain. Anything longer would be accepted
+   here and then rejected downstream, turning a good lead into a 502 after
+   the visitor had already filled the form. Overlength values are REJECTED,
+   never truncated - silently shortening someone's name or email corrupts
+   their data and produces an address that does not deliver. */
 const LIMITS = {
   form_type: 32, first_name: 40, last_name: 80, email: 100, phone: 30,
   property_address: 200, topic: 120, message: 4000, timeline: 120,

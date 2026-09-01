@@ -164,12 +164,17 @@ else {
 }
 
 /* No secret may ever appear in anything that ships to the browser. */
-const SECRET_NAMES = ["ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "ZOHO_CLIENT_ID"];
+const SECRET_NAMES = [
+  "HUBSPOT_ACCESS_TOKEN",
+  "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "ZOHO_CLIENT_ID",
+];
 for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
   const text = readFileSync(join(ROOT, file), "utf8");
   for (const name of SECRET_NAMES)
     if (text.includes(name)) fail(file, `references server secret ${name} in client-delivered output`);
   if (/Zoho-oauthtoken/i.test(text)) fail(file, "contains a Zoho OAuth token header in client output");
+  if (/api\.hubapi\.com/i.test(text)) fail(file, "calls the HubSpot API directly from client output");
+  if (/\bpat-na\d/i.test(text)) fail(file, "contains what looks like a HubSpot private app token");
 }
 
 /* --- homepage hero CRO contract --------------------------------------- */
@@ -259,6 +264,61 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (a !== b2) fail("site", `home_value field contract has drifted between / and /home-value:\n      / = ${a}\n      /home-value = ${b2}`);
 }
 
+/* --- HubSpot delivery conformance -------------------------------------- */
+const hubspotSrc = existsSync(join(API, "_lib/hubspot.mjs"))
+  ? readFileSync(join(API, "_lib/hubspot.mjs"), "utf8") : "";
+if (!hubspotSrc) fail("site", "api/_lib/hubspot.mjs is missing");
+else {
+  const leadSrc = readFileSync(join(API, "lead.js"), "utf8");
+
+  /* The live delivery path must actually be HubSpot. Importing both would
+     make it ambiguous which CRM a lead reaches. */
+  if (!/from\s+"\.\/_lib\/hubspot\.mjs"/.test(leadSrc))
+    fail("api/lead.js", "does not import the HubSpot client");
+  if (/from\s+"\.\/_lib\/zoho\.mjs"/.test(leadSrc))
+    fail("api/lead.js", "still imports the Zoho client — the runtime path must be HubSpot only");
+
+  /* Least privilege: the token is the only credential this phase may need. */
+  if (/ZOHO_/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "references a Zoho variable");
+  const cfg = /export function isConfigured\(\)[\s\S]*?\n}/.exec(hubspotSrc);
+  if (!cfg) fail("api/_lib/hubspot.mjs", "no isConfigured()");
+  else {
+    if (!/HUBSPOT_ACCESS_TOKEN/.test(cfg[0]))
+      fail("api/_lib/hubspot.mjs", "isConfigured does not require HUBSPOT_ACCESS_TOKEN");
+    const envs = (cfg[0].match(/process\.env\.[A-Z0-9_]+/g) || []);
+    for (const e of envs)
+      if (e !== "process.env.HUBSPOT_ACCESS_TOKEN")
+        fail("api/_lib/hubspot.mjs", `isConfigured requires ${e} — this phase needs only the token`);
+  }
+
+  /* The enquiry block goes to a STANDARD HubSpot property. A custom property
+     would need a scope this integration deliberately does not have. */
+  const prop = /export const DETAIL_PROPERTY = "([^"]+)"/.exec(hubspotSrc);
+  if (!prop) fail("api/_lib/hubspot.mjs", "DETAIL_PROPERTY is not declared");
+  else if (prop[1] !== "message")
+    fail("api/_lib/hubspot.mjs",
+      `DETAIL_PROPERTY is "${prop[1]}" — only the standard writable property "message" is confirmed`);
+
+  /* Scope budget: no Notes API, no properties/schema API. */
+  if (/\/crm\/v3\/objects\/notes|\/engagements\//.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "uses the Notes/engagements API — this token has no notes scope");
+  if (/\/crm\/v3\/properties\//.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "uses the properties API — this token has no schema scope");
+
+  /* Dedupe must exist, or repeat submissions pile up duplicate contacts. */
+  if (!/\/crm\/v3\/objects\/contacts\/search/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no email lookup — repeat submissions would duplicate contacts");
+  if (!/409/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no 409 conflict handling — a search-index lag would duplicate or fail");
+
+  /* The enquiry detail must never be quietly dropped to make a write succeed. */
+  if (!/detailPropertyRejected/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "no detection of a rejected detail property");
+  if (/withoutDetail|delete\s+\w*\[DETAIL_PROPERTY\]|retryWithoutMessage/.test(hubspotSrc))
+    fail("api/_lib/hubspot.mjs", "retries without the enquiry detail — that would silently discard the lead body");
+}
+
 /* --- Zoho Lead schema conformance ------------------------------------- */
 const zohoSrc = existsSync(join(API, "_lib/zoho.mjs"))
   ? readFileSync(join(API, "_lib/zoho.mjs"), "utf8") : "";
@@ -284,7 +344,7 @@ for (const [field, max] of Object.entries(ZOHO_MAX)) {
   const m = new RegExp(field + ":\\s*(\\d+)").exec(limitsSrc);
   if (!m) fail("api/_lib/validate.mjs", `no limit declared for ${field}`);
   else if (Number(m[1]) > max)
-    fail("api/_lib/validate.mjs", `${field} limit ${m[1]} exceeds Zoho's ${max} — Zoho would reject`);
+    fail("api/_lib/validate.mjs", `${field} limit ${m[1]} exceeds the agreed maximum ${max}`);
 }
 for (const file of pages.filter((f) => ["contact.html", "home-value.html"].includes(f))) {
   const html = readFileSync(join(ROOT, file), "utf8");

@@ -171,11 +171,12 @@ describe("Secrets and PII never leak", () => {
       (await call({ method: "GET", body: validContact })).body,
     ];
     for (const b of bodies)
-      for (const secret of ["ZOHO_", "client_secret", "refresh_token", "oauthtoken", "Bearer "])
+      for (const secret of ["ZOHO_", "HUBSPOT_", "client_secret", "refresh_token",
+                            "oauthtoken", "Bearer ", "hubapi.com"])
         assert.ok(!b.includes(secret), `response leaked ${secret}`);
   });
 
-  test("the 503 for unconfigured Zoho does not claim success", async () => {
+  test("the 503 for an unconfigured CRM does not claim success", async () => {
     const res = await call({ body: validContact });
     assert.equal(res.json().ok, false);
     assert.equal(res.json().code, "NOT_CONFIGURED");
@@ -192,7 +193,8 @@ describe("Secrets and PII never leak", () => {
 
   test("client bundle contains no server secret names", () => {
     const js = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
-    for (const s of ["ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "Zoho-oauthtoken"])
+    for (const s of ["ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN",
+                     "Zoho-oauthtoken", "HUBSPOT_ACCESS_TOKEN", "hubapi.com"])
       assert.ok(!js.includes(s), `main.js leaks ${s}`);
   });
 });
@@ -221,8 +223,12 @@ describe("Contact points are stable", () => {
 
 
 /* =====================================================================
-   Zoho Lead schema conformance
+   Zoho Lead schema conformance - RETAINED FALLBACK, not the live path
    =====================================================================
+   Delivery runs through HubSpot (tests/hubspot.test.mjs). This module is
+   kept wired-but-unused so the migration can be rolled back without a
+   rewrite, and these tests keep it from rotting while it sits there.
+
    Zoho rejects a Lead with no Company (MANDATORY_NOT_FOUND) and rejects
    values longer than the standard field maximums. Anything this layer
    accepts but Zoho refuses becomes a 502 for a visitor who already

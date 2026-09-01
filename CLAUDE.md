@@ -54,7 +54,8 @@ If something is blocked or unproven, say so plainly in that report. Never let
 | Contact | (419) 245-4655 · crystal@crystalsellstoledo.com |
 | Stack | Static HTML built by `tools/build.mjs`, one Vercel function at `api/lead.js` |
 | Deploy | Vercel, production branch `main` |
-| CRM | Zoho CRM (free edition — no custom fields) |
+| CRM | **HubSpot** — Contacts API, scopes `crm.objects.contacts.read/write` only.
+Zoho code is retained but imported by nothing; it is a rollback path, not the live path. |
 
 ## Commands
 
@@ -62,7 +63,7 @@ If something is blocked or unproven, say so plainly in that report. Never let
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
 npm test             # build + check + full test suite
-npm run zoho:verify  # confirm Zoho picklists before go-live
+npm run zoho:verify  # Zoho picklists — only if rolling back to Zoho
 npm run dev          # build, then serve public/ on :3000
 ```
 
@@ -82,8 +83,11 @@ Full detail in `docs/PHASE-1-HANDOFF.md` section 6. In short:
 6. Never add "Degnan Group" — the site does not advertise as a team.
 7. No automated home valuation. The site promises a human CMA.
 8. Assets are content-hashed at build. Removing that pins old code in browsers.
-9. Never expose a Zoho credential to the browser.
+9. Never expose a CRM credential to the browser — `HUBSPOT_ACCESS_TOKEN` above all.
 10. Reject overlength input; never silently truncate user data.
+11. The enquiry block is the whole lead. If the CRM rejects the property it is
+    written to, fail loudly — never retry without it. A contact saved without
+    its address, timeline and message looks fine and is worthless.
 
 ## Testing practice
 

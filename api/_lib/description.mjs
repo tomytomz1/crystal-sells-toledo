@@ -1,10 +1,20 @@
-/* Builds the deterministic Description block written to the Zoho Lead.
-   Zoho Free has no custom fields, so everything that is not a standard
-   field lives here. The order and labels are fixed so the block stays
-   greppable and diffable across leads. */
+/* Builds the deterministic enquiry block written to the CRM.
+
+   CRM-agnostic on purpose. It is written to HubSpot's default `message`
+   contact property (the live path), and to the Zoho Lead Description and
+   Note (the retained fallback). Neither CRM has a custom field for this
+   under the plan/scopes in use, so everything that is not a standard
+   contact field lives here. The order and labels are fixed so the block
+   stays greppable and diffable across leads. */
 
 const ROWS = [
   ["FORM", (l) => l.lead.form_type],
+  /* The address is in this block, not only in a CRM address field. Zoho put
+     it in the standard `Street` field, so the block never carried it; the
+     HubSpot mapping is deliberately limited to email/name/phone, so without
+     this row a seller's property address would be lost on delivery. The
+     block has to stand alone whatever CRM is on the other end. */
+  ["PROPERTY ADDRESS", (l) => l.lead.property_address],
   ["SELLING TIMELINE", (l) => l.lead.timeline],
   ["CONDITION", (l) => l.lead.condition],
   ["TOPIC", (l) => l.lead.topic],

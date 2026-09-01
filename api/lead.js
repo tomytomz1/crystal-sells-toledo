@@ -12,11 +12,11 @@
 
 import { randomBytes } from "node:crypto";
 import { validateLead, FieldError } from "./_lib/validate.mjs";
-import { createLead, isConfigured } from "./_lib/zoho.mjs";
+import { createLead, isConfigured } from "./_lib/hubspot.mjs";
 import { readBody, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
-/** 96 bits of CSPRNG entropy, prefixed so it is recognisable in a CRM note. */
+/** 96 bits of CSPRNG entropy, prefixed so it is recognisable in a CRM record. */
 function submissionId() {
   return "csv_" + randomBytes(12).toString("hex");
 }
@@ -115,7 +115,7 @@ export default async function handler(req, res) {
        their enquiry had been received when nothing had stored it - the one
        outcome this system exists to prevent. The client keeps their input
        and offers phone, email and mailto recovery. */
-    logError("lead.not_configured", new Error("Zoho credentials absent"), { submission_id: sid });
+    logError("lead.not_configured", new Error("HUBSPOT_ACCESS_TOKEN absent"), { submission_id: sid });
     return fail(res, 503, "NOT_CONFIGURED", GENERIC_FAILURE);
   }
 

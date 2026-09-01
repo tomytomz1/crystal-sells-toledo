@@ -1,9 +1,14 @@
 # crystalsellstoledo.com — Phase 1 Handoff
 
 Paste-ready context for another assistant. Everything below reflects the repo as
-of **`dc2d618`**, the most recent commit to change production code (the Zoho Lead
-schema correction pass), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
+of **`__SHA__`**, the most recent commit to change production code (the HubSpot
+lead migration), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
 and merged to `main`, which is what Vercel deploys.
+
+> **CRM: HubSpot.** Leads are delivered to HubSpot Contacts. Zoho was the
+> original target and its code is still in the repo, wired to nothing, kept as a
+> rollback path until HubSpot is proven with a live submission. Where this
+> document describes Zoho it is describing that dormant fallback, and says so.
 
 Later commits on this branch may be documentation-only; this reference is
 deliberately pinned to the last code change so it does not go stale every time a
@@ -35,10 +40,11 @@ src/partials/*.html     shared shell, header, footer, CTA band ← EDIT THESE
 assets/css/styles.css   the entire design system, one file
 assets/js/main.js       nav, reveals, attribution, analytics, forms
 api/lead.js             POST /api/lead  (Vercel serverless function)
-api/_lib/*.mjs          validate, security, zoho, description, log
+api/_lib/*.mjs          validate, security, hubspot, description, log
+                        (+ zoho.mjs — dormant rollback path, not imported)
 tools/build.mjs         assembles src/ + assets/ into public/
 tools/check.mjs         static validation, run by npm run check
-tests/*.test.mjs        node:test suites (62 tests)
+tests/*.test.mjs        node:test suites (141 tests)
 docs/                   strategy + compliance docs (NOT deployed)
 public/                 GENERATED. gitignored. Never edit by hand.
 ```
@@ -50,8 +56,8 @@ public/                 GENERATED. gitignored. Never edit by hand.
 ```bash
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
-npm test             # build + check + 62 automated tests
-npm run zoho:verify  # confirm Zoho picklists against the real account
+npm test             # build + check + 141 automated tests
+npm run zoho:verify  # Zoho picklists — only needed if rolling back to Zoho
 npm run dev          # build, then serve public/ on :3000
 ```
 
@@ -84,12 +90,12 @@ POST /api/lead     JSON only · 16 KB cap · same-origin
 | 400 | `REJECTED` | honeypot filled (server-side check) |
 | 422 | `MISSING_FIRST_NAME` `MISSING_LAST_NAME` `MISSING_EMAIL` `INVALID_EMAIL` `MISSING_FORM_TYPE` `UNKNOWN_FORM_TYPE` `MISSING_ADDRESS` `MISSING_MESSAGE` `FIELD_TOO_LONG` | validation |
 | 429 | `RATE_LIMITED` | >5 per 10 min per IP |
-| 503 | `NOT_CONFIGURED` | Zoho env vars absent |
-| 502 | `DELIVERY_FAILED` | Zoho call failed |
+| 503 | `NOT_CONFIGURED` | `HUBSPOT_ACCESS_TOKEN` absent |
+| 502 | `DELIVERY_FAILED` | HubSpot call failed, or returned something unusable |
 
 Responses never contain exception text, stack traces or credential material.
 
-### Field limits (server-enforced, aligned to Zoho)
+### Field limits (server-enforced)
 
 ```
 first_name 40 · last_name 80 · email 100 · phone 30      <- Zoho Lead maximums
@@ -98,6 +104,11 @@ message 4000 · notes 4000 · page 300 · form_type 32
 landing_page 500 · referrer 500 · first_touch_at 40
 utm_* 200 · gclid/gbraid/wbraid/fbclid/msclkid 300
 ```
+
+These were set to Zoho's Lead maximums and are **deliberately unchanged** by the
+HubSpot migration. HubSpot's own contact properties allow far more (65,536
+characters), so these sit safely inside both; relaxing them would be a contract
+change for no gain.
 
 Overlength values are **rejected with 422 FIELD_TOO_LONG, never truncated** -
 silently shortening a name or email corrupts the record and can produce an
@@ -157,70 +168,73 @@ the build if it is reintroduced. The form resets **only** after the server accep
 
 ## 3. Manual setup still required
 
-### Step 1 — Create a Zoho self-client
+### Step 1 — The HubSpot token
 
-1. Go to <https://api-console.zoho.com> → **Self Client** → Create.
-2. Scopes: `ZohoCRM.modules.leads.CREATE`, `ZohoCRM.modules.leads.UPDATE`,
-   `ZohoCRM.modules.notes.CREATE`, `ZohoCRM.settings.fields.READ`
-   (or simply `ZohoCRM.modules.ALL` plus `ZohoCRM.settings.ALL`).
-3. Time duration: 10 minutes. Scope description: your domain.
-4. Copy the generated **code** (single use, expires fast).
+Already done. A HubSpot private-app access token is set in Vercel as
+`HUBSPOT_ACCESS_TOKEN`, with exactly two scopes:
 
-### Step 2 — Exchange the code for a refresh token, once
-
-```bash
-curl -X POST https://accounts.zoho.com/oauth/v2/token \
-  -d grant_type=authorization_code \
-  -d client_id=YOUR_CLIENT_ID \
-  -d client_secret=YOUR_CLIENT_SECRET \
-  -d code=THE_CODE_FROM_STEP_1
+```
+crm.objects.contacts.read
+crm.objects.contacts.write
 ```
 
-Copy `refresh_token` from the response. It does not expire.
-(If the Zoho account is not in the `.com` data centre, swap the domain for
-`.eu`, `.in`, `.com.au`, `.jp` or `.ca` **and** set the two domain vars below.)
+This is deliberate least privilege and **no further scope is required**. The
+integration is built to live inside those two, which is why it uses no Notes
+API, no engagements API and no properties/schema API — a static check fails the
+build if any of those appear.
 
-### Step 3 — Set Vercel environment variables
+### Step 2 — Set Vercel environment variables
 
 Vercel → Project → Settings → Environment Variables. **Never** prefix these so
 they reach the browser.
 
 | Variable | Required | Default |
 |---|---|---|
-| `ZOHO_CLIENT_ID` | yes | — |
-| `ZOHO_CLIENT_SECRET` | yes | — |
-| `ZOHO_REFRESH_TOKEN` | yes | — |
-| `ZOHO_ACCOUNTS_DOMAIN` | no | `https://accounts.zoho.com` |
-| `ZOHO_API_DOMAIN` | no | `https://www.zohoapis.com` |
+| `HUBSPOT_ACCESS_TOKEN` | **yes** | — |
+| `HUBSPOT_API_BASE` | no | `https://api.hubapi.com` |
 | `ALLOWED_ORIGINS` | no | comma-separated extra hostnames |
-| `ZOHO_LEAD_SOURCE` | no | picklist value, default `Website` |
-| `ZOHO_LEAD_STATUS` | no | picklist value; **omitted entirely if unset** |
+
+The token is the **only** credential required. `isConfigured()` checks nothing
+else, and a check fails the build if that changes.
+
+The Zoho variables (`ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`,
+`ZOHO_ACCOUNTS_DOMAIN`, `ZOHO_API_DOMAIN`, `ZOHO_LEAD_SOURCE`, `ZOHO_LEAD_STATUS`)
+are **no longer read at runtime**. They are documented in
+`docs/updates/2026-08-31-zoho-schema-corrections.md` and are only relevant if the
+migration is rolled back. Leaving them set is harmless; nothing consults them.
 
 Redeploy after setting them.
 
-### Step 3b — Confirm the picklists BEFORE the first live lead
+### Step 3 — Confirm the `message` property exists
 
-```bash
-ZOHO_CLIENT_ID=... ZOHO_CLIENT_SECRET=... ZOHO_REFRESH_TOKEN=... npm run zoho:verify
-```
+The full enquiry is written to HubSpot's **default** contact property `message`
+(see section 4). It ships in every HubSpot portal, but a portal admin can archive
+a default property.
 
-Prints the account's real `Lead_Source` and `Lead_Status` values, flags any
-configured value that does not exist, confirms `Company` is mandatory, and
-suggests the closest status to "new / uncontacted". Needs
-`ZohoCRM.settings.fields.READ` (covered by `ZohoCRM.modules.ALL`).
+In HubSpot: Settings → Properties → Contact properties → search `message`. It
+should exist, be of type **multi-line text**, and not be read-only.
 
-Set `ZOHO_LEAD_STATUS` in Vercel only to a value this command actually lists.
+If it has been archived or made read-only, the endpoint **fails the lead rather
+than saving a contact with the enquiry silently missing**, and logs
+`hubspot.detail_property_unavailable` with the remediation. Restore the property
+— do not point the code at an invented property name.
 
-### Step 4 — Verify end to end
+### Step 4 — Verify end to end (NOT YET DONE)
+
+**No live HubSpot call has ever been made.** This is the outstanding step.
 
 1. Submit a real test lead through `/home-value`.
 2. Confirm the success panel appears (not the recovery panel).
-3. In Zoho CRM confirm: a Lead exists, `Company` is set, `Lead_Source` is as
-   configured, and **a Note is attached** carrying the full detail.
-4. Submit a second lead with the same email → the Lead should update and a
-   **second Note** should appear. No duplicate Lead.
+3. In HubSpot confirm a contact exists with `email`, `firstname`, `lastname`,
+   `phone`, and a `message` property carrying the full 23-row enquiry block —
+   including the property address, the timeline and every UTM.
+4. Submit a second lead with the **same email** and a different message. Confirm
+   there is still **one** contact, and that its `message` now carries **both**
+   enquiries, newest first, separated by `----- earlier submission -----`.
+5. Check the Vercel function logs for `hubspot.contact.saved` with
+   `action: "create"` then `action: "update"`.
 
-**Until step 3 is done the endpoint returns `503 NOT_CONFIGURED` by design** and
+**Until step 2 is done the endpoint returns `503 NOT_CONFIGURED` by design** and
 forms show the recovery panel. This is deliberate: returning success with nothing
 stored is the exact failure this system exists to prevent.
 
@@ -234,91 +248,148 @@ NAP across site / GBP / Zillow / Realtor.com is a strong local ranking signal.
 
 ## 4. CRM field mapping
 
-Zoho Free has no custom fields, so everything beyond the standard set goes into
-`Description` in a fixed order.
+### HubSpot contact properties (the live path)
 
-| Zoho field | Source | Notes |
+Only standard, confirmed-writable properties are used. Nothing custom, so no
+schema scope is needed.
+
+| HubSpot property | Source | Notes |
 |---|---|---|
-| `First_Name` | form | max 40 |
-| `Last_Name` | form | max 80, **mandatory in Zoho** |
-| `Company` | constant by form type | **mandatory in Zoho** |
-| `Email` | form, lowercased | max 100, upsert key |
-| `Phone` | form, normalised | max 30, omitted when blank |
-| `Street` | property address | omitted when blank |
-| `Lead_Source` | `ZOHO_LEAD_SOURCE`, default `Website` | **picklist** |
-| `Lead_Status` | `ZOHO_LEAD_STATUS` | **picklist, omitted unless set** |
-| `Description` | the 22-row block below | |
+| `email` | form, lowercased | max 100, the dedupe key |
+| `firstname` | form | max 40 |
+| `lastname` | form | max 80 |
+| `phone` | form, normalised | max 30, **omitted when blank** |
+| `message` | the 23-row enquiry block below | everything else lives here |
 
-**Company values** (business classification, not a claim about the person):
+`phone` is omitted rather than sent empty because an empty string on an update
+would blank a number HubSpot already holds — a visitor who gave a phone once and
+not the second time would lose it.
 
-| form_type | Company |
-|---|---|
-| `home_value` | `Residential Seller` |
-| `contact` | `Residential Real Estate Lead` |
-| `buyer_inquiry` | `Residential Real Estate Lead` |
+### Why `message`
+
+This token has **no notes scope**, so the Zoho design (a Lead plus one Note per
+submission) is not available. `message` is a HubSpot **default** contact
+property, present in every portal, multi-line text, writable via the CRM API, and
+documented by HubSpot as being for "any message or comments the contact may want
+to leave on a form". That is exactly this payload.
+
+It is not invented and not custom. `DETAIL_PROPERTY` in `api/_lib/hubspot.mjs`
+names it, and a static check fails the build if it is ever set to anything else.
 
 ### Exact payload
 
 ```json
+POST /crm/v3/objects/contacts
 {
-  "First_Name": "Sam",
-  "Last_Name": "Rivera",
-  "Company": "Residential Seller",
-  "Email": "sam@example.com",
-  "Phone": "(419) 555-0000",
-  "Street": "123 Louisiana Ave, Perrysburg, OH 43551",
-  "Lead_Source": "Website",
-  "Description": "FORM: home_value\nSELLING TIMELINE: ...\n(22 rows)"
+  "properties": {
+    "email": "sam@example.com",
+    "firstname": "Sam",
+    "lastname": "Rivera",
+    "phone": "(419) 555-0000",
+    "message": "FORM: home_value\nPROPERTY ADDRESS: 123 Louisiana Ave...\n(23 rows)"
+  }
 }
 ```
 
-Sent to `POST /crm/v5/Leads/upsert` with `duplicate_check_fields: ["Email"]`,
-followed by `POST /crm/v5/Notes` carrying the same block.
+An update is the same body sent as `PATCH /crm/v3/objects/contacts/{id}`.
 
-### Picklists are never invented
-
-`Lead_Source` and `Lead_Status` are Zoho **picklists**. A value the account does
-not hold is rejected with `INVALID_DATA`, which would fail the whole lead. Three
-safeguards:
-
-1. **`Lead_Status` is omitted unless `ZOHO_LEAD_STATUS` is set.** Zoho's stock
-   statuses are `Not Contacted`, `Contacted`, `Pre-Qualified`, ... - **`New Lead`
-   is not among them** on a default account. The desired semantics are
-   "new / uncontacted"; `Not Contacted` is usually the right value, but it must
-   be confirmed, not assumed.
-2. **`npm run zoho:verify`** reads the account's real field metadata and prints
-   the actual picklist values, flagging any configured value that does not exist.
-3. **Picklist-free retry.** If Zoho still rejects a picklist value, the lead is
-   retried once without `Lead_Source` and `Lead_Status`. A lead that lands
-   unclassified is a small annoyance; a lead lost to an assumed dropdown entry is
-   not acceptable. The retry is logged loudly with the remediation command.
-
-Description rows, always all 22, blanks rendered as `-`:
+### Enquiry block — always all 23 rows, blanks rendered as `-`
 
 ```
-FORM · SELLING TIMELINE · CONDITION · TOPIC · MESSAGE · NOTES ·
+FORM · PROPERTY ADDRESS · SELLING TIMELINE · CONDITION · TOPIC · MESSAGE · NOTES ·
 LANDING PAGE · CURRENT PAGE · REFERRER ·
 UTM SOURCE · UTM MEDIUM · UTM CAMPAIGN · UTM TERM · UTM CONTENT ·
 GCLID · GBRAID · WBRAID · FBCLID · MSCLKID ·
 FIRST TOUCH · SUBMITTED · SUBMISSION ID
 ```
 
-**Duplicate strategy:** upsert on `Email` (no duplicate Leads) **plus a Note on
-every submission** (nothing a person said is ever overwritten).
+`PROPERTY ADDRESS` was **added** during the HubSpot migration. Under Zoho the
+address went into the standard `Street` field, so the block never carried it —
+and because the HubSpot mapping is deliberately limited to email/name/phone, a
+seller's property address would otherwise have been lost on delivery. The block
+now stands alone regardless of which CRM is on the other end.
+
+### Deduplication
+
+1. `POST /crm/v3/objects/contacts/search` filtering `email EQ <address>`, also
+   fetching the current `message`.
+2. Found → `PATCH` that contact. Not found → `POST` a new one.
+3. If the create still returns **409** (HubSpot enforces email uniqueness and the
+   search index can lag a very recent write), the existing id is read from the
+   conflict message and the call becomes an update. If the id cannot be parsed it
+   falls back to `PATCH /crm/v3/objects/contacts/{email}?idProperty=email`.
+
+A repeat submission therefore never creates a second contact.
+
+### History is appended, never overwritten
+
+With no notes scope, a plain update would **overwrite** the previous enquiry — a
+returning seller's first message would vanish the moment they sent a second. So
+the new block is prepended to whatever `message` already holds:
+
+```
+<newest enquiry>
+
+----- earlier submission -----
+
+<previous enquiry>
+```
+
+Trimming only happens if the value would exceed 60,000 bytes (HubSpot's limit is
+65,536 characters / 64 KB). Then the **oldest** entries are dropped, never the
+submission in hand, and the value ends with an explicit
+`----- older submissions trimmed ... -----` marker. Trimming is never silent. One
+maximal lead is roughly 13 KB, so this only engages after several large repeat
+submissions from the same address.
+
+### Failure handling
+
+| HubSpot says | Error | Visitor sees |
+|---|---|---|
+| 401 / 403 | `HUBSPOT_<stage>_AUTH_<status>` | 502 + recovery panel |
+| 429 | `HUBSPOT_<stage>_RATE_LIMITED` | 502 + recovery panel |
+| 5xx | `HUBSPOT_<stage>_SERVER_<status>` | 502 + recovery panel |
+| 200 with an unusable body | `HUBSPOT_<stage>_MALFORMED_RESPONSE` | 502 + recovery panel |
+| 400 rejecting `message` | `HUBSPOT_DETAIL_PROPERTY_UNAVAILABLE` | 502 + recovery panel |
+
+`<stage>` is `SEARCH`, `CREATE` or `UPDATE`. **No HubSpot response body is ever
+attached to a thrown error** — HubSpot echoes submitted values back in validation
+errors, so a body pasted into an Error would put lead PII into the logs.
+
+The `message`-rejected case is deliberately fatal. Saving the name and dropping
+the address, the timeline and the message would hand Crystal a contact with no
+enquiry attached and no sign anything was missing.
+
+### The Zoho mapping (dormant)
+
+`api/_lib/zoho.mjs` still holds the full Lead mapping — `Company` by form type,
+`Lead_Source`/`Lead_Status` picklist safety, the picklist-free retry and the Note
+attachment. It is not imported by `api/lead.js` and a check fails the build if it
+ever is again. It is documented in
+`docs/updates/2026-08-31-zoho-schema-corrections.md`.
 
 ## 5. Tests
 
-`npm test` → build + check + **62 tests, all passing**.
+`npm test` → build + check + **141 tests, all passing**.
 
-29 endpoint tests (method allowlist, origin, size, rate limit, honeypot, email
-validation, length caps, normalisation, description determinism, secret leakage,
-PII redaction) and 11 browser tests (first-touch preservation, attribution in
-payload, success state + reset + event, failure retains values, `ok:false` treated
-as failure, step hiding, keyboard operation, step validation, indicator, analytics).
+- `tests/api.test.mjs` — endpoint contract, validation, limits, secret leakage,
+  PII redaction, and the dormant Zoho mapping
+- `tests/hubspot.test.mjs` — **66 tests** covering the live delivery path: create,
+  update, dedupe, 409 conflict resolution, 401/403/429/5xx, malformed responses,
+  missing token, lookup/create/update failures, detail-history append and
+  trimming, attribution preservation, and token non-leakage
+- `tests/browser.test.mjs` — real Chromium: hero layout across 7 viewports,
+  first-touch preservation, step behaviour, keyboard operation, analytics
 
-**Every guard was negative-tested** — deliberately broken once to prove the suite
-catches it. 18 of 18 in the first pass, 16 of 16 in the schema-correction pass,
-zero no-ops. Preserve this practice.
+All HubSpot tests run against a **stubbed global fetch**. They prove the client
+behaves correctly against HubSpot's documented contract. They do **not** prove a
+real portal accepts the payload — only the live submission in section 3 step 4
+can do that.
+
+**Every guard is negative-tested** — deliberately broken once to prove the suite
+catches it, then restored. 18 of 18 in the first pass, 16 of 16 in the
+schema-correction pass, 21 of 21 in the hero pass, **23 of 23 in the HubSpot
+migration**, zero no-ops throughout. Preserve this practice.
 
 ---
 
@@ -347,7 +418,13 @@ These were the result of a compliance review. Breaking them has legal consequenc
    If it were ever named, Key Realty LTD would need parity with *both* the team
    name and the salesperson's name.
 8. **No automated home valuation.** The site promises a human CMA. Keep it true.
-9. **Asset cache busting.** `/assets/*` is served `immutable` for a year;
+9. **No CRM credential in the browser, ever.** `HUBSPOT_ACCESS_TOKEN` (and the
+   dormant Zoho secrets) are server-only. Checks fail the build if a token name,
+   a bearer header or `api.hubapi.com` appears in anything client-delivered.
+10. **The enquiry detail is never silently dropped.** If HubSpot rejects the
+   `message` property the lead fails loudly. Never "fix" that by retrying without
+   it — that saves a contact with the whole enquiry missing and no sign of it.
+11. **Asset cache busting.** `/assets/*` is served `immutable` for a year;
    `tools/build.mjs` content-hashes CSS and JS. Remove it and new code will never
    reach returning visitors.
 
@@ -357,9 +434,12 @@ These were the result of a compliance review. Breaking them has legal consequenc
 
 | Item | Status |
 |---|---|
-| Zoho env vars | **Not set.** Endpoint returns 503 until done. |
-| Zoho Mail mailbox | `crystal@crystalsellstoledo.com` must exist |
-| Photography | 15 images still placeholders (hero, 12 neighbourhood, 2 lifestyle) |
+| **HubSpot live verification** | **NOT DONE.** No real call has ever been made. Section 3 step 4. |
+| HubSpot `message` property | Assumed present (it is a HubSpot default). Confirm in the portal — section 3 step 3. |
+| Zoho | Dormant. Code retained as a rollback path; env vars no longer read. |
+| Mailbox | `crystal@crystalsellstoledo.com` must exist |
+| Photography | 14 images still placeholders (12 neighbourhood, 2 lifestyle) |
+| Hero image | `assets/img/hero-perrysburg.jpg` absent; hero falls back to a branded gradient |
 | Neighbourhood copy | Drafted from general knowledge; Crystal should rewrite in her voice |
 | Rate limiting | Per-instance memory. Move to Vercel KV/Upstash for a hard global limit. |
 | Last-touch attribution | Only first touch is captured today |
@@ -393,7 +473,9 @@ In rough priority order — none of this is started:
 2. **Last-touch attribution** alongside first touch.
 3. **GA4** wired to the existing CustomEvents (the abstraction already exists).
 4. **Durable rate limiting** via Vercel KV.
-5. **Lead retry queue** so a Zoho outage cannot cost a lead even if the visitor
+5. **Lead retry queue** so a HubSpot outage cannot cost a lead even if the visitor
    gives up.
+6. **Remove the dormant Zoho code** once HubSpot has run in production long
+   enough to trust — but not before.
 6. **Real photography** and Crystal's own neighbourhood copy — the biggest
    conversion and SEO lever left.
