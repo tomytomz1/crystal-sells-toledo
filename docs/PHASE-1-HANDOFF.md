@@ -1,7 +1,7 @@
 # crystalsellstoledo.com — Phase 1 Handoff
 
 Paste-ready context for another assistant. Everything below reflects the repo as
-of **`c6d2aea`**, the most recent commit to change production code (the HubSpot
+of **`6286ab3`**, the most recent commit to change production code (the HubSpot
 timeline-activity pass), on branch `claude/crystal-perrysburg-realtor-site-so38qa`
 and merged to `main`, which is what Vercel deploys.
 
