@@ -44,7 +44,7 @@ api/_lib/*.mjs          validate, security, hubspot, description, log
                         (+ zoho.mjs — dormant rollback path, not imported)
 tools/build.mjs         assembles src/ + assets/ into public/
 tools/check.mjs         static validation, run by npm run check
-tests/*.test.mjs        node:test suites (141 tests)
+tests/*.test.mjs        node:test suites (155 tests)
 docs/                   strategy + compliance docs (NOT deployed)
 public/                 GENERATED. gitignored. Never edit by hand.
 ```
@@ -56,7 +56,7 @@ public/                 GENERATED. gitignored. Never edit by hand.
 ```bash
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
-npm test             # build + check + 141 automated tests
+npm test             # build + check + 155 automated tests
 npm run zoho:verify  # Zoho picklists — only needed if rolling back to Zoho
 npm run dev          # build, then serve public/ on :3000
 ```
@@ -193,6 +193,15 @@ they reach the browser.
 | `HUBSPOT_ACCESS_TOKEN` | **yes** | — |
 | `HUBSPOT_API_BASE` | no | `https://api.hubapi.com` |
 | `ALLOWED_ORIGINS` | no | comma-separated extra hostnames |
+| `GOOGLE_MAPS_API_KEY` | no | unset — address autocomplete stays off |
+
+`GOOGLE_MAPS_API_KEY` is read at **build** time, not request time, so setting it
+requires a **redeploy** to take effect. It is a *browser* key: it is injected into
+the page and is visible to anyone. That is how Google's client APIs work, and it
+is safe only because the key is restricted by HTTP referrer and by API in the
+Google Cloud console. It is **not** a secret in the sense the HubSpot token is,
+and the two must never be treated alike. With it unset, no loader is emitted and
+the address field is an ordinary text input.
 
 The token is the **only** credential required. `isConfigured()` checks nothing
 else, and a check fails the build if that changes.
@@ -368,9 +377,36 @@ attachment. It is not imported by `api/lead.js` and a check fails the build if i
 ever is again. It is documented in
 `docs/updates/2026-08-31-zoho-schema-corrections.md`.
 
+## 4b. Address autocomplete (optional)
+
+The hero's property-address field can offer Google-backed suggestions. It is
+**off unless `GOOGLE_MAPS_API_KEY` is set at build time**, and off in the current
+deploy.
+
+- Uses the Place Autocomplete **Data API** and renders the list itself. The
+  classic `google.maps.places.Autocomplete` widget was deprecated in March 2025
+  and is unavailable to keys created since; a check fails the build if it appears.
+- The real `property_address` input stays the source of truth — label, `required`,
+  `maxlength="200"` and step validation are all unchanged. Google never replaces it.
+- **A visitor is never blocked.** Free text always submits, an address Google does
+  not know still submits, and any failure (no key, blocked script, quota, error)
+  silently reverts the field to plain text. Autocomplete is an enhancement, never
+  a requirement for a lead.
+- Suggestions are **biased** toward Perrysburg (50 km), never **restricted** — a
+  restriction would drop legitimate nearby addresses and make the site look like
+  it refuses other areas. A check enforces this.
+- Cost control: 250 ms debounce, 3-character minimum, session tokens rotated after
+  each selection, and the feature disables itself for the page on any API error.
+
+Setup, key restriction and live verification are in
+`docs/updates/2026-09-01-address-autocomplete.md` section 7. **It has never been
+run against the live Google API** — every test stubs Google.
+
+---
+
 ## 5. Tests
 
-`npm test` → build + check + **141 tests, all passing**.
+`npm test` → build + check + **155 tests, all passing**.
 
 - `tests/api.test.mjs` — endpoint contract, validation, limits, secret leakage,
   PII redaction, and the dormant Zoho mapping
@@ -379,7 +415,8 @@ ever is again. It is documented in
   missing token, lookup/create/update failures, detail-history append and
   trimming, attribution preservation, and token non-leakage
 - `tests/browser.test.mjs` — real Chromium: hero layout across 7 viewports,
-  first-touch preservation, step behaviour, keyboard operation, analytics
+  first-touch preservation, step behaviour, keyboard operation, analytics, and
+  **14 address-autocomplete tests against a stubbed Google**
 
 All HubSpot tests run against a **stubbed global fetch**. They prove the client
 behaves correctly against HubSpot's documented contract. They do **not** prove a
@@ -388,8 +425,10 @@ can do that.
 
 **Every guard is negative-tested** — deliberately broken once to prove the suite
 catches it, then restored. 18 of 18 in the first pass, 16 of 16 in the
-schema-correction pass, 21 of 21 in the hero pass, **23 of 23 in the HubSpot
-migration**, zero no-ops throughout. Preserve this practice.
+schema-correction pass, 21 of 21 in the hero pass, 23 of 23 in the HubSpot
+migration, and **19 of 19 in the address-autocomplete pass** — where four guards
+started as no-ops and had to be repaired before they counted. Zero no-ops
+throughout. Preserve this practice.
 
 ---
 
@@ -440,6 +479,7 @@ These were the result of a compliance review. Breaking them has legal consequenc
 | Mailbox | `crystal@crystalsellstoledo.com` must exist |
 | Photography | 14 images still placeholders (12 neighbourhood, 2 lifestyle) |
 | Hero image | `assets/img/hero-perrysburg.jpg` absent; hero falls back to a branded gradient |
+| Address autocomplete | Built, tested, **off**. Needs `GOOGLE_MAPS_API_KEY` + a restricted key. Never run live. |
 | Neighbourhood copy | Drafted from general knowledge; Crystal should rewrite in her voice |
 | Rate limiting | Per-instance memory. Move to Vercel KV/Upstash for a hard global limit. |
 | Last-touch attribution | Only first touch is captured today |

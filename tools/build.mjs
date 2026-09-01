@@ -115,6 +115,52 @@ const heroImageTag = existsSync(join(ROOT, HERO_IMAGE))
   : "";
 if (!heroImageTag) console.log("  i hero photo absent - using the branded gradient");
 
+/* ---------------------------------------------------------------------
+   Google Places address autocomplete - OPTIONAL, build-time gated.
+   ---------------------------------------------------------------------
+   The Maps JS API key is a BROWSER key: it is designed to be public and
+   there is no way to use Places autocomplete without shipping it. That is
+   fine ONLY because it is restricted in the Google Cloud console (HTTP
+   referrer + API restrictions). It is not a secret in the sense the
+   HubSpot token is, and it must never be confused for one.
+
+   It is injected here, at build time, rather than living in
+   assets/js/main.js, so that:
+     - the key is not committed to the repo
+     - a fork or a local build simply has no autocomplete
+     - rotating the key is a redeploy, not a code change
+
+   With no GOOGLE_MAPS_API_KEY set, NOTHING is emitted and the address
+   field stays an ordinary text input that still accepts any address.
+   Autocomplete is an enhancement; it is never a requirement for a lead.
+   --------------------------------------------------------------------- */
+const MAPS_KEY = (process.env.GOOGLE_MAPS_API_KEY || "").trim();
+
+/* Google keys are URL-safe alphanumerics. Anything else is a paste error or
+   an injection attempt, and either way must not reach a script tag. */
+const MAPS_KEY_OK = /^[A-Za-z0-9_-]{20,80}$/.test(MAPS_KEY);
+if (MAPS_KEY && !MAPS_KEY_OK)
+  throw new Error("GOOGLE_MAPS_API_KEY is not a plausible Google API key - refusing to emit it");
+
+const mapsLoaderTag = MAPS_KEY_OK
+  ? `
+<!-- Google Places address autocomplete. Restricted browser key, injected at
+     build time. The address field works without this script. -->
+<script>
+window.__csvMapsReady = new Promise(function (resolve, reject) {
+  window.__csvMapsResolve = resolve;
+  window.__csvMapsReject = reject;
+  setTimeout(reject, 8000);
+});
+function csvMapsReady() { window.__csvMapsResolve(true); }
+</script>
+<script async src="https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&loading=async&callback=csvMapsReady"
+        onerror="window.__csvMapsReject()"></script>`
+  : "";
+
+if (mapsLoaderTag) console.log("  i Google Places autocomplete enabled");
+else console.log("  i no GOOGLE_MAPS_API_KEY - address field stays a plain text input");
+
 const shell = partial("_shell");
 const pagesDir = join(ROOT, "src/pages");
 const built = [];
@@ -138,6 +184,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     css_v: ASSET_VERSIONS.css_v,
     js_v: ASSET_VERSIONS.js_v,
     heroImage: heroImageTag,
+    mapsLoader: mapsLoaderTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",

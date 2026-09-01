@@ -458,6 +458,208 @@
     });
   }
 
+  /* =============================================================
+     7. Google Places address autocomplete
+     =============================================================
+     Progressive enhancement over the ordinary address input.
+
+     The input stays the single source of truth. Google never replaces
+     it, never owns it, and never gates it: a visitor can ignore every
+     suggestion, type a rural route or a brand-new build Google has never
+     heard of, and submit exactly as before. An address Google cannot find
+     is still a lead.
+
+     This uses the Place Autocomplete DATA api and renders the list
+     ourselves rather than the PlaceAutocompleteElement widget, because
+     the widget brings its own shadow-DOM input - which would displace the
+     real `property_address` field, its label, its maxlength and its
+     required state, and cannot be styled to match the dark hero.
+
+     Anything that goes wrong - no key, script blocked, offline, API error,
+     quota exhausted - closes the list and leaves a plain text field.
+     ============================================================= */
+  var ADDRESS_DEBOUNCE_MS = 250;
+  var ADDRESS_MAX_SUGGESTIONS = 5;
+
+  /* Bias toward Perrysburg without RESTRICTING to it. Crystal works the
+     wider Toledo metro and must not appear to refuse other areas - and a
+     restriction would silently drop a legitimate address just outside it. */
+  var ADDRESS_BIAS = { center: { lat: 41.557, lng: -83.627 }, radius: 50000 };
+
+  function initAddressAutocomplete() {
+    var inputs = document.querySelectorAll('input[name="property_address"]');
+    if (!inputs.length) return;
+
+    /* Absent unless the build injected a Maps key. */
+    if (!window.__csvMapsReady || typeof window.__csvMapsReady.then !== "function") return;
+
+    window.__csvMapsReady.then(function () {
+      if (!window.google || !google.maps || !google.maps.importLibrary) return;
+      return google.maps.importLibrary("places").then(function (places) {
+        Array.prototype.forEach.call(inputs, function (input) {
+          attachAddressAutocomplete(input, places);
+        });
+      });
+    }).catch(function () {
+      /* Stay a plain text field. Never surface this to the visitor: the
+         form works, and an error about a mapping service would only make
+         them think their enquiry failed. */
+    });
+  }
+
+  function attachAddressAutocomplete(input, places) {
+    var Suggestion = places.AutocompleteSuggestion;
+    var SessionToken = places.AutocompleteSessionToken;
+    if (!Suggestion || !SessionToken) return;
+
+    var field = input.parentNode;
+    var list = document.createElement("ul");
+    var listId = (input.id || "addr") + "-suggestions";
+    list.id = listId;
+    list.className = "addr-suggest";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+    field.appendChild(list);
+
+    var live = document.createElement("p");
+    live.className = "sr-only";
+    live.setAttribute("aria-live", "polite");
+    field.appendChild(live);
+
+    /* The browser's own street-address autofill would draw a second,
+       competing dropdown over ours. The attribute stays in the markup so
+       the no-JS path keeps it; it is only dropped once ours is live. */
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-controls", listId);
+    input.setAttribute("aria-autocomplete", "list");
+
+    var token = new SessionToken();
+    var items = [];
+    var active = -1;
+    var timer = null;
+    var seq = 0;
+    var disabled = false;
+
+    function close() {
+      list.hidden = true;
+      list.innerHTML = "";
+      items = [];
+      active = -1;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    }
+
+    function setActive(i) {
+      var opts = list.querySelectorAll("[role=option]");
+      if (!opts.length) return;
+      if (active >= 0 && opts[active]) opts[active].setAttribute("aria-selected", "false");
+      active = (i + opts.length) % opts.length;
+      opts[active].setAttribute("aria-selected", "true");
+      input.setAttribute("aria-activedescendant", opts[active].id);
+      if (opts[active].scrollIntoView) opts[active].scrollIntoView({ block: "nearest" });
+    }
+
+    function choose(i) {
+      if (!items[i]) return;
+      var value = items[i];
+      /* Never write more than the server will accept. */
+      input.value = value.slice(0, Number(input.getAttribute("maxlength")) || 200);
+      close();
+      /* A new session begins after a selection - this is what keeps
+         autocomplete billed per session rather than per keystroke. */
+      token = new SessionToken();
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      analytics.track("address_suggestion_selected", { page: location.pathname });
+      input.focus();
+    }
+
+    function render(values) {
+      items = values;
+      list.innerHTML = "";
+      if (!values.length) { close(); return; }
+      values.forEach(function (text, i) {
+        var li = document.createElement("li");
+        li.id = listId + "-" + i;
+        li.className = "addr-suggest__item";
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", "false");
+        li.textContent = text;
+        /* pointerdown, not click: click fires after blur, which would
+           have already closed the list. */
+        li.addEventListener("pointerdown", function (e) { e.preventDefault(); choose(i); });
+        list.appendChild(li);
+      });
+      list.hidden = false;
+      active = -1;
+      input.setAttribute("aria-expanded", "true");
+      live.textContent = values.length + " address suggestions available.";
+    }
+
+    function request(value, narrowed) {
+      var req = { input: value, sessionToken: token, language: "en", region: "us" };
+      if (narrowed) {
+        req.locationBias = ADDRESS_BIAS;
+        req.includedPrimaryTypes = ["street_address", "premise", "subpremise"];
+      }
+      return Suggestion.fetchAutocompleteSuggestions(req);
+    }
+
+    function fetchFor(value) {
+      var mine = ++seq;
+      /* Retry once unnarrowed: a place-type or bias parameter Google
+         rejects would otherwise kill autocomplete outright, and a slightly
+         less relevant list beats no list at all. */
+      request(value, true)
+        .catch(function () { return request(value, false); })
+        .then(function (res) {
+          if (mine !== seq || disabled) return;          // a newer keystroke won
+          var out = [];
+          var suggestions = (res && res.suggestions) || [];
+          for (var i = 0; i < suggestions.length && out.length < ADDRESS_MAX_SUGGESTIONS; i++) {
+            var pred = suggestions[i] && suggestions[i].placePrediction;
+            var text = pred && pred.text ? String(pred.text) : "";
+            if (text) out.push(text);
+          }
+          render(out);
+        })
+        .catch(function () {
+          /* Quota, network, revoked key. Give up quietly and for good -
+             retrying on every keystroke would just burn the quota. */
+          disabled = true;
+          close();
+        });
+    }
+
+    input.addEventListener("input", function () {
+      if (disabled) return;
+      var value = input.value.trim();
+      clearTimeout(timer);
+      if (value.length < 3) { close(); return; }
+      timer = setTimeout(function () { fetchFor(value); }, ADDRESS_DEBOUNCE_MS);
+    });
+
+    input.addEventListener("keydown", function (e) {
+      if (list.hidden) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === "Enter") {
+        /* Only swallow Enter when a suggestion is actually highlighted.
+           Otherwise the visitor keeps normal form behaviour. */
+        if (active >= 0) { e.preventDefault(); choose(active); }
+        else close();
+      } else if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if (e.key === "Tab") { close(); }
+    });
+
+    input.addEventListener("blur", function () {
+      /* Delayed so a pointerdown on an option still registers. */
+      setTimeout(close, 150);
+    });
+  }
+
   function ready(fn) {
     if (document.readyState !== "loading") fn();
     else document.addEventListener("DOMContentLoaded", fn);
@@ -473,6 +675,7 @@
     initSteps();
     initForms();
     initCtaTracking();
+    initAddressAutocomplete();
     initYear();
   });
 })();

@@ -264,6 +264,66 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (a !== b2) fail("site", `home_value field contract has drifted between / and /home-value:\n      / = ${a}\n      /home-value = ${b2}`);
 }
 
+/* --- Google Places address autocomplete -------------------------------- */
+{
+  const mainJs = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
+  const buildSrc = readFileSync(join(ROOT, "..", "tools/build.mjs"), "utf8");
+
+  /* The Maps key is a browser key, but it still must not be committed. It is
+     injected at build time from GOOGLE_MAPS_API_KEY, so it can be rotated by
+     redeploying and a fork simply gets no autocomplete. */
+  for (const file of ["assets/js/main.js", "assets/css/styles.css"]) {
+    const text = readFileSync(join(ROOT, file), "utf8");
+    if (/AIza[0-9A-Za-z_-]{10,}/.test(text)) fail(file, "contains a hardcoded Google API key");
+    if (/maps\.googleapis\.com/.test(text))
+      fail(file, "loads the Maps API directly — it must be injected by the build");
+  }
+  if (!/GOOGLE_MAPS_API_KEY/.test(buildSrc))
+    fail("tools/build.mjs", "no GOOGLE_MAPS_API_KEY gate for the Maps loader");
+  if (!/\/\^\[[^/]*\]\{\d+,\d+\}\$\/\.test\(\s*MAPS_KEY\s*\)/.test(buildSrc))
+    fail("tools/build.mjs",
+      "the Maps key is not pattern-validated before being written into a script tag");
+  if (!/MAPS_KEY_OK\s*\n?\s*\?/.test(buildSrc))
+    fail("tools/build.mjs", "the Maps loader is emitted unconditionally — it must be key-gated");
+
+  /* Autocomplete is an enhancement. Without a key nothing is emitted and the
+     address field must still be an ordinary, submittable text input. */
+  if (!/__csvMapsReady\b/.test(mainJs))
+    fail("assets/js/main.js", "address autocomplete is not gated on the Maps loader");
+  if (!existsSync(join(ROOT, "index.html"))) fail("site", "index.html missing");
+  else {
+    const home = readFileSync(join(ROOT, "index.html"), "utf8");
+    const hasLoader = /maps\.googleapis\.com/.test(home);
+    if (hasLoader && !/loading=async/.test(home))
+      fail("index.html", "the Maps loader must use loading=async");
+    if (hasLoader && !/callback=csvMapsReady/.test(home))
+      fail("index.html", "the Maps loader has no ready callback");
+    if (!hasLoader && /__csvMapsReady\b/.test(home))
+      fail("index.html", "declares a Maps ready promise with no loader to resolve it");
+  }
+
+  /* The deprecated widget is unavailable to any key created after March 2025,
+     and it would replace our real input with its own shadow-DOM one. */
+  if (/places\.Autocomplete\s*\(|new\s+google\.maps\.places\.Autocomplete/.test(mainJs))
+    fail("assets/js/main.js",
+      "uses the deprecated Places Autocomplete widget — use the Autocomplete Data API");
+
+  /* Suggestions are BIASED toward Perrysburg, never RESTRICTED to it.
+     A restriction would drop legitimate addresses just outside the box and
+     would make the site look like it refuses other areas. */
+  if (/locationRestriction/.test(mainJs))
+    fail("assets/js/main.js",
+      "restricts address suggestions to an area — bias them instead, never restrict");
+  if (!/locationBias/.test(mainJs))
+    fail("assets/js/main.js", "no location bias — local addresses will not rank first");
+
+  /* The real input must remain the source of truth. */
+  if (!/input\[name="property_address"\]/.test(mainJs))
+    fail("assets/js/main.js", "autocomplete is not bound to the real property_address input");
+  if (!/maxlength/.test(mainJs))
+    fail("assets/js/main.js", "a chosen suggestion is not capped to the field's maxlength");
+}
+
 /* --- HubSpot delivery conformance -------------------------------------- */
 const hubspotSrc = existsSync(join(API, "_lib/hubspot.mjs"))
   ? readFileSync(join(API, "_lib/hubspot.mjs"), "utf8") : "";

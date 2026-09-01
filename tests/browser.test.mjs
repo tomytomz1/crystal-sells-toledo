@@ -527,4 +527,242 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     assert.equal(starts[0].form_type, "contact");
     await p.close();
   });
+
+  /* =====================================================================
+     Google Places address autocomplete
+     =====================================================================
+     Google is stubbed. These prove OUR behaviour - the list, the keyboard,
+     what lands in the input, and that a lead is never blocked - not that
+     Google's API returns what we expect. Only a live key proves that.
+     ===================================================================== */
+  const SUGGESTIONS = [
+    "4108 N Holland Sylvania Rd, Toledo, OH 43623, USA",
+    "4108 Watermill Ln, Perrysburg, OH 43551, USA",
+    "4108 Kingsway Dr, Toledo, OH 43606, USA",
+  ];
+
+  /** Install a fake google.maps before any page script runs. */
+  async function withMaps(p, { suggestions = SUGGESTIONS, fail = false } = {}) {
+    await p.addInitScript(({ suggestions, fail }) => {
+      window.__mapsCalls = [];
+      window.__csvMapsReady = Promise.resolve(true);
+      window.google = {
+        maps: {
+          importLibrary: () => Promise.resolve({
+            AutocompleteSessionToken: function () { this.id = Math.random(); },
+            AutocompleteSuggestion: {
+              fetchAutocompleteSuggestions: (req) => {
+                window.__mapsCalls.push({
+                  input: req.input,
+                  hasToken: !!req.sessionToken,
+                  tokenId: req.sessionToken && req.sessionToken.id,
+                });
+                if (fail) return Promise.reject(new Error("stub failure"));
+                return Promise.resolve({
+                  suggestions: suggestions.map((t) => ({ placePrediction: { text: t } })),
+                });
+              },
+            },
+          }),
+        },
+      };
+    }, { suggestions, fail });
+    return p;
+  }
+
+  const openList = async (p, text = "4108") => {
+    await p.fill("#v-address", text);
+    await p.waitForSelector(".addr-suggest:not([hidden]) [role=option]", { timeout: 3000 });
+  };
+
+  test("suggestions appear as the visitor types", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const opts = await p.$$eval(".addr-suggest [role=option]", (n) => n.map((x) => x.textContent));
+    assert.equal(opts.length, 3);
+    assert.ok(opts[0].includes("N Holland Sylvania"));
+    await p.close();
+  });
+
+  test("the lookup is debounced and carries a session token", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await p.click("#v-address");
+    await p.type("#v-address", "4108 Water", { delay: 20 });
+    await openList(p, "4108 Watermill");
+    const calls = await p.evaluate(() => window.__mapsCalls);
+    assert.ok(calls.length <= 3, `expected few calls for fast typing, got ${calls.length}`);
+    assert.ok(calls.every((c) => c.hasToken), "every request must carry a session token");
+    await p.close();
+  });
+
+  test("a new session token starts after each selection", async () => {
+    /* Session tokens are what make autocomplete billed per session rather
+       than per keystroke. Reusing one across selections is a billing bug
+       that nothing else would surface. */
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const before = (await p.evaluate(() => window.__mapsCalls)).slice(-1)[0].tokenId;
+    await p.click(".addr-suggest [role=option]");
+    await p.fill("#v-address", "");
+    await openList(p, "4108 King");
+    const after = (await p.evaluate(() => window.__mapsCalls)).slice(-1)[0].tokenId;
+    assert.ok(before && after, "both lookups must carry a token");
+    assert.notEqual(after, before, "the session token must rotate after a selection");
+    await p.close();
+  });
+
+  test("nothing is requested for very short input", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await p.fill("#v-address", "41");
+    await p.waitForTimeout(500);
+    assert.equal((await p.evaluate(() => window.__mapsCalls)).length, 0);
+    assert.ok(await p.isHidden(".addr-suggest"));
+    await p.close();
+  });
+
+  test("clicking a suggestion fills the real input", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.click(".addr-suggest [role=option]:nth-child(2)");
+    assert.equal(await p.inputValue("#v-address"), SUGGESTIONS[1]);
+    assert.ok(await p.isHidden(".addr-suggest"), "list should close after choosing");
+    await p.close();
+  });
+
+  test("arrow keys and Enter choose a suggestion", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.keyboard.press("ArrowDown");
+    await p.keyboard.press("ArrowDown");
+    await p.keyboard.press("Enter");
+    assert.equal(await p.inputValue("#v-address"), SUGGESTIONS[1]);
+    await p.close();
+  });
+
+  test("Enter on a highlighted suggestion does not advance the step", async () => {
+    /* Enter must select the address, not skip past the field. */
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.keyboard.press("ArrowDown");
+    await p.keyboard.press("Enter");
+    assert.equal(await p.getAttribute('[data-step="2"]', "hidden"), "",
+      "step 2 must still be hidden");
+    await p.close();
+  });
+
+  test("Escape closes the list and keeps what was typed", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.keyboard.press("Escape");
+    assert.ok(await p.isHidden(".addr-suggest"));
+    assert.equal(await p.inputValue("#v-address"), "4108");
+    await p.close();
+  });
+
+  test("the field is a labelled combobox for assistive tech", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const a = await p.evaluate(() => {
+      const i = document.querySelector("#v-address");
+      const opt = document.querySelector(".addr-suggest [role=option]");
+      return {
+        role: i.getAttribute("role"),
+        expanded: i.getAttribute("aria-expanded"),
+        controls: i.getAttribute("aria-controls"),
+        listRole: document.querySelector(".addr-suggest").getAttribute("role"),
+        optId: opt.id,
+        label: document.querySelector('label[for="v-address"]') !== null,
+      };
+    });
+    assert.equal(a.role, "combobox");
+    assert.equal(a.expanded, "true");
+    assert.equal(a.listRole, "listbox");
+    assert.ok(a.controls && a.optId.startsWith(a.controls));
+    assert.ok(a.label, "the visible label must survive");
+    await p.keyboard.press("ArrowDown");
+    assert.equal(await p.getAttribute("#v-address", "aria-activedescendant"),
+      await p.getAttribute(".addr-suggest [role=option]", "id"));
+    await p.close();
+  });
+
+  test("a typed address that matches nothing still submits", async () => {
+    /* The whole point: Google not knowing an address must never cost a lead. */
+    const p = await withMaps(await page(), { suggestions: [] });
+    await p.goto(base + "/");
+    await p.fill("#v-address", "Rural Route 2, Wood County, OH");
+    await p.waitForTimeout(400);
+    assert.ok(await p.isHidden(".addr-suggest"));
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    assert.equal(await p.inputValue("#v-address"), "Rural Route 2, Wood County, OH");
+    await p.close();
+  });
+
+  test("a Google failure degrades to a plain text field", async () => {
+    const p = await withMaps(await page(), { fail: true });
+    const errors = [];
+    p.on("pageerror", (e) => errors.push(String(e)));
+    await p.goto(base + "/");
+    await p.fill("#v-address", "4108 Watermill");
+    await p.waitForTimeout(600);
+    assert.ok(await p.isHidden(".addr-suggest"), "no list on failure");
+    assert.equal(errors.length, 0, "a Places failure must not throw at the visitor");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])', { timeout: 3000 });
+    await p.close();
+  });
+
+  test("with no Maps key the field is an ordinary input", async () => {
+    /* The default build. No key, no script, no combobox, no regression. */
+    const p = await page();
+    await p.goto(base + "/");
+    assert.equal(await p.getAttribute("#v-address", "role"), null);
+    assert.equal(await p.locator(".addr-suggest").count(), 0);
+    await p.fill("#v-address", "123 Main St, Perrysburg, OH");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await p.close();
+  });
+
+  test("a chosen address is never longer than the server accepts", async () => {
+    const long = "9".repeat(260) + " Long Rd, Toledo, OH, USA";
+    const p = await withMaps(await page(), { suggestions: [long] });
+    await p.goto(base + "/");
+    await openList(p);
+    await p.click(".addr-suggest [role=option]");
+    const v = await p.inputValue("#v-address");
+    assert.ok(v.length <= 200, `address ${v.length} chars exceeds the 200 limit`);
+    await p.close();
+  });
+
+  test("a chosen address reaches the lead payload", async () => {
+    const p = await withMaps(await page());
+    let sent = null;
+    await p.route("**/api/lead", async (route) => {
+      sent = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ ok: true, submission_id: "csv_stub" }) });
+    });
+    await p.goto(base + "/");
+    await openList(p);
+    await p.click(".addr-suggest [role=option]:nth-child(2)");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await p.fill("#v-first", "Sam");
+    await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForFunction(() => document.querySelector(".form-status")?.textContent?.length > 0);
+    assert.equal(sent.property_address, SUGGESTIONS[1]);
+    await p.close();
+  });
 });
