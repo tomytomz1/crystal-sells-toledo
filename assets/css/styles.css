@@ -23,10 +23,20 @@
   --sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
   /* Rhythm */
-  --wrap: 1180px;
+  --wrap: 1220px;
   --wrap-narrow: 760px;
   --gutter: clamp(1.25rem, 5vw, 3rem);
   --section-y: clamp(4.5rem, 9vw, 8rem);
+
+  /* Structure comes from hairlines, not boxes. Phase 1 leans on these
+     instead of bordered cards. */
+  --rule-hair:   rgba(20, 18, 15, .10);
+  --rule-strong: rgba(20, 18, 15, .16);
+  /* The hero proof panel sits on its own slightly warmer surface so it
+     reads as a separate page rather than a floating widget. */
+  --desk:        rgba(255, 255, 255, .045);
+  --desk-line:   rgba(255, 255, 255, .13);
+  --measure: 62ch;
 
   --radius: 2px;
   --radius-lg: 4px;
@@ -593,7 +603,15 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(184,134,59,.14);
 }
 .field input:user-invalid, .field textarea:user-invalid { border-color: #b4483c; }
-.form__note { font-size: .8rem; color: var(--muted-lt); line-height: 1.55; }
+.form__note {
+  /* Was .8rem (12.8px) in --muted-lt, about 3:1 on white - too weak for
+     reassurance copy a visitor is expected to read before submitting.
+     --muted on white measures ~5.7:1. The dark-hero override below keeps
+     its own light value. */
+  font-size: .875rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
 .form__note a { color: var(--gold-dk); text-decoration: underline; text-underline-offset: 2px; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 
@@ -915,3 +933,196 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
    panel that showed before it was earned. Fixing it once, globally, is
    safer than remembering `:not([hidden])` on every future component. */
 [hidden] { display: none !important; }
+
+/* ==========================================================================
+   PHASE 1 — editorial homepage
+   ==========================================================================
+   Local editorial authority: structure carried by typography, hairlines and
+   whitespace rather than bordered cards, with gold demoted to an accent.
+   Scoped to homepage components so interior pages are unaffected. */
+
+/* --- section headings: editorial, left-aligned, narrow measure ---------- */
+.sec-head { max-width: var(--measure); margin-bottom: clamp(2.25rem, 4vw, 3.25rem); }
+.sec-head h2 { font-size: clamp(1.85rem, 3.6vw, 2.6rem); margin-bottom: .5em; }
+.sec-head .lede { font-size: clamp(1.02rem, 1.5vw, 1.15rem); margin-bottom: 0; }
+.sec-head--wide { max-width: 46rem; }
+
+/* --- hero: two intentional zones instead of an empty right half -------- */
+.hero__grid { display: grid; gap: clamp(2.5rem, 5vw, 3.5rem); }
+
+@media (min-width: 1024px) {
+  /* Slightly wider left: the seller action outranks the explanation. */
+  .hero__grid { grid-template-columns: 1.04fr .96fr; gap: clamp(3rem, 5vw, 5rem); align-items: start; }
+  .hero--capture .hero__content { max-width: 36rem; }
+}
+
+/* --- hero proof panel --------------------------------------------------
+   Explanatory UI, deliberately NOT a mock report: no figures, no
+   comparables, no addresses. It says how a human valuation is reasoned
+   about, which is the actual differentiator.
+   TODO REAL ASSET: replace with an approved redacted CMA excerpt, or an
+   approved Perrysburg architectural photograph, once one exists. */
+.proof {
+  background: var(--desk);
+  border: 1px solid var(--desk-line);
+  padding: clamp(1.5rem, 3vw, 2.25rem);
+}
+.proof__label {
+  margin: 0 0 1.25rem;
+  font-size: .72rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--gold-lt);
+}
+.proof__list { list-style: none; margin: 0; padding: 0; }
+.proof__item {
+  display: grid;
+  grid-template-columns: 2.25rem 1fr;
+  gap: .5rem;
+  align-items: baseline;
+  padding-block: .8rem;
+  border-top: 1px solid var(--desk-line);
+  color: rgba(255, 255, 255, .9);
+  font-size: .98rem;
+  line-height: 1.45;
+}
+.proof__n {
+  font-size: .74rem;
+  letter-spacing: .1em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, .45);
+}
+.proof__foot {
+  margin: 1.4rem 0 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--desk-line);
+  font-size: .88rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, .62);
+}
+
+/* --- quiet assurance strip: promises, not pseudo-statistics ------------ */
+/* The strip is a thin band directly under the hero: a full section's worth
+   of padding beneath it left a large void before the next heading. */
+.assure-strip { padding-block: clamp(2.25rem, 4vw, 3.25rem); }
+
+.assure {
+  display: grid;
+  gap: clamp(1.75rem, 3.5vw, 2.75rem);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+}
+.assure__item { border-top: 2px solid var(--ink); padding-top: .95rem; }
+.assure__t {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.assure__d { margin: .45rem 0 0; font-size: .95rem; line-height: 1.55; color: var(--muted); }
+
+/* --- reasoning rows: what a human valuation weighs --------------------- */
+.reasons { margin-top: clamp(.5rem, 2vw, 1rem); }
+.reasons__row {
+  display: grid;
+  gap: .35rem clamp(1.5rem, 4vw, 3.5rem);
+  padding-block: clamp(1.15rem, 2.2vw, 1.6rem);
+  border-top: 1px solid var(--line);
+}
+.reasons__row:last-child { border-bottom: 1px solid var(--line); }
+@media (min-width: 720px) {
+  .reasons__row { grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); align-items: baseline; }
+}
+.reasons__t { margin: 0; font-family: var(--serif); font-size: 1.1rem; font-weight: 500; color: var(--ink); }
+.reasons__d { margin: 0; color: var(--muted); font-size: .97rem; line-height: 1.65; }
+
+/* --- method: 01 / 02 / 03 as an editorial sequence, not cards ---------- */
+.method__item {
+  display: grid;
+  gap: .6rem clamp(1.5rem, 4vw, 3.5rem);
+  padding-block: clamp(1.75rem, 3.5vw, 2.75rem);
+  border-top: 1px solid var(--line);
+}
+.method__item:last-child { border-bottom: 1px solid var(--line); }
+@media (min-width: 860px) {
+  .method__item { grid-template-columns: 4rem minmax(0, 13rem) minmax(0, 1fr); align-items: start; }
+}
+.method__n {
+  font-size: .78rem;
+  letter-spacing: .16em;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-dk);
+  padding-top: .3rem;
+}
+.method__k {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.method__d { margin: 0; color: var(--muted); font-size: .99rem; line-height: 1.7; max-width: 56ch; }
+
+/* --- Perrysburg property desk: text-led, no placeholder photography ----
+   TODO REAL ASSET: approved local photography may join this later. Until
+   then generic beige placeholders would misrepresent local knowledge. */
+.desk { margin-top: clamp(.5rem, 2vw, 1rem); }
+.desk__item {
+  display: grid;
+  gap: .35rem clamp(1.25rem, 3vw, 2.5rem);
+  padding-block: clamp(1.4rem, 3vw, 2.1rem);
+  border-top: 1px solid var(--line);
+  transition: background .25s var(--ease);
+}
+.desk__item:last-of-type { border-bottom: 1px solid var(--line); }
+@media (min-width: 780px) {
+  .desk__item { grid-template-columns: 3rem minmax(0, 18rem) minmax(0, 1fr); align-items: baseline; }
+}
+.desk__n {
+  font-size: .76rem;
+  letter-spacing: .14em;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-dk);
+}
+.desk__name {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(1.3rem, 2.4vw, 1.75rem);
+  font-weight: 500;
+  color: var(--ink);
+  transition: color .2s var(--ease);
+}
+.desk__note { margin: 0; color: var(--muted); font-size: .96rem; line-height: 1.6; }
+a.desk__item:hover .desk__name,
+a.desk__item:focus-visible .desk__name { color: var(--gold-dk); }
+a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+.desk__served {
+  margin: clamp(1.75rem, 3vw, 2.5rem) 0 0;
+  font-size: .9rem;
+  line-height: 1.75;
+  color: var(--muted);
+  max-width: 56rem;
+}
+
+/* --- buyer path: available, deliberately subordinate ------------------- */
+.buyer-note {
+  border-top: 1px solid var(--rule-strong);
+  padding-top: clamp(1.25rem, 2.5vw, 1.75rem);
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--muted);
+  max-width: var(--measure);
+}
+.buyer-note a {
+  color: var(--ink);
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 1px;
+  transition: border-color .2s var(--ease);
+}
+.buyer-note a:hover { border-color: var(--gold-dk); }

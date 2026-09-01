@@ -71,42 +71,122 @@
      block will terminate the enclosing comment early and hoist its markup
      out of position.
 
-     The background image is emitted by tools/build.mjs ONLY when the real
-     photograph exists on disk. Absent it, the branded ink gradient below
-     stands in - a development placeholder must never reach production in
-     the primary conversion surface.
+     The right zone is an EXPLANATORY panel, not a sample report. It carries
+     no figures, comparables, addresses or percentages, because none exist
+     yet and inventing them would be a fabricated credential.
+
+     TODO REAL ASSET: approved Perrysburg architectural photograph, and/or a
+     redacted excerpt from a real CMA, to replace the proof panel.
+
+     Do not nest a <section> inside this hero: tools/check.mjs matches the
+     hero up to its first closing tag.
      ===================================================================== -->
 <section class="hero hero--capture">
   <div class="hero__bg">{{heroImage}}</div>
   <div class="hero__inner wrap">
-    <div class="hero__content">
-      <p class="eyebrow">Perrysburg&nbsp;&middot; 43551&nbsp;&middot; Greater Toledo</p>
-      <h1>What could your Perrysburg home sell for?</h1>
-      <p class="hero__lede">Get a local, human valuation built from recent nearby sales and the
-        details of your property &mdash; not an instant automated estimate.</p>
+    <div class="hero__grid">
+      <div class="hero__content">
+        <p class="eyebrow">Perrysburg&nbsp;&middot; 43551&nbsp;&middot; Greater Toledo</p>
+        <h1>What could your Perrysburg home sell for?</h1>
+        <p class="hero__lede">Get a local, human valuation built from recent nearby sales and the
+          details of your property &mdash; not an instant automated estimate.</p>
 
-      {{> home-value-form}}
+        {{> home-value-form}}
 
-      <p class="hero__secondary">
-        <a href="/sell">See how the selling process works <span aria-hidden="true">&rarr;</span></a>
-      </p>
+        <p class="hero__secondary">
+          <a href="/sell">See how the selling process works <span aria-hidden="true">&rarr;</span></a>
+        </p>
+      </div>
+
+      <aside class="proof reveal" aria-label="What a human valuation considers">
+        <p class="proof__label">A human valuation looks at</p>
+        <ul class="proof__list">
+          <li class="proof__item"><span class="proof__n">01</span><span>Recent closed sales</span></li>
+          <li class="proof__item"><span class="proof__n">02</span><span>Condition &amp; updates</span></li>
+          <li class="proof__item"><span class="proof__n">03</span><span>Lot, street &amp; setting</span></li>
+          <li class="proof__item"><span class="proof__n">04</span><span>Competing inventory</span></li>
+          <li class="proof__item"><span class="proof__n">05</span><span>Preparation opportunities</span></li>
+        </ul>
+        <p class="proof__foot">Reviewed personally &mdash; not generated automatically.</p>
+      </aside>
     </div>
   </div>
 </section>
 
-<section class="section--tight">
+<!-- ------------------------------------------------ assurance strip ----
+     Service promises, deliberately NOT styled as quantitative statistics.
+     Every claim below already appears elsewhere on the site. -->
+<section class="assure-strip">
   <div class="wrap">
-    <div class="stats">
-      <div class="stat"><span class="stat__num">Metro&#8209;Wide</span><span class="stat__label">Perrysburg, Toledo, Sylvania, Maumee &amp; beyond</span></div>
-      <div class="stat"><span class="stat__num">Same&nbsp;Day</span><span class="stat__label">Reply to every inquiry</span></div>
-      <div class="stat"><span class="stat__num">Pro&nbsp;Media</span><span class="stat__label">Photo, video &amp; floor plan, always</span></div>
-      <div class="stat"><span class="stat__num">No&nbsp;Pressure</span><span class="stat__label">Free consultation, zero obligation</span></div>
+    <div class="assure">
+      <div class="assure__item">
+        <p class="assure__t">Human valuation</p>
+        <p class="assure__d">Personally reviewed, not automated.</p>
+      </div>
+      <div class="assure__item">
+        <p class="assure__t">Perrysburg depth</p>
+        <p class="assure__d">43551 first, greater Toledo throughout.</p>
+      </div>
+      <div class="assure__item">
+        <p class="assure__t">Professional presentation</p>
+        <p class="assure__d">Photography, video and floor plans.</p>
+      </div>
+      <div class="assure__item">
+        <p class="assure__t">No obligation</p>
+        <p class="assure__d">Useful whether you sell now or later.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------- the human valuation ----
+     Explains the METHOD. This is not a CMA sample and must never present
+     itself as one: no numbers, no comparables, no invented outcomes. -->
+<section class="section">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">The human valuation</p>
+      <h2>The number matters. So does the reasoning behind it.</h2>
+      <p class="lede">An automated estimate reads public records. A person reads the house, the
+        street and what buyers are actually choosing between right now.</p>
+    </div>
+
+    <div class="reasons reveal">
+      <div class="reasons__row">
+        <h3 class="reasons__t">Recent closed sales</h3>
+        <p class="reasons__d">What genuinely comparable homes nearby have sold for lately &mdash; not
+          list prices, and not averages stretched across the whole ZIP.</p>
+      </div>
+      <div class="reasons__row">
+        <h3 class="reasons__t">Current competition</h3>
+        <p class="reasons__d">What a buyer would be weighing your home against this month. The same
+          house is worth something different depending on what else is available.</p>
+      </div>
+      <div class="reasons__row">
+        <h3 class="reasons__t">Condition &amp; updates</h3>
+        <p class="reasons__d">Which improvements a buyer will actually pay for, and which ones
+          quietly return nothing.</p>
+      </div>
+      <div class="reasons__row">
+        <h3 class="reasons__t">Lot, street &amp; setting</h3>
+        <p class="reasons__d">Position on the street, lot size and what is around you &mdash; the part
+          no automated estimate can see.</p>
+      </div>
+      <div class="reasons__row">
+        <h3 class="reasons__t">Preparation opportunities</h3>
+        <p class="reasons__d">The cheap changes that add thousands before listing, and the expensive
+          ones that do not.</p>
+      </div>
+    </div>
+
+    <div class="btn-row" style="margin-top:clamp(2rem,4vw,3rem)">
+      <a class="btn btn--primary" href="/home-value">See what goes into your valuation</a>
     </div>
   </div>
 </section>
 
 <!-- ---------------------------------------------------------- meet ---- -->
-<section class="section">
+<section class="section section--cream">
   <div class="wrap">
     <div class="split split--media-right">
       <div class="frame frame--portrait reveal">
@@ -115,7 +195,7 @@
              width="1000" height="1250" loading="lazy">
       </div>
       <div class="reveal">
-        <p class="eyebrow">Meet your agent</p>
+        <p class="eyebrow">Who reviews your home</p>
         <h2>A neighbor first, an agent second.</h2>
         <p class="lede">I live here, my kids are growing up here, and I know what makes one street
           sell in a weekend while the next one sits.</p>
@@ -132,135 +212,112 @@
   </div>
 </section>
 
-<!-- --------------------------------------------------------- how -------- -->
-<section class="section section--cream">
-  <div class="wrap">
-    <div class="center" style="margin-bottom:clamp(2.5rem,5vw,4rem)">
-      <p class="eyebrow">The difference</p>
-      <h2>What a properly marketed listing looks like</h2>
-      <p class="lede">Three quarters of buyers decide whether to book a showing from the photos alone.
-        So we start there &mdash; and we do not stop there.</p>
-    </div>
-
-    <div class="grid grid--3">
-      <article class="card reveal">
-        <div class="card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h3l2-2h8l2 2h3v12H3z"/><circle cx="12" cy="13" r="3.5"/></svg></div>
-        <h3>Photography that sells</h3>
-        <p>Professional stills, twilight exteriors, walkthrough video and an accurate floor plan &mdash;
-          on every listing, at every price point. Never a phone snapshot.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H4z"/><path d="M8 20h8"/><path d="M12 16v4"/><path d="M8 10l2.5 2.5L16 7"/></svg></div>
-        <h3>Prepared before it is priced</h3>
-        <p>A room-by-room walkthrough before we list: what to fix, what to leave, what to stage.
-          The cheap changes that add thousands, and the expensive ones that do not.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg></div>
-        <h3>Exposure beyond the MLS</h3>
-        <p>Targeted social campaigns to buyers actively searching your area, syndication
-          everywhere buyers look, and direct outreach to the agents already working your street.</p>
-      </article>
-    </div>
-
-    <div class="btn-row center" style="margin-top:clamp(2.5rem,5vw,3.5rem)">
-      <a class="btn btn--primary" href="/sell">The full selling process</a>
-    </div>
-  </div>
-</section>
-
-<!-- ---------------------------------------------------- two paths ------- -->
+<!-- -------------------------------------------------- selling method ---
+     The existing three service commitments, recomposed as a sequence.
+     No new commitment has been introduced. -->
 <section class="section">
   <div class="wrap">
-    <div class="grid grid--2">
-      <article class="card card--link reveal" style="display:flex;flex-direction:column">
-        <span class="card__num">01</span>
-        <h3>I&rsquo;m thinking about selling</h3>
-        <p style="flex:1">Find out what your home is realistically worth today, what it would take to get
-          top dollar, and whether this season is the right one to move. No obligation, no follow-up
-          you did not ask for.</p>
-        <div style="margin-top:1.75rem"><a class="textlink" href="/home-value">Get my home&rsquo;s value <span aria-hidden="true">&rarr;</span></a></div>
-      </article>
-      <article class="card card--link reveal" style="display:flex;flex-direction:column">
-        <span class="card__num">02</span>
-        <h3>I&rsquo;m looking to buy</h3>
-        <p style="flex:1">The good homes around Toledo rarely sit. Get set up on real-time
-          alerts, learn the neighborhoods honestly &mdash; including the trade-offs &mdash; and have
-          someone in your corner when it is time to write.</p>
-        <div style="margin-top:1.75rem"><a class="textlink" href="/buy">Start your search <span aria-hidden="true">&rarr;</span></a></div>
-      </article>
+    <div class="sec-head reveal">
+      <p class="eyebrow">How a listing is run</p>
+      <h2>Prepare, position, launch.</h2>
+      <p class="lede">Three quarters of buyers decide whether to book a showing from the photos
+        alone. So we start well before that &mdash; and we do not stop there.</p>
+    </div>
+
+    <div class="reveal">
+      <div class="method__item">
+        <p class="method__n">01</p>
+        <h3 class="method__k">Prepare</h3>
+        <p class="method__d">A room-by-room walkthrough before we list: what to fix, what to leave,
+          what to stage. The cheap changes that add thousands, and the expensive ones that do not.</p>
+      </div>
+      <div class="method__item">
+        <p class="method__n">02</p>
+        <h3 class="method__k">Position</h3>
+        <p class="method__d">Professional stills, twilight exteriors, walkthrough video and an
+          accurate floor plan &mdash; on every listing, at every price point. Never a phone snapshot.</p>
+      </div>
+      <div class="method__item">
+        <p class="method__n">03</p>
+        <h3 class="method__k">Launch</h3>
+        <p class="method__d">Targeted social campaigns to buyers actively searching your area,
+          syndication everywhere buyers look, and direct outreach to the agents already working
+          your street.</p>
+      </div>
+    </div>
+
+    <div class="btn-row" style="margin-top:clamp(2rem,4vw,3rem)">
+      <a class="btn btn--ghost" href="/sell">See the full selling process</a>
     </div>
   </div>
 </section>
 
-<!-- -------------------------------------------------- neighborhoods ---- -->
+<!-- ------------------------------------------- Perrysburg property desk
+     Text-led on purpose. The neighborhood artwork is still placeholder
+     material, and beige stand-ins presented as local knowledge would be a
+     fabricated credential.
+     TODO REAL ASSET: approved Perrysburg neighborhood photography. -->
 <section class="section section--cream">
   <div class="wrap">
-    <div class="center" style="margin-bottom:clamp(2.5rem,5vw,4rem)">
-      <p class="eyebrow">Know before you move</p>
-      <h2>The neighborhoods of greater Toledo</h2>
-      <p class="lede">Toledo is not one market &mdash; it is dozens of small ones, from century homes in
-        the Old West End to new builds in Perrysburg, and they behave very differently.</p>
+    <div class="sec-head reveal">
+      <p class="eyebrow">The Perrysburg Property Desk</p>
+      <h2>Street-level knowledge, neighborhood by neighborhood.</h2>
+      <p class="lede">Toledo is not one market &mdash; it is dozens of small ones, and they behave very
+        differently. Here is where that matters most in 43551.</p>
     </div>
 
-    <div class="grid grid--3">
-      <a class="hood reveal" href="/neighborhoods#historic-downtown">
-        <div class="hood__media"><span class="hood__tag">Historic</span>
-          <img src="/assets/img/hood-downtown.jpg" data-fallback="/assets/img/placeholder-hood.svg"
-               alt="Historic Downtown Perrysburg" width="800" height="600" loading="lazy"></div>
-        <div class="hood__body">
-          <h3>Historic Downtown</h3>
-          <p>Century homes, brick sidewalks and Louisiana Avenue at your doorstep. Character you cannot rebuild.</p>
-          <div class="hood__meta"><span>Walkable</span><span>Character homes</span></div>
-        </div>
+    <div class="desk reveal">
+      <a class="desk__item" href="/neighborhoods#historic-downtown">
+        <p class="desk__n">01</p>
+        <h3 class="desk__name">Historic Downtown</h3>
+        <p class="desk__note">Century homes, brick sidewalks and Louisiana Avenue at your doorstep.
+          Character you cannot rebuild.</p>
       </a>
-
-      <a class="hood reveal" href="/neighborhoods#riverbend">
-        <div class="hood__media"><span class="hood__tag">New build</span>
-          <img src="/assets/img/hood-riverbend.jpg" data-fallback="/assets/img/placeholder-hood.svg"
-               alt="Village at Riverbend, Perrysburg" width="800" height="600" loading="lazy"></div>
-        <div class="hood__body">
-          <h3>Village at Riverbend</h3>
-          <p>Newer construction, open plans and modern finishes &mdash; where much of Perrysburg&rsquo;s recent volume has landed.</p>
-          <div class="hood__meta"><span>New construction</span><span>Newer build-out</span></div>
-        </div>
+      <a class="desk__item" href="/neighborhoods#riverbend">
+        <p class="desk__n">02</p>
+        <h3 class="desk__name">Village at Riverbend</h3>
+        <p class="desk__note">Newer construction, open plans and modern finishes &mdash; where much of
+          Perrysburg&rsquo;s recent volume has landed.</p>
       </a>
-
-      <a class="hood reveal" href="/neighborhoods#three-meadows">
-        <div class="hood__media"><span class="hood__tag">Established</span>
-          <img src="/assets/img/hood-three-meadows.jpg" data-fallback="/assets/img/placeholder-hood.svg"
-               alt="Three Meadows, Perrysburg" width="800" height="600" loading="lazy"></div>
-        <div class="hood__body">
-          <h3>Three Meadows</h3>
-          <p>Mature trees, generous lots and the kind of established streets buyers keep circling back to.</p>
-          <div class="hood__meta"><span>Mature</span><span>Larger lots</span></div>
-        </div>
+      <a class="desk__item" href="/neighborhoods#three-meadows">
+        <p class="desk__n">03</p>
+        <h3 class="desk__name">Three Meadows</h3>
+        <p class="desk__note">Mature trees, generous lots and the kind of established streets buyers
+          keep circling back to.</p>
+      </a>
+      <a class="desk__item" href="/neighborhoods#fort-meigs">
+        <p class="desk__n">04</p>
+        <h3 class="desk__name">Fort Meigs &amp; the riverfront</h3>
+        <p class="desk__note">The Maumee River edge of town, where setting and proximity do a lot of
+          the work.</p>
       </a>
     </div>
 
-    <div class="btn-row center" style="margin-top:clamp(2.5rem,5vw,3.5rem)">
-      <a class="btn btn--ghost" href="/neighborhoods">All neighborhood guides</a>
+    <p class="desk__served">Also working across Perrysburg Township &middot; Maumee &middot; Rossford
+      &middot; Waterville &middot; Whitehouse &middot; Monclova &middot; Holland &middot; Sylvania
+      &middot; Toledo &middot; Oregon &middot; Northwood &middot; and the surrounding Wood and Lucas
+      County communities.</p>
+
+    <div class="btn-row" style="margin-top:clamp(2rem,4vw,3rem)">
+      <a class="btn btn--ghost" href="/neighborhoods">Explore Perrysburg &amp; greater Toledo</a>
     </div>
   </div>
 </section>
 
-<!-- ---------------------------------------------------- testimonials --- -->
-<!-- Client reviews go here once real ones exist. Deliberately empty:
+<!-- ---------------------------------------------------- testimonials ---
+     Client reviews go here once real ones exist. Deliberately empty:
      mocked-up testimonials read as fabricated endorsements (NAR Article 12,
      FTC Endorsement Guides). Restore this section with verbatim quotes and
      the client's permission to use their name. -->
 
-<section class="section section--tight section--cream">
-  <div class="wrap center">
-    <p class="eyebrow">Areas served</p>
-    <h2 style="font-size:clamp(1.5rem,2.8vw,2rem)">Greater Toledo is my market. Perrysburg is my specialty.</h2>
-    <p class="lede" style="margin-top:1rem">I work with buyers and sellers right across the metro,
-      and go deepest in Perrysburg and 43551. Wherever you are moving, I would love to hear from you.</p>
-    <p style="margin-top:1.5rem;font-size:.92rem;color:var(--muted);max-width:52rem;margin-inline:auto">
-      Perrysburg &middot; Perrysburg Township &middot; Maumee &middot; Rossford &middot; Waterville
-      &middot; Whitehouse &middot; Monclova &middot; Holland &middot; Sylvania &middot; Toledo
-      &middot; Oregon &middot; Northwood &middot; and the surrounding Wood and Lucas County communities
-    </p>
+<!-- ------------------------------------------------------ buyer path ---
+     Available, deliberately subordinate: this is a seller-acquisition site
+     and seller intent has already been served throughout the page. -->
+<section class="section section--tight">
+  <div class="wrap">
+    <p class="buyer-note">Buying instead?
+      <a href="/buy">Explore how Crystal helps buyers compete around greater Toledo
+      <span aria-hidden="true">&rarr;</span></a></p>
   </div>
 </section>
 
