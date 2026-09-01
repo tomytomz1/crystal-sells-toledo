@@ -597,6 +597,13 @@
     input.setAttribute("aria-autocomplete", "list");
 
     var token = new SessionToken();
+    /* The exact value this widget last wrote into the input. While the input
+       still holds it, the visitor has chosen and not yet edited, so there is
+       nothing to look up. Cleared the moment they change a character. */
+    var chosenValue = null;
+    /* True only while WE are dispatching input/change after a selection, so
+       our own listener can tell our write apart from the visitor typing. */
+    var programmatic = false;
     var items = [];
     var active = -1;
     var timer = null;
@@ -622,18 +629,51 @@
       if (opts[active].scrollIntoView) opts[active].scrollIntoView({ block: "nearest" });
     }
 
+    /**
+     * Choosing a suggestion is TERMINAL for that interaction.
+     *
+     * It previously was not. Writing the address dispatched an `input` event
+     * so the rest of the form would notice, that event synchronously re-entered
+     * our own input listener, which scheduled another lookup, and the menu
+     * reopened underneath the address the visitor had just picked. A response
+     * already in flight could do the same thing on its own.
+     *
+     * So all four routes are closed here: the pending debounce is cancelled,
+     * the request sequence is invalidated so a late response cannot render,
+     * our own listener is told to ignore the write we are about to announce,
+     * and the chosen value is remembered so nothing reopens while it stands.
+     */
     function choose(i) {
       if (!items[i]) return;
       var value = items[i];
+
+      clearTimeout(timer);
+      /* Any response still in flight belongs to a query the visitor has now
+         answered. Bumping the sequence makes it land on the floor. */
+      seq++;
+
       /* Never write more than the server will accept. */
       input.value = value.slice(0, Number(input.getAttribute("maxlength")) || 200);
+      chosenValue = input.value;
       close();
+
       /* A new session begins after a selection - this is what keeps
          autocomplete billed per session rather than per keystroke. */
       token = new SessionToken();
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+
+      /* The rest of the form still needs to know the field changed. Guarded so
+         announcing it cannot be mistaken for the visitor typing. */
+      programmatic = true;
+      try {
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      } finally {
+        programmatic = false;
+      }
+
       analytics.track("address_suggestion_selected", { page: location.pathname });
+      /* Focus stays in the field - the visitor may want to edit what they
+         picked. Blurring to hide the menu would be a worse fix than none. */
       input.focus();
     }
 
@@ -705,8 +745,18 @@
 
     input.addEventListener("input", function () {
       if (disabled) return;
+      /* Our own post-selection announcement, not the visitor. */
+      if (programmatic) return;
+
       var value = input.value.trim();
       clearTimeout(timer);
+
+      /* Still exactly what was chosen - nothing to look up, and reopening
+         would put a menu over an answered field. Any real edit falls through
+         and clears this, so autocomplete comes straight back. */
+      if (chosenValue !== null && input.value === chosenValue) return;
+      chosenValue = null;
+
       if (value.length < 3) { close(); return; }
       timer = setTimeout(function () { fetchFor(value); }, ADDRESS_DEBOUNCE_MS);
     });
@@ -730,6 +780,113 @@
     });
   }
 
+  /* =============================================================
+     8. US phone formatting
+     =============================================================
+     Presentation and normalisation ONLY. api/_lib/validate.mjs stays
+     authoritative: it re-normalises whatever arrives and rejects anything
+     over the limit. Nothing here relaxes that.
+
+     A visitor typing 5863241248 saw 5863241248 back, which reads as a
+     number the site did not understand.
+     ============================================================= */
+
+  /** The logical value: at most ten US digits, country code dropped. */
+  function phoneDigits(raw) {
+    var d = String(raw == null ? "" : raw).replace(/\D/g, "");
+    /* A leading 1 is the US country code only once the rest is a full
+       number - stripping it earlier would eat a real area code digit. */
+    if (d.length === 11 && d.charAt(0) === "1") d = d.slice(1);
+    return d.slice(0, 10);
+  }
+
+  /** Progressive display: 5 / 58 / 586 / (586) 3 / (586) 324-1248 */
+  function phoneFormat(d) {
+    if (!d) return "";
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return "(" + d.slice(0, 3) + ") " + d.slice(3);
+    return "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6);
+  }
+
+  /** How many digits precede this caret position. Punctuation never counts. */
+  function digitsBefore(text, caret) {
+    var n = 0;
+    for (var i = 0; i < caret && i < text.length; i++)
+      if (text.charAt(i) >= "0" && text.charAt(i) <= "9") n++;
+    return n;
+  }
+
+  /** Where the caret goes to sit after `n` digits of the formatted text. */
+  function caretAfterDigits(text, n) {
+    if (n <= 0) return 0;
+    var seen = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (text.charAt(i) >= "0" && text.charAt(i) <= "9") {
+        seen++;
+        if (seen === n) return i + 1;
+      }
+    }
+    return text.length;
+  }
+
+  function initPhoneFormat() {
+    document.querySelectorAll('input[name="phone"]').forEach(function (input) {
+      input.setAttribute("inputmode", "tel");
+
+      function apply(rawValue, digitPos) {
+        var text = phoneFormat(phoneDigits(rawValue));
+        if (input.value !== text) input.value = text;
+        if (digitPos != null && document.activeElement === input) {
+          var pos = caretAfterDigits(text, digitPos);
+          try { input.setSelectionRange(pos, pos); } catch (err) { /* not selectable */ }
+        }
+      }
+
+      /* Backspace and Delete must never strand the caret on generated
+         punctuation. When the character being removed is punctuation, take
+         the nearest digit on that side instead, so held-down Backspace walks
+         straight out of the field instead of sticking on ") ". */
+      input.addEventListener("keydown", function (e) {
+        if (e.key !== "Backspace" && e.key !== "Delete") return;
+        if (input.selectionStart !== input.selectionEnd) return;   // a range: let it through
+        var v = input.value;
+        var at = input.selectionStart;
+        var isDigit = function (c) { return c >= "0" && c <= "9"; };
+
+        if (e.key === "Backspace") {
+          var i = at - 1;
+          while (i >= 0 && !isDigit(v.charAt(i))) i--;
+          if (i < 0) return;                       // only punctuation behind
+          if (i === at - 1) return;                // already a digit: normal path
+          e.preventDefault();
+          apply(v.slice(0, i) + v.slice(at), digitsBefore(v, i));
+        } else {
+          var j = at;
+          while (j < v.length && !isDigit(v.charAt(j))) j++;
+          if (j >= v.length) return;
+          if (j === at) return;
+          e.preventDefault();
+          apply(v.slice(0, j) + v.slice(j + 1), digitsBefore(v, at));
+        }
+      });
+
+      /* Covers typing, paste, cut, range replacement and drag-drop: the
+         browser has already applied the edit, so the caret is read from the
+         raw text and re-placed after the same number of digits. */
+      input.addEventListener("input", function () {
+        apply(input.value, digitsBefore(input.value, input.selectionStart || 0));
+      });
+
+      /* Some browsers autofill without firing `input`. */
+
+      input.addEventListener("change", function () { apply(input.value, null); });
+      input.addEventListener("blur", function () { apply(input.value, null); });
+
+      /* An autofilled value present before this ran. Blank stays blank. */
+      if (input.value) apply(input.value, null);
+    });
+  }
+
   function ready(fn) {
     if (document.readyState !== "loading") fn();
     else document.addEventListener("DOMContentLoaded", fn);
@@ -746,6 +903,7 @@
     initForms();
     initCtaTracking();
     initAddressAutocomplete();
+    initPhoneFormat();
     initYear();
   });
 })();

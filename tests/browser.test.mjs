@@ -544,8 +544,8 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
   ];
 
   /** Install a fake google.maps before any page script runs. */
-  async function withMaps(p, { suggestions = SUGGESTIONS, fail = false, rejectTypes = false } = {}) {
-    await p.addInitScript(({ suggestions, fail, rejectTypes }) => {
+  async function withMaps(p, { suggestions = SUGGESTIONS, fail = false, rejectTypes = false, delayMs = 0 } = {}) {
+    await p.addInitScript(({ suggestions, fail, rejectTypes, delayMs }) => {
       window.__mapsCalls = [];
       window.__csvMapsReady = Promise.resolve(true);
       window.google = {
@@ -562,6 +562,12 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
                   types: req.includedPrimaryTypes || null,
                 });
                 if (fail) return Promise.reject(new Error("stub failure"));
+                const answer = () => ({
+                  suggestions: suggestions.map((t) => ({ placePrediction: { text: t } })),
+                });
+                /* Resolving LATE is how the live reopen bug reproduces: a
+                   response for the query before the click lands after it. */
+                if (delayMs) return new Promise((r) => setTimeout(() => r(answer()), delayMs));
                 /* Places rejects the whole request over one bad type value. */
                 if (rejectTypes && req.includedPrimaryTypes)
                   return Promise.reject(new Error("INVALID_ARGUMENT: includedPrimaryTypes"));
@@ -573,7 +579,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
           }),
         },
       };
-    }, { suggestions, fail, rejectTypes });
+    }, { suggestions, fail, rejectTypes, delayMs });
     return p;
   }
 
@@ -1067,6 +1073,388 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     const n = await p.evaluate(() =>
       document.querySelectorAll('script[src*="googletagmanager.com"]').length);
     assert.equal(n, 0, "a non-production build must not report to GA4");
+    await p.close();
+  });
+
+  /* =====================================================================
+     Choosing an address suggestion is terminal
+     =====================================================================
+     Live bug: after clicking a suggestion the address was written correctly,
+     then the menu immediately reopened underneath it showing the same address
+     and its neighbours. Two causes: the post-selection `input` event we
+     dispatch re-entered our own listener and scheduled another lookup, and a
+     response already in flight could render after the menu had closed.
+     ===================================================================== */
+
+  const menuOpen = (p) => p.evaluate(() => {
+    const l = document.querySelector(".addr-suggest");
+    return !!l && !l.hidden && l.querySelectorAll("[role=option]").length > 0;
+  });
+
+  test("clicking a suggestion closes the menu and it stays closed", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.click(".addr-suggest [role=option]:nth-child(2)");
+
+    assert.equal(await p.inputValue("#v-address"), SUGGESTIONS[1]);
+    assert.equal(await menuOpen(p), false, "the menu did not close");
+    /* Well past the 250ms debounce and any queued work. */
+    await p.waitForTimeout(900);
+    assert.equal(await menuOpen(p), false, "the menu reopened after selection");
+    assert.equal(await p.inputValue("#v-address"), SUGGESTIONS[1], "the address changed");
+    await p.close();
+  });
+
+  test("Enter on a highlighted suggestion closes the menu and it stays closed", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.keyboard.press("ArrowDown");
+    await p.keyboard.press("Enter");
+
+    assert.equal(await p.inputValue("#v-address"), SUGGESTIONS[0]);
+    assert.equal(await menuOpen(p), false);
+    await p.waitForTimeout(900);
+    assert.equal(await menuOpen(p), false, "the menu reopened after keyboard selection");
+    await p.close();
+  });
+
+  test("a stale response resolving AFTER selection cannot reopen the menu", async () => {
+    /* The live failure, reproduced: the lookup for what was typed resolves
+       only after the visitor has already clicked a suggestion. */
+    const p = await withMaps(await page(), { delayMs: 700 });
+    await p.goto(base + "/");
+    await p.fill("#v-address", "4108");
+    await p.waitForSelector(".addr-suggest:not([hidden]) [role=option]", { timeout: 4000 });
+
+    /* Start another lookup, then choose before it can answer. */
+    await p.fill("#v-address", "4108 W");
+    await p.waitForTimeout(300);            // debounce fired, request in flight
+    await p.evaluate(() => {
+      const opt = document.querySelector(".addr-suggest [role=option]");
+      if (opt) opt.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+    });
+    const chosen = await p.inputValue("#v-address");
+    assert.ok(chosen.length > 6, "nothing was selected: " + chosen);
+
+    await p.waitForTimeout(1200);           // the stale response has landed by now
+    assert.equal(await menuOpen(p), false, "a stale response reopened the menu");
+    assert.equal(await p.inputValue("#v-address"), chosen, "a stale response changed the address");
+    await p.close();
+  });
+
+  test("the programmatic write on selection triggers no new Places request", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const before = (await p.evaluate(() => window.__mapsCalls)).length;
+    await p.click(".addr-suggest [role=option]");
+    await p.waitForTimeout(900);
+    const after = (await p.evaluate(() => window.__mapsCalls)).length;
+    assert.equal(after, before, `selection caused ${after - before} extra lookup(s)`);
+    await p.close();
+  });
+
+  test("editing the selected address makes autocomplete active again", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    await p.click(".addr-suggest [role=option]");
+    await p.waitForTimeout(400);
+    assert.equal(await menuOpen(p), false);
+
+    /* The visitor changes what they picked. */
+    await p.click("#v-address");
+    await p.keyboard.press("End");
+    await p.keyboard.type(" Apt 4");
+    await p.waitForSelector(".addr-suggest:not([hidden]) [role=option]", { timeout: 4000 });
+    assert.equal(await menuOpen(p), true, "autocomplete did not come back after an edit");
+    await p.close();
+  });
+
+  test("selection still rotates the session token", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const before = (await p.evaluate(() => window.__mapsCalls)).slice(-1)[0].tokenId;
+    await p.click(".addr-suggest [role=option]");
+    await p.fill("#v-address", "");
+    await openList(p, "4108 King");
+    const after = (await p.evaluate(() => window.__mapsCalls)).slice(-1)[0].tokenId;
+    assert.ok(before && after);
+    assert.notEqual(after, before, "the session token stopped rotating");
+    await p.close();
+  });
+
+  test("a chosen address still submits and reaches the lead payload", async () => {
+    const p = await withMaps(await page());
+    let sent = null;
+    await p.route("**/api/lead", async (route) => {
+      sent = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ ok: true, submission_id: "csv_sel" }) });
+    });
+    await p.goto(base + "/");
+    await openList(p);
+    await p.click(".addr-suggest [role=option]:nth-child(2)");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await p.fill("#v-first", "Sam");
+    await p.fill("#v-last", "Rivera");
+    await p.fill("#v-email", "sam@example.com");
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForSelector("[data-form-success]:not([hidden])");
+    assert.equal(sent.property_address, SUGGESTIONS[1]);
+    await p.close();
+  });
+
+
+  /* =====================================================================
+     Success panel heading contrast
+     ===================================================================== */
+
+  /** WCAG relative luminance, compositing any alpha over its backdrop. */
+  const CONTRAST_FN = () => {
+    window.__contrast = (sel) => {
+      const el = document.querySelector(sel);
+      const parse = (c) => { const n = c.match(/[\d.]+/g).map(Number); return { r: n[0], g: n[1], b: n[2], a: n.length > 3 ? n[3] : 1 }; };
+      const over = (f, b) => ({ r: f.a * f.r + (1 - f.a) * b.r, g: f.a * f.g + (1 - f.a) * b.g, b: f.a * f.b + (1 - f.a) * b.b, a: 1 });
+      const lum = (o) => { const [r, g, b] = [o.r, o.g, o.b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      let node = el, bg = null;
+      while (node && node !== document.documentElement) {
+        const c = getComputedStyle(node).backgroundColor;
+        if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) {
+          const p = parse(c);
+          bg = bg ? over(bg, p) : p;
+          if (p.a === 1) break;
+        }
+        node = node.parentElement;
+      }
+      if (!bg || bg.a < 1) bg = over(bg || { r: 0, g: 0, b: 0, a: 0 }, { r: 20, g: 18, b: 15, a: 1 });
+      const fg = over(parse(getComputedStyle(el).color), bg);
+      const L1 = lum(fg), L2 = lum(bg);
+      const [hi, lo] = L1 > L2 ? [L1, L2] : [L2, L1];
+      return { ratio: (hi + 0.05) / (lo + 0.05), color: getComputedStyle(el).color };
+    };
+  };
+
+  for (const [label, path] of [["the homepage hero", "/"], ["/home-value", "/home-value"]]) {
+    test(`the success heading is readable on ${label}`, async () => {
+      const p = await page();
+      await p.addInitScript(CONTRAST_FN);
+      await submitHomeValue(p, path);
+      const r = await p.evaluate(() => window.__contrast(".success-panel__title"));
+      /* Large text needs 3:1; this clears the 4.5:1 normal-text bar anyway.
+         The live bug was near-black on near-black, around 1:1. */
+      assert.ok(r.ratio >= 4.5,
+        `success heading contrast is ${r.ratio.toFixed(2)}:1 (${r.color}) on ${label}`);
+      await p.close();
+    });
+
+    test(`the success heading colour is set explicitly on ${label}`, async () => {
+      /* `h1,h2,h3,h4 { color: var(--ink) }` beats a colour inherited from the
+         panel, so the heading must name its own. */
+      const p = await page();
+      await submitHomeValue(p, path);
+      const same = await p.evaluate(() => {
+        const t = document.querySelector(".success-panel__title");
+        const panel = document.querySelector("[data-form-success]");
+        return { heading: getComputedStyle(t).color, panel: getComputedStyle(panel).color };
+      });
+      assert.equal(same.heading, same.panel,
+        "the heading colour does not match its panel — it is falling back to the global heading ink");
+      await p.close();
+    });
+  }
+
+  test("the gold confirmation mark survives the contrast fix", async () => {
+    const p = await page();
+    await submitHomeValue(p, "/");
+    const mark = await p.evaluate(() => {
+      const m = document.querySelector(".success-panel__mark");
+      return m ? getComputedStyle(m).backgroundColor : null;
+    });
+    assert.ok(mark && !/rgba\(0, 0, 0, 0\)/.test(mark), "the accent mark lost its background");
+    await p.close();
+  });
+
+
+  /* =====================================================================
+     US phone formatting
+     ===================================================================== */
+
+  async function phonePage(path = "/") {
+    const p = await page();
+    await p.goto(base + path);
+    if (path === "/") {
+      await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
+      await p.click("[data-step-next]");
+      await p.waitForSelector('[data-step="2"]:not([hidden])');
+    }
+    return p;
+  }
+
+  test("typing ten digits formats to (586) 324-1248", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248", { delay: 10 });
+    assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
+    await p.close();
+  });
+
+  test("the display progresses sensibly as digits arrive", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    const seen = [];
+    for (const ch of "586324") {
+      await p.keyboard.type(ch);
+      seen.push(await p.inputValue("#v-phone"));
+    }
+    assert.deepEqual(seen, ["5", "58", "586", "(586) 3", "(586) 32", "(586) 324"]);
+    await p.close();
+  });
+
+  for (const [name, pasted] of [
+    ["raw digits", "5863241248"],
+    ["already formatted", "(586) 324-1248"],
+    ["hyphenated", "586-324-1248"],
+    ["spaced", "586 324 1248"],
+    ["with +1 country code", "+1 586 324 1248"],
+    ["with 1 country code, no plus", "15863241248"],
+  ]) {
+    test(`pasting ${name} normalises to (586) 324-1248`, async () => {
+      const p = await phonePage();
+      await p.evaluate((v) => {
+        const el = document.querySelector("#v-phone");
+        el.focus();
+        el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }, pasted);
+      assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
+      await p.close();
+    });
+  }
+
+  test("Backspace deletes through generated punctuation", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248");
+    assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
+    for (const expected of ["(586) 324-124", "(586) 324-12", "(586) 324-1", "(586) 324", "(586) 32"]) {
+      await p.keyboard.press("Backspace");
+      assert.equal(await p.inputValue("#v-phone"), expected);
+    }
+    await p.close();
+  });
+
+  test("Backspace mid-field deletes a digit rather than trapping on punctuation", async () => {
+    /* The real trap: the caret sits just after ") ", so a native Backspace
+       removes the space, reformatting puts it straight back, and nothing is
+       ever deleted. Deleting at the END of the field never reproduces this. */
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248");
+    assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
+    /* Caret directly after "(586) " — position 6. */
+    await p.evaluate(() => document.querySelector("#v-phone").setSelectionRange(6, 6));
+    await p.keyboard.press("Backspace");
+    /* The nearest digit BEFORE the caret is the "6" of 586, so that is what
+       goes: 586 324 1248 -> 58 324 1248. */
+    assert.equal(await p.inputValue("#v-phone"), "(583) 241-248",
+      "Backspace on punctuation deleted nothing — the caret is trapped");
+    await p.close();
+  });
+
+  test("held Backspace empties the field rather than sticking on punctuation", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248");
+    for (let i = 0; i < 14; i++) await p.keyboard.press("Backspace");
+    assert.equal(await p.inputValue("#v-phone"), "", "the caret got trapped on punctuation");
+    await p.close();
+  });
+
+  test("Delete forward works through punctuation", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248");
+    await p.evaluate(() => document.querySelector("#v-phone").setSelectionRange(0, 0));
+    await p.keyboard.press("Delete");
+    assert.equal(await p.inputValue("#v-phone"), "(863) 241-248");
+    await p.close();
+  });
+
+  test("selecting all and replacing works", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248");
+    await p.keyboard.press("Control+a");
+    await p.keyboard.type("4192454655");
+    assert.equal(await p.inputValue("#v-phone"), "(419) 245-4655");
+    await p.close();
+  });
+
+  test("clearing the field leaves it empty, not punctuation", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("5863241248");
+    await p.fill("#v-phone", "");
+    assert.equal(await p.inputValue("#v-phone"), "");
+    await p.close();
+  });
+
+  test("more than ten digits are ignored", async () => {
+    const p = await phonePage();
+    await p.click("#v-phone");
+    await p.keyboard.type("58632412489999");
+    assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
+    await p.close();
+  });
+
+  test("a formatted phone reaches /api/lead and a blank one stays blank", async () => {
+    for (const [typed, expected] of [["5863241248", "(586) 324-1248"], ["", ""]]) {
+      const p = await page();
+      let sent = null;
+      await p.route("**/api/lead", async (route) => {
+        sent = JSON.parse(route.request().postData() || "{}");
+        await route.fulfill({ status: 200, contentType: "application/json",
+          body: JSON.stringify({ ok: true, submission_id: "csv_ph" }) });
+      });
+      await p.goto(base + "/");
+      await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
+      await p.click("[data-step-next]");
+      await p.waitForSelector('[data-step="2"]:not([hidden])');
+      await p.fill("#v-first", "Sam");
+      await p.fill("#v-last", "Rivera");
+      await p.fill("#v-email", "sam@example.com");
+      if (typed) { await p.click("#v-phone"); await p.keyboard.type(typed); }
+      await p.click('[data-step="2"] button[type=submit]');
+      await p.waitForSelector("[data-form-success]:not([hidden])");
+      assert.equal(sent.phone, expected,
+        `phone reached the endpoint as ${JSON.stringify(sent.phone)}`);
+      await p.close();
+    }
+  });
+
+  test("the /contact form is formatted by the same code", async () => {
+    const p = await page();
+    await p.goto(base + "/contact");
+    const sel = 'input[name="phone"]';
+    await p.click(sel);
+    await p.keyboard.type("5863241248");
+    assert.equal(await p.inputValue(sel), "(586) 324-1248");
+    await p.close();
+  });
+
+  test("autofilling a value without an input event is still formatted", async () => {
+    const p = await phonePage();
+    await p.evaluate(() => {
+      const el = document.querySelector("#v-phone");
+      el.value = "5863241248";
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
     await p.close();
   });
 });

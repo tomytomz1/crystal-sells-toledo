@@ -43,7 +43,7 @@ api/_lib/*.mjs          validate, security, hubspot, description, log
                         (+ zoho.mjs — dormant rollback path, not imported)
 tools/build.mjs         assembles src/ + assets/ into public/
 tools/check.mjs         static validation, run by npm run check
-tests/*.test.mjs        node:test suites (199 tests)
+tests/*.test.mjs        node:test suites (229 tests)
 docs/                   strategy + compliance docs (NOT deployed)
 public/                 GENERATED. gitignored. Never edit by hand.
 ```
@@ -55,7 +55,7 @@ public/                 GENERATED. gitignored. Never edit by hand.
 ```bash
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
-npm test             # build + check + 199 automated tests
+npm test             # build + check + 229 automated tests
 npm run zoho:verify  # Zoho picklists — only needed if rolling back to Zoho
 npm run dev          # build, then serve public/ on :3000
 ```
@@ -162,6 +162,43 @@ On any failure — network, 4xx, 5xx, or a 200 carrying `ok:false`:
 
 The old behaviour of auto-launching the email client is gone, and a check fails
 the build if it is reintroduced. The form resets **only** after the server accepts.
+
+---
+
+## 2b. Production-proven — verified live
+
+The HubSpot lead pipeline has been verified end to end against the real portal.
+**These are proven, not merely tested:**
+
+| Behaviour | Status |
+|---|---|
+| Contact create from a website submission | **proven live** |
+| Repeat-email dedupe — one Contact, never two | **proven live** |
+| `phone` mapping | **proven live** |
+| Standard `address` mapping (visible Street Address) | **proven live** |
+| Authenticated Forms Submission API write | **proven live** |
+| A distinct `Form submitted` timeline activity per submission | **proven live** |
+| Complete deterministic enquiry payload on the activity | **proven live** |
+| Persistent post-submit success state | **proven live** |
+
+The live run:
+
+1. **First submission** — created one Contact, populated Street Address and
+   phone, and produced a native `Form submitted` activity on the timeline
+   carrying the complete enquiry payload.
+2. **Second submission, same email** — produced a **second distinct**
+   `Form submitted` activity. Exactly **one** Contact remained. The first
+   activity was intact; the second carried `LIVE FORMS API TEST 2`.
+
+### The HubSpot cookie warning is expected and harmless
+
+HubSpot's submission UI warns that no tracking cookie was included. The site does
+not load HubSpot's tracking code, so no real `hubspotutk` exists, and the code
+deliberately does not invent one. It affects HubSpot's own browser/session
+attribution only — **not** lead delivery, Contact matching, or activity content,
+all of which are proven above. See
+`docs/updates/2026-09-01-production-ux-closeout.md` section 5, which also records
+what would be required if visitor analytics are wanted later.
 
 ---
 
@@ -413,7 +450,7 @@ run against the live Google API** — every test stubs Google.
 
 ## 5. Tests
 
-`npm test` → build + check + **199 tests, all passing**.
+`npm test` → build + check + **229 tests, all passing**.
 
 - `tests/api.test.mjs` — endpoint contract, validation, limits, secret leakage,
   PII redaction, and the dormant Zoho mapping
@@ -481,7 +518,8 @@ These were the result of a compliance review. Breaking them has legal consequenc
 | Item | Status |
 |---|---|
 | **`crm.objects.notes.write` scope** | **CONFIRMED UNAVAILABLE** to a Service Key. Notes work retained as tag `hubspot-notes-fallback`. |
-| Timeline activity | **IMPLEMENTED** via the Forms Submission API. See `docs/updates/2026-09-01-hubspot-forms-timeline.md`. **Not production-proven.** |
+| Timeline activity | **PRODUCTION-PROVEN** via the Forms Submission API. See section 2b. |
+| Live UX fixes (heading contrast, autocomplete reopen, phone formatting) | Implemented and tested, **not yet visually confirmed on the deployed site**. |
 | HubSpot `message` property | Assumed present (it is a HubSpot default). Confirm in the portal — section 3 step 3. |
 | Zoho | Dormant. Code retained as a rollback path; env vars no longer read. |
 | Mailbox | `crystal@crystalsellstoledo.com` must exist |

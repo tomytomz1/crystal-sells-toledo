@@ -284,6 +284,40 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (a !== b2) fail("site", `home_value field contract has drifted between / and /home-value:\n      / = ${a}\n      /home-value = ${b2}`);
 }
 
+/* --- live UX guards ---------------------------------------------------- */
+{
+  const css = readFileSync(join(ROOT, "assets/css/styles.css"), "utf8");
+  const mainJs = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
+
+  /* `h1, h2, h3, h4 { color: var(--ink) }` beats a colour inherited from the
+     panel, so the confirmation heading must name its own or it renders
+     near-black on the dark hero. */
+  if (!/\.success-panel__title\s*\{[^}]*\bcolor\s*:/.test(css))
+    fail("assets/css/styles.css", "the success heading has no explicit colour");
+  if (!/\.hero \.success-panel__title\s*\{[^}]*color\s*:\s*#fff/i.test(css))
+    fail("assets/css/styles.css", "the success heading is not light on the dark hero");
+
+  /* Choosing a suggestion must be terminal: the announcement we dispatch must
+     not re-enter our own listener, and a late response must not render. */
+  if (!/programmatic/.test(mainJs))
+    fail("assets/js/main.js",
+      "the post-selection input event is not distinguished from typing — the menu will reopen");
+  if (!/chosenValue/.test(mainJs))
+    fail("assets/js/main.js", "nothing remembers the chosen address, so a lookup can reopen the menu");
+  if (!/clearTimeout\(timer\);\s*\n\s*\/\* Any response still in flight/.test(mainJs))
+    fail("assets/js/main.js", "selection does not cancel the pending debounce");
+  if (!/seq\+\+;/.test(mainJs))
+    fail("assets/js/main.js", "selection does not invalidate in-flight requests");
+
+  /* Presentation only — the server stays authoritative. */
+  if (!/function phoneDigits/.test(mainJs) || !/function phoneFormat/.test(mainJs))
+    fail("assets/js/main.js", "no US phone formatter");
+  if (!/d\.length === 11 && d\.charAt\(0\) === "1"/.test(mainJs))
+    fail("assets/js/main.js", "a leading US country code is not normalised away");
+  if (!/d\.slice\(0, 10\)/.test(mainJs))
+    fail("assets/js/main.js", "the phone formatter does not cap at ten digits");
+}
+
 /* --- Google Analytics 4 ------------------------------------------------ */
 {
   const buildSrc = readFileSync(join(ROOT, "..", "tools/build.mjs"), "utf8");

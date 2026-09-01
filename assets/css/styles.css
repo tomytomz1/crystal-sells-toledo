@@ -876,6 +876,11 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 
 .success-panel__title {
   margin: 0;
+  /* EXPLICIT, never inherited. `h1, h2, h3, h4` sets `color: var(--ink)` at
+     element specificity, which a `color` on the panel cannot override - so on
+     the dark hero the confirmation heading rendered near-black on near-black
+     and was effectively invisible. Each context sets it outright below. */
+  color: var(--ink);
   font-size: clamp(1.4rem, 3.4vw, 1.9rem);
   line-height: 1.15;
   text-wrap: balance;
@@ -889,6 +894,7 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .success-panel__call a { font-weight: 600; }
 
 .hero .success-panel { color: #fff; }
+.hero .success-panel__title { color: #fff; }
 .hero .success-panel__lede { color: rgba(255, 255, 255, .86); }
 .hero .success-panel__call { color: rgba(255, 255, 255, .72); }
 .hero .success-panel__call a { color: var(--gold-lt); }
@@ -898,6 +904,7 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   border-color: rgba(20, 18, 15, .14);
   color: var(--ink);
 }
+.form-card .success-panel__title { color: var(--ink); }
 
 /* =============================================================
    [hidden] must actually hide
