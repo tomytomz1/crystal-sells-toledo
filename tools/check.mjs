@@ -316,6 +316,23 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
       "restricts address suggestions to an area — bias them instead, never restrict");
   if (!/locationBias/.test(mainJs))
     fail("assets/js/main.js", "no location bias — local addresses will not rank first");
+  /* Inspect the DECLARATION, not the file: the comment that explains why
+     subpremise is absent would otherwise trip the guard enforcing its absence. */
+  const types = /var ADDRESS_TYPES = \[([^\]]*)\]/.exec(mainJs);
+  if (!types) fail("assets/js/main.js", "no ADDRESS_TYPES declared for the address lookup");
+  else {
+    const values = (types[1].match(/"([^"]+)"/g) || []).map((v) => v.slice(1, -1));
+    /* Places Autocomplete does not support subpremise; including it makes
+       Google reject the ENTIRE request, which silently costs the bias too. */
+    if (values.includes("subpremise"))
+      fail("assets/js/main.js",
+        "requests the subpremise type — Places Autocomplete rejects the whole request over it");
+    if (values.length > 5)
+      fail("assets/js/main.js",
+        `requests ${values.length} primary types — Places allows at most five`);
+    if (!values.length)
+      fail("assets/js/main.js", "ADDRESS_TYPES is empty");
+  }
 
   /* The real input must remain the source of truth. */
   if (!/input\[name="property_address"\]/.test(mainJs))

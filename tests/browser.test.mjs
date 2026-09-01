@@ -542,8 +542,8 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
   ];
 
   /** Install a fake google.maps before any page script runs. */
-  async function withMaps(p, { suggestions = SUGGESTIONS, fail = false } = {}) {
-    await p.addInitScript(({ suggestions, fail }) => {
+  async function withMaps(p, { suggestions = SUGGESTIONS, fail = false, rejectTypes = false } = {}) {
+    await p.addInitScript(({ suggestions, fail, rejectTypes }) => {
       window.__mapsCalls = [];
       window.__csvMapsReady = Promise.resolve(true);
       window.google = {
@@ -556,8 +556,13 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
                   input: req.input,
                   hasToken: !!req.sessionToken,
                   tokenId: req.sessionToken && req.sessionToken.id,
+                  bias: req.locationBias || null,
+                  types: req.includedPrimaryTypes || null,
                 });
                 if (fail) return Promise.reject(new Error("stub failure"));
+                /* Places rejects the whole request over one bad type value. */
+                if (rejectTypes && req.includedPrimaryTypes)
+                  return Promise.reject(new Error("INVALID_ARGUMENT: includedPrimaryTypes"));
                 return Promise.resolve({
                   suggestions: suggestions.map((t) => ({ placePrediction: { text: t } })),
                 });
@@ -566,7 +571,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
           }),
         },
       };
-    }, { suggestions, fail });
+    }, { suggestions, fail, rejectTypes });
     return p;
   }
 
@@ -611,6 +616,52 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     const after = (await p.evaluate(() => window.__mapsCalls)).slice(-1)[0].tokenId;
     assert.ok(before && after, "both lookups must carry a token");
     assert.notEqual(after, before, "the session token must rotate after a selection");
+    await p.close();
+  });
+
+  test("every lookup is biased to the Toledo area", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const calls = await p.evaluate(() => window.__mapsCalls);
+    assert.ok(calls.length > 0);
+    for (const c of calls) {
+      assert.ok(c.bias, "a request went out with no location bias");
+      assert.equal(c.bias.center.lat, 41.557);
+      assert.ok(c.bias.radius > 0);
+    }
+    await p.close();
+  });
+
+  test("the bias survives a rejected type filter", async () => {
+    /* The regression that put Detroit above Perrysburg: `subpremise` is not
+       supported by Places Autocomplete, so the typed request was rejected on
+       every keystroke and the retry dropped the bias with it, leaving
+       prominence-ranked national results. */
+    const p = await withMaps(await page(), { rejectTypes: true });
+    await p.goto(base + "/");
+    await openList(p);
+    const calls = await p.evaluate(() => window.__mapsCalls);
+    const retries = calls.filter((c) => !c.types);
+    assert.ok(retries.length > 0, "expected a retry without the type filter");
+    for (const c of retries)
+      assert.ok(c.bias, "the retry dropped the location bias — local results will not rank");
+    await p.close();
+  });
+
+  test("only address types Places actually supports are requested", async () => {
+    const p = await withMaps(await page());
+    await p.goto(base + "/");
+    await openList(p);
+    const typed = (await p.evaluate(() => window.__mapsCalls)).filter((c) => c.types);
+    assert.ok(typed.length > 0, "expected a typed request");
+    for (const c of typed) {
+      assert.ok(!c.types.includes("subpremise"),
+        "Places Autocomplete does not support subpremise — it rejects the whole request");
+      assert.ok(c.types.length <= 5, "Places allows at most five primary types");
+      for (const t of c.types)
+        assert.ok(["street_address", "premise"].includes(t), "unexpected type " + t);
+    }
     await p.close();
   });
 

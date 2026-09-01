@@ -486,6 +486,21 @@
      restriction would silently drop a legitimate address just outside it. */
   var ADDRESS_BIAS = { center: { lat: 41.557, lng: -83.627 }, radius: 50000 };
 
+  /* Homes resolve as street_address or premise. `subpremise` is deliberately
+     absent: Places Autocomplete does not support it, and including it makes
+     Google reject the WHOLE request - which is exactly how the bias got lost
+     and national landmarks outranked local streets. Max five values. */
+  var ADDRESS_TYPES = ["street_address", "premise"];
+
+  /* Console-only, once per page. A visitor must never see this; a developer
+     looking at why suggestions are odd absolutely must. */
+  var warned = {};
+  function warnOnce(what, err) {
+    if (warned[what] || !window.console || !console.warn) return;
+    warned[what] = true;
+    console.warn("[crystal] " + what + (err && err.message ? ": " + err.message : ""));
+  }
+
   function initAddressAutocomplete() {
     var inputs = document.querySelectorAll('input[name="property_address"]');
     if (!inputs.length) return;
@@ -598,22 +613,31 @@
       live.textContent = values.length + " address suggestions available.";
     }
 
-    function request(value, narrowed) {
+    function request(value, opts) {
       var req = { input: value, sessionToken: token, language: "en", region: "us" };
-      if (narrowed) {
-        req.locationBias = ADDRESS_BIAS;
-        req.includedPrimaryTypes = ["street_address", "premise", "subpremise"];
-      }
+      /* Bias is sent on its own, never bundled with the type filter. They
+         fail independently, and a rejected type filter must not silently
+         cost us the bias - that is what put Detroit above Perrysburg. */
+      if (opts.bias) req.locationBias = ADDRESS_BIAS;
+      if (opts.types) req.includedPrimaryTypes = ADDRESS_TYPES;
       return Suggestion.fetchAutocompleteSuggestions(req);
     }
 
     function fetchFor(value) {
       var mine = ++seq;
-      /* Retry once unnarrowed: a place-type or bias parameter Google
-         rejects would otherwise kill autocomplete outright, and a slightly
-         less relevant list beats no list at all. */
-      request(value, true)
-        .catch(function () { return request(value, false); })
+      /* Degrade one parameter at a time, most useful last to go. Losing the
+         type filter costs a little precision; losing the bias makes the
+         feature actively misleading, so it is only given up to save the
+         feature entirely. */
+      request(value, { bias: true, types: true })
+        .catch(function (err) {
+          warnOnce("address type filter rejected by Places", err);
+          return request(value, { bias: true, types: false });
+        })
+        .catch(function (err) {
+          warnOnce("address location bias rejected by Places", err);
+          return request(value, { bias: false, types: false });
+        })
         .then(function (res) {
           if (mine !== seq || disabled) return;          // a newer keystroke won
           var out = [];
