@@ -422,6 +422,23 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 @media (max-width: 639px) {
   .hero .hv-form__go { width: 100%; }
 }
+/* Narrow desktop / tablet-landscape.
+   1024px is where the hero splits into two columns, which roughly halves
+   the width the address row has to work with: at 1024 the field fell to
+   214px against the ~240px a typical Perrysburg address needs, so the
+   placeholder clipped. Between there and 1200px the field and the CTA
+   stack instead - the hero keeps both of its columns, the field gets the
+   full width of the left one, and the CTA becomes a full-width gold bar
+   rather than something the field has to give width to. No type size
+   changes on either control, and nothing about the form's behaviour does. */
+@media (min-width: 1024px) and (max-width: 1199.98px) {
+  .hero .hv-form__lead {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: .85rem;
+  }
+  .hero .hv-form__go { width: 100%; }
+}
 /* Comfortable touch targets; taller than the 48px floor. */
 .hero .hv-form .field input,
 .hero .hv-form .btn { min-height: 3.4rem; }
