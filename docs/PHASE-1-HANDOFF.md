@@ -44,7 +44,7 @@ api/_lib/*.mjs          validate, security, hubspot, description, log
                         (+ zoho.mjs — dormant rollback path, not imported)
 tools/build.mjs         assembles src/ + assets/ into public/
 tools/check.mjs         static validation, run by npm run check
-tests/*.test.mjs        node:test suites (178 tests)
+tests/*.test.mjs        node:test suites (182 tests)
 docs/                   strategy + compliance docs (NOT deployed)
 public/                 GENERATED. gitignored. Never edit by hand.
 ```
@@ -56,7 +56,7 @@ public/                 GENERATED. gitignored. Never edit by hand.
 ```bash
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
-npm test             # build + check + 178 automated tests
+npm test             # build + check + 182 automated tests
 npm run zoho:verify  # Zoho picklists — only needed if rolling back to Zoho
 npm run dev          # build, then serve public/ on :3000
 ```
@@ -495,7 +495,7 @@ show before it was earned.
 
 ## 5. Tests
 
-`npm test` → build + check + **178 tests, all passing**.
+`npm test` → build + check + **182 tests, all passing**.
 
 - `tests/api.test.mjs` — endpoint contract, validation, limits, secret leakage,
   PII redaction, and the dormant Zoho mapping

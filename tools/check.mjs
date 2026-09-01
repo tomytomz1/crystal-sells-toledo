@@ -284,6 +284,42 @@ for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/sty
   if (a !== b2) fail("site", `home_value field contract has drifted between / and /home-value:\n      / = ${a}\n      /home-value = ${b2}`);
 }
 
+/* --- Google Analytics 4 ------------------------------------------------ */
+{
+  const buildSrc = readFileSync(join(ROOT, "..", "tools/build.mjs"), "utf8");
+
+  /* The measurement ID is public, but WHERE it runs is not incidental:
+     preview deploys and local builds must not pollute the numbers. */
+  if (!/VERCEL_ENV === "production"/.test(buildSrc))
+    fail("tools/build.mjs", "the analytics tag is not limited to production builds");
+  if (!/\^G-\[A-Z0-9\]/.test(buildSrc))
+    fail("tools/build.mjs", "the GA4 measurement ID is not validated before being emitted");
+
+  for (const file of pages) {
+    const html = readFileSync(join(ROOT, file), "utf8");
+    const tags = (html.match(/googletagmanager\.com\/gtag\/js/g) || []).length;
+    /* Google is explicit: never more than one Google tag on a page. */
+    if (tags > 1) fail(file, `has ${tags} Google tags — a page must carry at most one`);
+    if (tags === 1) {
+      if (!/<script async src="https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=G-/.test(html))
+        fail(file, "the Google tag is not the documented async gtag.js snippet");
+      if (!/gtag\('config', 'G-/.test(html))
+        fail(file, "the Google tag loads but never configures a measurement ID");
+      /* A blocking tag in the head would cost the LCP the hero pass bought. */
+      if (/<script src="https:\/\/www\.googletagmanager\.com/.test(html))
+        fail(file, "the Google tag is render-blocking — it must be async");
+    }
+  }
+
+  /* Analytics must never become the reason an event exists. The site's own
+     event layer stays vendor-neutral and simply forwards when gtag is there. */
+  const mainJs = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");
+  if (/googletagmanager|G-[A-Z0-9]{6,12}/.test(mainJs))
+    fail("assets/js/main.js", "hardcodes an analytics vendor — the build injects the tag");
+  if (!/typeof window\.gtag === "function"/.test(mainJs))
+    fail("assets/js/main.js", "no longer forwards events to gtag when present");
+}
+
 /* --- Google Places address autocomplete -------------------------------- */
 {
   const mainJs = readFileSync(join(ROOT, "assets/js/main.js"), "utf8");

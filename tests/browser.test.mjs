@@ -1001,4 +1001,72 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     assert.ok(await p.isHidden("[data-form-success]"));
     await p.close();
   });
+
+  /* =====================================================================
+     Google Analytics wiring
+     =====================================================================
+     The built pages under test are a LOCAL build, so they carry no tag.
+     These prove the site's own event layer would feed GA4 correctly once
+     the tag is present, and that nothing depends on GA4 being there.
+     ===================================================================== */
+
+  test("site events reach gtag when a Google tag is present", async () => {
+    const p = await page();
+    await p.addInitScript(() => {
+      window.__gtag = [];
+      window.gtag = function () { window.__gtag.push([].slice.call(arguments)); };
+    });
+    await p.goto(base + "/");
+    /* A real click on a tel: link navigates and destroys the execution
+       context, so dispatch synthetically with capture-phase suppression -
+       the same technique the CTA tracking test uses. */
+    const calls = await p.evaluate(() => {
+      document.addEventListener("click", (e) => e.preventDefault(), true);
+      const el = document.querySelector('a[href^="tel:"]');
+      if (el) el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return window.__gtag;
+    });
+    const evt = calls.find((c) => c[0] === "event" && c[1] === "phone_click");
+    assert.ok(evt, "phone_click never reached gtag: " + JSON.stringify(calls));
+    assert.equal(typeof evt[2], "object", "the event carried no payload");
+    await p.close();
+  });
+
+  test("lead submission reports success to gtag", async () => {
+    const p = await page({ apiBody: { ok: true, submission_id: "csv_ga4" } });
+    await p.addInitScript(() => {
+      window.__gtag = [];
+      window.gtag = function () { window.__gtag.push([].slice.call(arguments)); };
+    });
+    await submitHomeValue(p, "/");
+    const calls = await p.evaluate(() => window.__gtag);
+    const evt = calls.find((c) => c[1] === "lead_submit_success");
+    assert.ok(evt, "lead_submit_success never reached gtag");
+    assert.equal(evt[2].submission_id, "csv_ga4");
+    await p.close();
+  });
+
+  test("the site works with no analytics vendor at all", async () => {
+    /* gtag is absent in this build. Nothing may throw, and the funnel must
+       still complete - analytics is never load-bearing. */
+    const p = await page({ apiBody: { ok: true, submission_id: "csv_noga" } });
+    const errors = [];
+    p.on("pageerror", (e) => errors.push(String(e)));
+    await p.goto(base + "/");
+    assert.equal(await p.evaluate(() => typeof window.gtag), "undefined",
+      "a local build must not ship a Google tag");
+    await submitHomeValue(p, "/");
+    assert.ok(await p.isVisible("[data-form-success]"));
+    assert.equal(errors.length, 0, "page errors without gtag: " + errors.join("; "));
+    await p.close();
+  });
+
+  test("a local build ships no Google tag at all", async () => {
+    const p = await page();
+    await p.goto(base + "/");
+    const n = await p.evaluate(() =>
+      document.querySelectorAll('script[src*="googletagmanager.com"]').length);
+    assert.equal(n, 0, "a non-production build must not report to GA4");
+    await p.close();
+  });
 });
