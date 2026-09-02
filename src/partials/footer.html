@@ -9,7 +9,13 @@
              Key Realty is its own mark directly below, because this column is
              identity and the row at the foot of the page is compliance. The
              logo is supplemental; the .legalid line under it is the
-             authoritative brokerage identification and carries the weight. -->
+             authoritative brokerage identification and carries the weight.
+
+             key-realty-gold-web.png is derived from the supplied square canvas:
+             the black matte inverted back into alpha, area-resampled to 3x its
+             rendered size, every visible pixel set to the site gold #b8863b. The
+             canvas proportions are untouched, so the offsets in .footer__brokerage
+             still hold. "Key Realty gold logo.png" stays as the source of record. -->
         <span class="lockup">
           <img class="lockup__mark" src="/assets/img/mark.svg" alt="" width="100" height="100"
                aria-hidden="true" loading="lazy">
@@ -19,8 +25,8 @@
           </span>
         </span>
         <p class="footer__brokerage">
-          <img src="/assets/img/key-realty-gold.png" alt="Key Realty"
-               width="1254" height="1254" loading="lazy">
+          <img src="/assets/img/key-realty-gold-web.png" alt="Key Realty"
+               width="318" height="318" loading="lazy">
         </p>
         <p class="legalid">
           <span class="legalid__name">Crystal Saylor</span><span class="legalid__sep" aria-hidden="true">|</span><span class="legalid__name">Key Realty LTD</span>
@@ -76,13 +82,19 @@
       </div>
       <div class="footer__badges" aria-label="Affiliations">
         <!-- Both marks are the official artwork, transparent, straight onto the
-             footer ground. No plate: the supplied gold REALTOR/MLS file carries
-             a real alpha channel, so there is no white rectangle left to hide.
-             The old hand-drawn realtor-mls.svg fallback is gone with it - a fake
-             mark standing in on a 404 is worse than a broken picture. -->
+             footer ground - no plate, nothing left to hide.
+
+             realtor-mls-gold-web.png is the supplied 2009x783 file area-resampled
+             to 3x its rendered size, with the coverage carried in alpha and every
+             visible pixel set to the site gold #b8863b. Geometry, proportions and
+             anti-aliasing are the source's; only the hue and the resolution are
+             ours. "Realtor MLS gold logo.png" stays as the source of record.
+
+             The old hand-drawn realtor-mls.svg fallback is gone - a fake mark
+             standing in on a 404 is worse than a broken picture. -->
         <span class="brandmark brandmark--mls">
-          <img src="/assets/img/Realtor%20MLS%20gold%20logo.png"
-               alt="REALTOR&reg; and Multiple Listing Service" width="2009" height="783" loading="lazy">
+          <img src="/assets/img/realtor-mls-gold-web.png"
+               alt="REALTOR&reg; and Multiple Listing Service" width="339" height="132" loading="lazy">
         </span>
         <!-- HUD's own vector, inlined rather than referenced so the single-colour
              artwork can inherit currentColor. Referenced as an image it would
