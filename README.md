@@ -206,14 +206,17 @@ portal admin archives it or makes it read-only the endpoint fails the lead
 rather than saving a contact with the enquiry silently missing.
 
 **Which origins may POST.** `crystalsellstoledo.com`, `www.`, `localhost`,
-`127.0.0.1`, and the hostname of the current deployment as Vercel reports it in
-`VERCEL_URL`. Arbitrary `*.vercel.app` hostnames are **not** accepted — that
-domain is shared, so a suffix match would let any Vercel project on earth drive
-a browser into posting here. One consequence worth knowing before you test a
-preview: Vercel also serves each deployment on a *branch alias*
-(`...-git-<branch>-<team>.vercel.app`), which is a different string from
-`VERCEL_URL` and so returns `403 FORBIDDEN_ORIGIN` on submit. Test on the
-deployment URL Vercel prints, or add the alias to `ALLOWED_ORIGINS`.
+`127.0.0.1`, both hostnames Vercel sets for the current deployment —
+`VERCEL_URL` (the immutable deployment hostname) and `VERCEL_BRANCH_URL` (the
+generated branch hostname that follows the latest successful deployment from
+that branch) — and anything named in `ALLOWED_ORIGINS`.
+
+Preview testing needs no configuration: the deployment URL Vercel prints and
+the branch URL both submit as they are. Arbitrary `*.vercel.app` hostnames are
+**not** accepted — that domain is shared, so a suffix match would let any
+Vercel project on earth drive a browser into posting here. A sibling
+deployment, a different branch of this project and another account's project
+are all different strings and all refused.
 
 None of this is authentication — an `Origin` header is trivially forged by
 anything that is not a browser. It is CSRF hygiene, and nothing downstream

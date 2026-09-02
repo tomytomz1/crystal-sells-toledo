@@ -37,30 +37,43 @@ export function clientIp(req) {
  *
  * `*.vercel.app` used to be accepted as a suffix so preview deploys worked.
  * That let ANY vercel.app hostname - including someone else's project, which
- * anyone can create in seconds - past this check. The current deployment's
- * own hostname is supplied by Vercel as VERCEL_URL, so preview deploys still
- * work without opening the whole shared domain; any other preview host that
- * genuinely needs to submit goes in ALLOWED_ORIGINS by name.
+ * anyone can create in seconds - past this check.
  *
- * VERCEL_URL is a bare hostname, not a URL, so it is lowercased and used as
- * given; a value that somehow arrives with a scheme is normalised through the
- * same parser as the request header.
+ * Vercel names this deployment for us instead, so preview deploys keep
+ * working without opening the whole shared domain:
+ *
+ *   VERCEL_URL         the immutable deployment hostname
+ *   VERCEL_BRANCH_URL  the generated branch hostname pointing at the latest
+ *                      successful deployment from this branch
+ *
+ * Both are admitted, and only whichever values Vercel actually set for THIS
+ * deployment - a sibling branch or another project gets different strings and
+ * is still refused. Anything else goes in ALLOWED_ORIGINS by name.
  */
 export function allowedHosts() {
   const extra = (process.env.ALLOWED_ORIGINS || "")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-  const deployment = (process.env.VERCEL_URL || "").trim().toLowerCase();
-  const deploymentHost = deployment
-    ? (deployment.includes("://") ? hostOf(deployment) : deployment.split("/")[0])
-    : null;
   return new Set([
     "crystalsellstoledo.com",
     "www.crystalsellstoledo.com",
     "localhost",
     "127.0.0.1",
-    ...(deploymentHost ? [deploymentHost] : []),
+    ...["VERCEL_URL", "VERCEL_BRANCH_URL"].map((v) => envHost(v)).filter(Boolean),
     ...extra,
   ]);
+}
+
+/**
+ * Read a Vercel-supplied hostname from the environment.
+ *
+ * These arrive as bare hostnames, not URLs, so the value is lowercased and
+ * used as given; one that somehow carries a scheme or a path is normalised
+ * through the same parser as the request header rather than trusted as-is.
+ */
+function envHost(name) {
+  const raw = (process.env[name] || "").trim().toLowerCase();
+  if (!raw) return null;
+  return raw.includes("://") ? hostOf(raw) : raw.split("/")[0] || null;
 }
 
 function hostOf(value) {

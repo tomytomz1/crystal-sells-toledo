@@ -622,15 +622,16 @@ for (const file of pages) {
         preview domain. vercel.app is shared: anyone can hold a hostname on
         it in seconds, so a suffix match let any Vercel project on earth
         drive a browser into posting here. The deployment's own host comes
-        from VERCEL_URL instead. */
+        from VERCEL_URL and VERCEL_BRANCH_URL instead. */
   const secPath = join(REPO, "api/_lib/security.mjs");
   if (!existsSync(secPath)) fail("api/_lib/security.mjs", "missing");
   else {
     const sec = readFileSync(secPath, "utf8");
     if (/endsWith\(\s*["'`]\.vercel\.app/.test(sec))
       fail("api/_lib/security.mjs", "accepts any *.vercel.app origin by suffix - vercel.app is a shared domain");
-    if (!/VERCEL_URL/.test(sec))
-      fail("api/_lib/security.mjs", "does not consult VERCEL_URL - preview deploys cannot submit at all");
+    for (const v of ["VERCEL_URL", "VERCEL_BRANCH_URL"])
+      if (!new RegExp(v).test(sec))
+        fail("api/_lib/security.mjs", `does not consult ${v} - preview deploys cannot submit at all`);
     for (const host of ["crystalsellstoledo.com", "localhost"])
       if (!sec.includes(host))
         fail("api/_lib/security.mjs", `lost ${host} from the origin allow-list`);

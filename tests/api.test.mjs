@@ -55,8 +55,9 @@ describe("POST /api/lead - method and transport", () => {
      `*.vercel.app` was once accepted as a suffix so preview deploys
      worked. vercel.app is a shared domain - anyone can hold a hostname
      on it in seconds - so that allowed every Vercel project on earth to
-     drive a visitor's browser into posting here. The deployment's own
-     hostname comes from VERCEL_URL instead.
+     drive a visitor's browser into posting here. This deployment's own
+     hostnames come from VERCEL_URL and VERCEL_BRANCH_URL instead, which
+     name exactly one deployment and one branch.
 
      None of this is authentication: a header is trivially forged by
      anything that is not a browser. It is CSRF hygiene, and the tests
@@ -78,8 +79,10 @@ describe("POST /api/lead - method and transport", () => {
   };
   const allows = (origin) => originAllowed({ headers: { origin } });
 
+  const NO_VERCEL = { VERCEL_URL: undefined, VERCEL_BRANCH_URL: undefined, ALLOWED_ORIGINS: undefined };
+
   test("an unrelated *.vercel.app origin is rejected", async () => {
-    await withEnv({ VERCEL_URL: undefined, ALLOWED_ORIGINS: undefined }, async () => {
+    await withEnv(NO_VERCEL, async () => {
       for (const host of [
         "https://someone-elses-project.vercel.app",
         "https://crystal-sells-toledo-evil.vercel.app",
@@ -98,32 +101,65 @@ describe("POST /api/lead - method and transport", () => {
     });
   });
 
+  /* The two hostnames Vercel sets for a deployment: the immutable
+     deployment URL, and the generated branch URL that follows the latest
+     successful deployment from that branch. Both are admitted; both are
+     exact strings, so neither opens the shared domain. */
+  const DEPLOY = "crystal-sells-toledo-abc123.vercel.app";
+  const BRANCH = "crystal-sells-toledo-git-phase-3-integrity-tomas.vercel.app";
+  const ON_VERCEL = { VERCEL_URL: DEPLOY, VERCEL_BRANCH_URL: BRANCH, ALLOWED_ORIGINS: undefined };
+
   test("the current VERCEL_URL hostname is accepted", async () => {
-    await withEnv({ VERCEL_URL: "crystal-sells-toledo-abc123.vercel.app", ALLOWED_ORIGINS: undefined },
-      async () => {
-        assert.equal(allows("https://crystal-sells-toledo-abc123.vercel.app"), true);
-        /* and only that one, not its neighbours on the shared domain */
-        assert.equal(allows("https://crystal-sells-toledo-def456.vercel.app"), false);
-        const res = await call({
-          body: validContact,
-          headers: { origin: "https://crystal-sells-toledo-abc123.vercel.app" },
-        });
-        assert.notEqual(res.statusCode, 403);
+    await withEnv(ON_VERCEL, async () => {
+      assert.equal(allows(`https://${DEPLOY}`), true);
+      const res = await call({ body: validContact, headers: { origin: `https://${DEPLOY}` } });
+      assert.notEqual(res.statusCode, 403);
+    });
+  });
+
+  test("the current VERCEL_BRANCH_URL hostname is accepted", async () => {
+    await withEnv(ON_VERCEL, async () => {
+      assert.equal(allows(`https://${BRANCH}`), true);
+      const res = await call({ body: validContact, headers: { origin: `https://${BRANCH}` } });
+      assert.notEqual(res.statusCode, 403);
+    });
+  });
+
+  test("a different branch or project on vercel.app is still rejected", async () => {
+    await withEnv(ON_VERCEL, async () => {
+      for (const host of [
+        /* a sibling deployment of this same project */
+        "https://crystal-sells-toledo-def456.vercel.app",
+        /* a different branch of this same project */
+        "https://crystal-sells-toledo-git-some-other-branch-tomas.vercel.app",
+        /* another account's project entirely */
+        "https://someone-elses-project.vercel.app",
+        /* the branch host with anything appended - not the same string */
+        `https://${BRANCH}.evil.vercel.app`,
+      ]) {
+        assert.equal(allows(host), false, `${host} must not be allowed`);
+      }
+      const res = await call({
+        body: validContact,
+        headers: { origin: "https://crystal-sells-toledo-git-some-other-branch-tomas.vercel.app" },
       });
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json().code, "FORBIDDEN_ORIGIN");
+    });
   });
 
   test("a referer is held to the same allow-list as an origin", async () => {
-    await withEnv({ VERCEL_URL: "crystal-sells-toledo-abc123.vercel.app", ALLOWED_ORIGINS: undefined },
-      async () => {
-        const byRef = (referer) => originAllowed({ headers: { referer } });
-        assert.equal(byRef("https://someone-elses-project.vercel.app/x"), false);
-        assert.equal(byRef("https://crystal-sells-toledo-abc123.vercel.app/x"), true);
-        assert.equal(byRef("https://www.crystalsellstoledo.com/home-value"), true);
-      });
+    await withEnv(ON_VERCEL, async () => {
+      const byRef = (referer) => originAllowed({ headers: { referer } });
+      assert.equal(byRef("https://someone-elses-project.vercel.app/x"), false);
+      assert.equal(byRef(`https://${DEPLOY}/x`), true);
+      assert.equal(byRef(`https://${BRANCH}/home-value`), true);
+      assert.equal(byRef("https://www.crystalsellstoledo.com/home-value"), true);
+    });
   });
 
   test("explicitly allowed origins remain accepted", async () => {
-    await withEnv({ VERCEL_URL: undefined, ALLOWED_ORIGINS: "staging.example.com, preview-1.vercel.app" },
+    await withEnv({ ...NO_VERCEL, ALLOWED_ORIGINS: "staging.example.com, preview-1.vercel.app" },
       async () => {
         assert.equal(allows("https://staging.example.com"), true);
         assert.equal(allows("https://preview-1.vercel.app"), true);
@@ -134,7 +170,7 @@ describe("POST /api/lead - method and transport", () => {
   });
 
   test("production and localhost origins remain accepted", async () => {
-    await withEnv({ VERCEL_URL: undefined, ALLOWED_ORIGINS: undefined }, async () => {
+    await withEnv(NO_VERCEL, async () => {
       for (const host of [
         "https://crystalsellstoledo.com",
         "https://www.crystalsellstoledo.com",
