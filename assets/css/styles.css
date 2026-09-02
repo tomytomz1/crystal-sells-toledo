@@ -764,20 +764,45 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 @media (max-width: 900px) { .footer__grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .footer__grid { grid-template-columns: 1fr; } }
-/* Brand marks are supplied as black-and-gold artwork on a white ground.
-   Rather than inverting them — which would turn the gold in the Crystal
-   Sells mark blue — they sit on a light chip, so they read correctly
-   whether or not the source files ever gain a transparent background. */
-.brandchip {
-  display: inline-flex; align-items: center; justify-content: center;
-  /* White, not cream: the supplied logo and badge have an opaque white
-     ground baked in, which would show as a paler rectangle on any other
-     colour. On white it disappears. */
-  background: #fff; border-radius: var(--radius);
-  padding: .55rem .75rem;
+/* --- footer identity ---------------------------------------------------
+   Every mark down here is now transparent artwork on the footer ground.
+   The white .brandchip plates are gone: they existed only because the old
+   files had an opaque white rectangle baked in, and none of these do. */
+
+/* The Crystal Sells Toledo lockup, set from mark.svg and live type - the
+   same device as .brand in the header, so the two read as one mark. */
+.lockup { --lk: 54px; display: flex; align-items: center; gap: calc(var(--lk) * .30); }
+.lockup__mark { height: var(--lk); width: auto; display: block; flex: none; }
+.lockup__words { display: flex; flex-direction: column; gap: calc(var(--lk) * .10); }
+.lockup__name {
+  font-family: var(--serif); font-weight: 400;
+  font-size: calc(var(--lk) * .44); line-height: .95;
+  letter-spacing: -.01em; color: var(--cream);
 }
-.brandchip--logo { padding: .9rem 1.1rem; margin-bottom: 1.35rem; }
-.footer__logo { height: 48px; width: auto; display: block; }
+/* Sans 600, wide tracking, uppercase - .brand__sub's treatment exactly. */
+.lockup__place {
+  font-family: var(--sans); font-weight: 600;
+  font-size: calc(var(--lk) * .21); line-height: 1;
+  letter-spacing: .3em; text-transform: uppercase; color: var(--gold-lt);
+  padding-left: .1em;
+}
+
+/* Brokerage mark. Subordinate to the lockup above and supplemental to the
+   .legalid text below, which remains the authoritative identification.
+
+   The supplied file is a square canvas with the artwork sitting off-centre
+   inside it (90/19 left-right, 212/126 top-bottom of empty pixels out of
+   1254). --kr sizes that whole canvas; the negative margins take the empty
+   pixels back out of the layout box, so the mark aligns with the column
+   edge and the gaps you set are the gaps you see. flow-root stops the
+   negative top margin collapsing out through the wrapper. */
+.footer__brokerage { --kr: 106px; display: flow-root; margin: 1.1rem 0 0; }
+.footer__brokerage img {
+  width: var(--kr); height: auto; display: block;
+  margin-block: calc(var(--kr) * -.1691) calc(var(--kr) * -.1005);
+  margin-inline-start: calc(var(--kr) * -.0718);
+}
+@media (max-width: 560px) { .footer__brokerage { --kr: 96px; } }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
@@ -794,8 +819,25 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   align-items: center; justify-content: space-between;
   font-size: .78rem; color: #948d83; line-height: 1.6;
 }
-.footer__badges { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
-.footer__badges img { height: 30px; width: auto; display: block; }
+/* Bare marks need more air between them than plated ones did. */
+.footer__badges { display: flex; align-items: center; flex-wrap: wrap;
+  gap: clamp(1.15rem, 2.5vw, 1.75rem); }
+
+/* Matched on ink, not on box height: the REALTOR/MLS lockup is landscape
+   and Equal Housing is portrait, so equal heights would leave one shouting.
+
+   The MLS file is sized off its block "R" device, which is 497/783 of the
+   canvas - at 44px that renders 27.9px, clear of the 20px floor. Its canvas
+   also carries more empty pixels above the ink than below (76 vs 108), so
+   the mark is nudged down to share a baseline with Equal Housing.
+
+   Equal Housing carries its own wordmark, 19% of its height in two lines:
+   at 46px each line renders about 3px and cannot resolve. That is inherent
+   to the official artwork, not a sizing mistake - the words are stated
+   legibly in the disclaimer beside it. */
+.brandmark { display: inline-flex; align-items: center; color: var(--gold); }
+.brandmark--mls img { height: 44px; width: auto; display: block; transform: translateY(1px); }
+.brandmark--eho svg { height: 46px; width: auto; display: block; }
 .footer__disclaimer { max-width: 60ch; }
 
 /* ------------------------------------------------------- sticky mobile -- */
