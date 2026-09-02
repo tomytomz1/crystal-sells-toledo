@@ -18,7 +18,19 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "public");
-const SITE = "https://www.crystalsellstoledo.com";
+/* The canonical origin. Every absolute URL the build emits - canonical
+   links, og:url, the JSON-LD graph, sitemap.xml and the Sitemap: line in
+   robots.txt - is derived from this one constant, so it must name the
+   hostname that actually SERVES the site, not one that redirects to it.
+
+   It said www. until 2 September 2026, and www. was never registered on
+   the Vercel project at all: it resolved to Vercel, got a fallback
+   certificate that did not carry the name, and every browser refused it
+   outright - HSTS includeSubDomains left no way to click through. So the
+   whole site spent its life declaring a canonical host no visitor and no
+   crawler could reach. www. now exists as a 308 to the apex; the apex is
+   what Production is aliased to, and is what belongs here. */
+const SITE = "https://crystalsellstoledo.com";
 
 /* ---------------------------------------------------------------------
    CONTENT REVIEW DATE — OAC 1301:5-1-02(E)
