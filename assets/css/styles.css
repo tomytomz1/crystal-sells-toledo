@@ -764,20 +764,48 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 @media (max-width: 900px) { .footer__grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .footer__grid { grid-template-columns: 1fr; } }
-/* Brand marks are supplied as black-and-gold artwork on a white ground.
-   Rather than inverting them — which would turn the gold in the Crystal
-   Sells mark blue — they sit on a light chip, so they read correctly
-   whether or not the source files ever gain a transparent background. */
+/* --- the Crystal Sells Toledo lockup -----------------------------------
+   Set, not placed: the real mark.svg beside live web type, exactly as the
+   header sets it. That removes the last raster brand file from the footer,
+   so the lockup is sharp at any size, the wordmark is selectable text, and
+   there is no opaque white ground needing a plate to sit on.
+
+   The words are aria-hidden because the <svg> already carries the accessible
+   name "Crystal Sells Toledo" — without that the lockup announces twice. */
+.lockup { --lk: 54px; display: inline-flex; align-items: center; gap: calc(var(--lk) * .30); }
+.lockup__mark { height: var(--lk); width: auto; display: block; flex: none; }
+.lockup__words { display: flex; flex-direction: column; gap: calc(var(--lk) * .10); }
+/* .44 and .21 of the mark height are the header's own ratios, carried over so
+   the two lockups are the same object at two sizes rather than two designs. */
+.lockup__name {
+  font-family: var(--serif); font-weight: 400;
+  font-size: calc(var(--lk) * .44); line-height: .95;
+  letter-spacing: -.01em; color: var(--cream);
+}
+.lockup__place {
+  font-family: var(--serif);
+  font-size: calc(var(--lk) * .21); line-height: 1;
+  letter-spacing: .3em; text-transform: uppercase; color: var(--gold-lt);
+  padding-left: .1em;
+}
+
+/* --- third-party compliance marks -------------------------------------
+   These two are NOT ours to restyle: the REALTOR®/MLS mark is NAR's and
+   both files carry an opaque white ground with no alpha. They keep a white
+   plate, which is the only colour their baked ground disappears into.
+
+   Normalised on optical weight rather than box height. Measured: the MLS
+   ink fills 90% of its file width and includes a solid bar, so at a shared
+   30px it out-weighed everything near it; Equal Housing is a 3.4-weight
+   outline with no fill and needs more size to hold the same presence. The
+   plate height and inline padding are shared; only the artwork differs. */
 .brandchip {
   display: inline-flex; align-items: center; justify-content: center;
-  /* White, not cream: the supplied logo and badge have an opaque white
-     ground baked in, which would show as a paler rectangle on any other
-     colour. On white it disappears. */
-  background: #fff; border-radius: var(--radius);
-  padding: .55rem .75rem;
+  height: 44px; padding-inline: 13px;
+  background: #fff;
+  border: 1px solid rgba(184, 134, 59, .30);
+  border-radius: var(--radius);
 }
-.brandchip--logo { padding: .9rem 1.1rem; margin-bottom: 1.35rem; }
-.footer__logo { height: 48px; width: auto; display: block; }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
@@ -795,7 +823,9 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   font-size: .78rem; color: #948d83; line-height: 1.6;
 }
 .footer__badges { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
-.footer__badges img { height: 30px; width: auto; display: block; }
+.footer__badges img { width: auto; display: block; }
+.brandchip--mls img { height: 25px; }
+.brandchip--eho img { height: 33px; }
 .footer__disclaimer { max-width: 60ch; }
 
 /* ------------------------------------------------------- sticky mobile -- */

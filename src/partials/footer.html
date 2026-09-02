@@ -2,9 +2,29 @@
   <div class="wrap">
     <div class="footer__grid">
       <div>
-        <span class="brandchip brandchip--logo">
-          <img class="footer__logo" src="/assets/img/logo-lockup.png" data-fallback="/assets/img/logo-lockup.svg"
-               alt="Key Realty — Crystal Sells Toledo" width="700" height="272" loading="lazy">
+        <!-- The lockup is SET, not placed: the real mark.svg beside live web
+             type, the same way the header sets it. No raster file, so nothing
+             carries an opaque white ground and no plate is needed.
+
+             Key Realty is no longer carried here as artwork. Brokerage
+             identification rests on the .legalid line directly below, where
+             both names share one rule at equal prominence.
+             TODO ASSET: if an official file exists for the new lockup, use it
+             in place of this typographic setting. -->
+        <span class="lockup">
+          <svg class="lockup__mark" viewBox="0 0 100 100" role="img"
+               aria-label="Crystal Sells Toledo" focusable="false">
+            <g stroke-linejoin="round">
+              <path d="M20 46 L33 31 L33 93 L20 93 Z" fill="#e0c78f"/>
+              <path d="M41 27 L50 8 L50 93 L41 93 Z"  fill="#c9a259"/>
+              <path d="M50 8 L59 27 L59 93 L50 93 Z"  fill="#b8863b"/>
+              <path d="M67 31 L80 46 L80 93 L67 93 Z" fill="#7a5620"/>
+            </g>
+          </svg>
+          <span class="lockup__words" aria-hidden="true">
+            <span class="lockup__name">Crystal Sells</span>
+            <span class="lockup__place">Toledo</span>
+          </span>
         </span>
         <p class="legalid">
           <span class="legalid__name">Crystal Saylor</span><span class="legalid__sep" aria-hidden="true">|</span><span class="legalid__name">Key Realty LTD</span>
@@ -59,11 +79,11 @@
         <p class="footer__updated">Website information last updated: {{updated}}</p>
       </div>
       <div class="footer__badges" aria-label="Affiliations">
-        <span class="brandchip">
+        <span class="brandchip brandchip--mls">
           <img src="/assets/img/realtor-mls.png" data-fallback="/assets/img/realtor-mls.svg"
                alt="REALTOR® and Multiple Listing Service" width="600" height="234" loading="lazy">
         </span>
-        <span class="brandchip">
+        <span class="brandchip brandchip--eho">
           <img src="/assets/img/equal-housing.svg" alt="Equal Housing Opportunity" width="42" height="34" loading="lazy">
         </span>
       </div>

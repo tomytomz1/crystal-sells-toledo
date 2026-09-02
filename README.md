@@ -149,8 +149,15 @@ replaces its branded placeholder — no code change needed.
 | `hood-established.jpg` | An established subdivision | 800 × 600 |
 | `buying.jpg` | A front porch / welcoming exterior (for `/buy`) | 1400 × 900 |
 
-Already supplied and in use: `crystal-headshot.jpg`, `logo-lockup.png`,
-`realtor-mls.png`, `og-default.jpg`.
+Already supplied and in use: `crystal-headshot.jpg`, `realtor-mls.png`,
+`og-default.jpg`.
+
+`logo-lockup.png` is no longer used. The footer now **sets** the Crystal Sells
+Toledo lockup — the real `mark.svg` beside live web type — the same way the
+header does, so it is sharp at every size and needs no white plate. The PNG is
+kept in the repository because it is the only co-branded Key Realty artwork on
+hand; nothing renders it. Its `logo-lockup.svg` sibling is a hand-drawn
+approximation and must never ship as the mark.
 
 `/sell` is deliberately text-led rather than carrying a listing photograph: presenting
 generic artwork beside "included on every listing" would read as evidence of work that
