@@ -1017,15 +1017,18 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
      its step 1 proportions, which is today's behaviour. */
   .proof { position: sticky; top: 7rem; }
 
-  .hero__grid:has([data-step="2"]:not([hidden])) {
+  /* Scoped away from .hero--value: /home-value reuses this shell with the
+     columns the other way round, where widening the left column would
+     narrow the form rather than the explanation. */
+  .hero--capture:not(.hero--value) .hero__grid:has([data-step="2"]:not([hidden])) {
     grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr);
   }
-  .hero__grid:has([data-step="2"]:not([hidden])) .hero__content { max-width: none; }
-  .hero__grid:has([data-step="2"]:not([hidden])) .hv-form { max-width: 46rem; }
+  .hero--capture:not(.hero--value) .hero__grid:has([data-step="2"]:not([hidden])) .hero__content { max-width: none; }
+  .hero--capture:not(.hero--value) .hero__grid:has([data-step="2"]:not([hidden])) .hv-form { max-width: 46rem; }
   /* Centred rather than pinned to the top of a column twice its height:
      the leftover space reads as framing instead of as one hole under the
      panel. */
-  .hero__grid:has([data-step="2"]:not([hidden])) .proof { align-self: center; }
+  .hero--capture:not(.hero--value) .hero__grid:has([data-step="2"]:not([hidden])) .proof { align-self: center; }
 }
 
 /* --- hero proof panel --------------------------------------------------
@@ -1229,3 +1232,279 @@ a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px
 .buyer-note a:hover { border-color: var(--gold-dk); }
 /* Keeps the trailing arrow bound to the last word of the link. */
 .nowrap { white-space: nowrap; }
+
+
+/* ==========================================================================
+   PHASE 2 - seller conversion pages (/sell and /home-value)
+   ==========================================================================
+   Same system as the Phase 1 homepage: serif headlines, sans utility text,
+   hairlines instead of boxes, gold as punctuation. Every rule below is a new
+   class or a modifier, so the pages outside this phase (/about, /buy,
+   /contact, /neighborhoods, /privacy, /404) keep the components they had.
+   Shared components used by those pages - .pagehead, .split, .card,
+   .form-card, .steps, .checklist, .faq - are untouched. */
+
+/* --- /sell: the lead ---------------------------------------------------
+   Extends .pagehead rather than replacing it: the dark ground, gold underline
+   and light type are already right, and .pagehead is shared with six other
+   pages. Only the composition inside it is new. */
+.pagehead--lead { padding-bottom: clamp(3rem, 6vw, 5rem); }
+.lead { display: grid; gap: clamp(2.5rem, 5vw, 3.5rem); }
+@media (min-width: 980px) {
+  .lead {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr);
+    gap: clamp(3rem, 6vw, 5.5rem);
+    align-items: end;
+  }
+}
+.pagehead--lead h1 { max-width: 15ch; text-wrap: balance; }
+.pagehead--lead .lede { max-width: 44ch; }
+.lead__act { margin-top: clamp(1.75rem, 3.5vw, 2.5rem); }
+/* Subordinate by construction: the valuation is the conversion, the
+   walkthrough is the alternative for someone not ready for a number. */
+.lead__alt { margin: 1.15rem 0 0; font-size: .9rem; color: rgba(255, 255, 255, .58); }
+.lead__alt a {
+  color: rgba(255, 255, 255, .84);
+  border-bottom: 1px solid rgba(255, 255, 255, .26);
+  padding-bottom: .15rem;
+  transition: color .25s var(--ease), border-color .25s var(--ease);
+}
+.lead__alt a:hover { color: #fff; border-color: var(--gold); }
+
+/* The right column carries the page's spine, not artwork. */
+.lead__maplabel {
+  margin: 0 0 1.15rem;
+  font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--gold-lt);
+}
+.lead__phases { list-style: none; margin: 0; padding: 0; }
+.lead__phases li {
+  display: grid; gap: .3rem;
+  padding-block: .95rem;
+  border-top: 1px solid var(--desk-line);
+}
+.lead__phases li:last-child { border-bottom: 1px solid var(--desk-line); }
+.lead__k { font-family: var(--serif); font-size: 1.14rem; color: var(--white); }
+.lead__v { font-size: .88rem; line-height: 1.5; color: rgba(255, 255, 255, .6); }
+
+/* --- /sell: where leverage is lost -------------------------------------
+   Prose, not cards. The headline states the claim; the column beside it
+   makes the argument in three named parts. */
+.argument { display: grid; gap: clamp(2rem, 4vw, 3rem); }
+@media (min-width: 960px) {
+  .argument {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+    gap: clamp(3rem, 6vw, 5.5rem);
+    align-items: start;
+  }
+}
+.argument__head h2 { font-size: clamp(1.8rem, 3.4vw, 2.5rem); margin-bottom: .5em; max-width: 19ch; }
+.argument__sub {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(1.05rem, 1.6vw, 1.22rem);
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.argument__body { display: grid; gap: clamp(1.6rem, 3vw, 2.35rem); }
+.argument__item h3 {
+  margin: 0 0 .35rem;
+  font-family: var(--serif); font-size: 1.18rem; font-weight: 500; color: var(--ink);
+}
+.argument__item p { margin: 0; color: var(--muted); line-height: 1.75; max-width: 58ch; }
+
+/* --- /sell: the roadmap ------------------------------------------------
+   Two levels, which is the point: three phases carrying six stages. A flat
+   run of six rows would have repeated the homepage Prepare / Position /
+   Launch rhythm and taught the visitor nothing about the shape of a sale.
+   A strong rule opens a phase; a hair rule separates stages inside it. */
+.roadmap { margin-top: clamp(.5rem, 2vw, 1rem); }
+.roadmap__phase {
+  display: grid;
+  gap: clamp(1.25rem, 2.5vw, 1.75rem);
+  padding-block: clamp(1.85rem, 3.5vw, 2.75rem);
+  border-top: 1px solid var(--rule-strong);
+}
+.roadmap__phase:last-child { border-bottom: 1px solid var(--rule-strong); }
+@media (min-width: 900px) {
+  .roadmap__phase {
+    grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+    gap: clamp(2rem, 5vw, 4rem);
+    align-items: start;
+  }
+  /* The phase name stays beside the stages it governs while they scroll. */
+  .roadmap__meta { position: sticky; top: 7rem; }
+}
+.roadmap__name {
+  margin: 0;
+  font-family: var(--serif); font-size: clamp(1.35rem, 2.2vw, 1.65rem);
+  font-weight: 500; color: var(--ink);
+}
+.roadmap__range {
+  margin: .4rem 0 0;
+  font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+  font-variant-numeric: tabular-nums; color: var(--gold-dk);
+}
+.roadmap__stages { display: grid; }
+.stage {
+  display: grid; gap: .25rem clamp(1rem, 2vw, 1.5rem);
+  padding-block: clamp(1.15rem, 2.2vw, 1.55rem);
+  border-top: 1px solid var(--rule-hair);
+}
+.roadmap__stages > .stage:first-child { border-top: 0; padding-top: 0; }
+@media (min-width: 560px) {
+  .stage { grid-template-columns: 2.75rem minmax(0, 1fr); align-items: start; }
+}
+.stage__n {
+  margin: 0;
+  font-family: var(--serif); font-size: 1rem;
+  font-variant-numeric: tabular-nums; color: var(--gold-dk);
+  padding-top: .18rem;
+}
+.stage__t {
+  margin: 0 0 .35rem;
+  font-family: var(--serif); font-size: 1.16rem; font-weight: 500;
+  letter-spacing: 0; color: var(--ink);
+}
+.stage__d { margin: 0; color: var(--muted); font-size: .98rem; line-height: 1.7; max-width: 62ch; }
+
+/* --- /sell: what every listing receives --------------------------------
+   An index, deliberately without rules or tick marks: the completeness comes
+   from the parallel structure and the count, not from a checklist beside a
+   photograph the site cannot yet prove is Crystal's own work. */
+.included { display: grid; gap: clamp(1.75rem, 3.5vw, 2.5rem) clamp(2rem, 5vw, 4rem); }
+@media (min-width: 720px) { .included { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.included__t {
+  margin: 0 0 .3rem;
+  font-family: var(--serif); font-size: 1.14rem; font-weight: 500; color: var(--ink);
+}
+.included__d { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.6; }
+
+/* --- /home-value: the capture hero, mirrored ---------------------------
+   Reuses .hero--capture so both ends of the funnel sit on one surface, then
+   swaps the emphasis: the argument takes the narrower column and the form
+   takes the wider one. */
+.hero--value .hero__by {
+  margin: clamp(1.35rem, 2.5vw, 1.85rem) 0 0;
+  padding-top: clamp(1.1rem, 2vw, 1.4rem);
+  border-top: 1px solid var(--desk-line);
+  font-size: .95rem; line-height: 1.65;
+  color: rgba(255, 255, 255, .66);
+  max-width: 44ch;
+}
+@media (min-width: 1024px) {
+  .hero--value .hero__grid {
+    grid-template-columns: minmax(0, .84fr) minmax(0, 1.16fr);
+    align-items: start;
+  }
+  .hero--value .hero__content { max-width: 30rem; position: sticky; top: 7rem; }
+}
+
+/* Small phones: reclaim the vertical space between the argument and the
+   form from spacing rather than from type size or touch targets, so the
+   address field and its CTA both sit in the first view at 360x800. */
+@media (max-width: 480px) {
+  .hero--value .hero__grid { gap: 1.5rem; }
+  .hero--value .hero__by { margin-top: 1rem; padding-top: .9rem; font-size: .9rem; }
+  .hero--value .valueform { padding: 1.25rem; }
+  .hero--value .valueform__note { margin-bottom: 1.05rem; }
+}
+
+/* The form panel takes the surface the homepage gives its explanation
+   panel. On this page the form is the thing that deserves it. */
+.valueform {
+  /* Opaque on purpose, not var(--desk).
+     The success panel is itself translucent, and stacking two translucent
+     surfaces makes the confirmation heading's contrast depend on whatever
+     the hero ground happens to be underneath - unauditable, and one theme
+     change away from white-on-light. This value is the colour the
+     translucent panel actually rendered as over this hero (sampled at
+     rgb(20-23, 19-21, 17-18)), so nothing moves visually, and the heading's
+     contrast is now fixed at about 16:1 regardless of the ground. */
+  background: #151412;
+  border: 1px solid var(--desk-line);
+  padding: clamp(1.5rem, 3vw, 2.25rem);
+}
+.valueform__label {
+  margin: 0 0 .35rem;
+  font-family: var(--serif); font-size: clamp(1.3rem, 2.2vw, 1.6rem);
+  font-weight: 500; color: var(--white);
+}
+.valueform__note {
+  margin: 0 0 clamp(1.35rem, 2.5vw, 1.75rem);
+  font-size: .9rem; line-height: 1.55; color: rgba(255, 255, 255, .62);
+}
+
+/* --- /home-value: why a person ----------------------------------------- */
+.whyhuman { display: grid; gap: clamp(2.25rem, 4vw, 3rem); }
+@media (min-width: 940px) {
+  .whyhuman {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+    gap: clamp(3rem, 6vw, 5rem);
+    align-items: start;
+  }
+}
+.whyhuman__body h2 { font-size: clamp(1.7rem, 3.1vw, 2.3rem); margin-bottom: .5em; }
+.whyhuman__body p { color: var(--muted); line-height: 1.75; max-width: 58ch; }
+.factors { padding-top: clamp(1.25rem, 2.5vw, 1.75rem); border-top: 1px solid var(--rule-strong); }
+.factors__label {
+  margin: 0 0 1.25rem;
+  font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--gold-dk);
+}
+.factors__list { margin: 0; display: grid; gap: clamp(1.1rem, 2vw, 1.4rem); }
+.factor dt {
+  margin-bottom: .2rem;
+  font-family: var(--serif); font-size: 1.06rem; color: var(--ink);
+}
+.factor dd { margin: 0; color: var(--muted); font-size: .94rem; line-height: 1.6; }
+
+/* --- /home-value: what comes back -------------------------------------- */
+.returns__list { display: grid; gap: clamp(1.5rem, 3vw, 2.25rem) clamp(2rem, 5vw, 4rem); }
+@media (min-width: 780px) { .returns__list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.returns__item h3 {
+  margin: 0 0 .3rem;
+  font-family: var(--serif); font-size: 1.14rem; font-weight: 500; color: var(--ink);
+}
+.returns__item p { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.6; }
+
+/* A quiet aside, not a dashed box. */
+.quietnote {
+  margin-top: clamp(2.5rem, 5vw, 3.5rem);
+  padding-left: clamp(1.25rem, 2.5vw, 1.75rem);
+  border-left: 2px solid var(--gold);
+  max-width: 60ch;
+}
+.quietnote__t {
+  margin: 0 0 .4rem;
+  font-family: var(--serif); font-size: 1.12rem; color: var(--ink);
+}
+.quietnote p:last-child { margin: 0; color: var(--muted); line-height: 1.7; font-size: .98rem; }
+
+/* --- /home-value: the direct route ------------------------------------- */
+.direct {
+  display: grid; gap: clamp(1.5rem, 3vw, 2.25rem);
+  padding-top: clamp(1.75rem, 3.5vw, 2.5rem);
+  border-top: 1px solid var(--rule-strong);
+}
+@media (min-width: 820px) {
+  .direct { grid-template-columns: minmax(0, 1fr) auto; gap: clamp(2rem, 5vw, 4rem); align-items: end; }
+}
+.direct__say h2 { margin: 0; font-size: clamp(1.5rem, 2.8vw, 2rem); max-width: 20ch; }
+.direct__routes { display: grid; gap: .35rem; justify-items: start; }
+@media (min-width: 820px) { .direct__routes { justify-items: end; } }
+.direct__tel {
+  display: inline-flex; align-items: center; min-height: 3rem;
+  font-family: var(--serif); font-size: clamp(1.5rem, 3vw, 2.05rem);
+  color: var(--ink); line-height: 1.2;
+  border-bottom: 1px solid var(--gold);
+  transition: color .2s var(--ease), border-color .2s var(--ease);
+}
+.direct__tel:hover { color: var(--gold-dk); border-color: var(--gold-dk); }
+.direct__mail {
+  display: inline-flex; align-items: center; min-height: 2.75rem;
+  font-size: .95rem; color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  transition: color .2s var(--ease), border-color .2s var(--ease);
+}
+.direct__mail:hover { color: var(--ink); border-color: var(--gold); }

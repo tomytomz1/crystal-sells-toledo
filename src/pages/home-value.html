@@ -12,66 +12,148 @@
   }
 } -->
 
-<section class="pagehead">
-  <div class="wrap">
-    <p class="eyebrow">Free &middot; No obligation</p>
-    <h1>What is your home actually worth?</h1>
-    <p class="lede">Not a computer&rsquo;s guess. A real valuation, built by hand from the homes that
-      have actually closed near you in the last 90 days.</p>
+<!-- ==================================================================
+     /home-value - the conversion page.
+     Job: "What could my house be worth, and how do I ask her?"
+     One job only. The form is in the first viewport and everything below it
+     exists to answer the questions that stop someone completing it.
+
+     The hero reuses the homepage capture-hero shell so the two ends of the
+     funnel share one surface, but mirrors it: there the form leads and the
+     explanation sits beside it; here the argument leads and the form takes
+     the wider column.
+     ================================================================== -->
+
+<section class="hero hero--capture hero--value">
+  <div class="hero__bg"></div>
+  <div class="hero__inner wrap">
+    <div class="hero__grid">
+      <div class="hero__content">
+        <p class="eyebrow">Free &middot; No obligation</p>
+        <h1>What is your home actually worth?</h1>
+        <p class="hero__lede">Not a computer&rsquo;s guess. A real valuation, built by hand from the
+          homes that have actually closed near you in the last 90 days.</p>
+        <p class="hero__by">Read and answered by Crystal &mdash; a person who has seen the streets your
+          home will be compared against, not a model scoring a record.</p>
+      </div>
+
+      <!-- The form panel sits on the same surface the homepage uses for its
+           explanation panel: the two pages read as one system, and on this
+           page the form is what deserves that surface.
+           The shared partial is the only form implementation on the site;
+           nothing here changes its fields, validation or behaviour. -->
+      <div class="valueform reveal">
+        <h2 class="valueform__label">Request your valuation</h2>
+        <p class="valueform__note">Takes about a minute. I reply personally, usually the same day.</p>
+        {{> home-value-form}}
+      </div>
+    </div>
   </div>
 </section>
 
+<!-- ------------------------------------------------- why ask a person ----
+     Deliberately short. The homepage already carries the long explanation of
+     what a human valuation looks at; repeating it here would push the form
+     off the page for no conversion gain. -->
 <section class="section">
   <div class="wrap">
-    <div class="split split--media-right" style="align-items:start">
-
-      <div class="reveal">
+    <div class="whyhuman">
+      <div class="whyhuman__body reveal">
         <p class="eyebrow">Why bother asking a person</p>
         <h2>Online estimates miss the things that decide your price.</h2>
         <p>Automated valuations are a starting point and nothing more. They cannot see the new roof,
           the finished basement, the fact that your lot backs onto trees instead of the collector road,
           or the kitchen you redid in 2023.</p>
+        <!-- TODO SOURCE: "routinely tens of thousands of dollars" is existing
+             copy carried over from the previous page and has no source on
+             file. It has been preserved, not strengthened. Either attach a
+             source or soften it before the next content review. -->
         <p>In a market as varied as this one &mdash; where a century home in the Old West End, a new build
           in Perrysburg and a ranch on an acre in Sylvania all sit within a short drive of each other
           &mdash; that gap is routinely tens of thousands of dollars in either direction.</p>
-
-        <hr class="rule">
-
-        <h3>What you get back</h3>
-        <ul class="checklist">
-          <li><span><strong>A realistic price range</strong>, with the closed comparables it came from</span></li>
-          <li><span><strong>What is selling near you right now</strong> &mdash; and what is sitting</span></li>
-          <li><span><strong>The specific things</strong> that would move your number up before listing</span></li>
-          <li><span><strong>An honest read on timing</strong> &mdash; including &ldquo;wait&rdquo; if that is the answer</span></li>
-        </ul>
-
-        <div class="card" style="margin-top:2.5rem;background:var(--cream-dk);border-style:dashed">
-          <h4 style="margin-bottom:.5rem">Just curious, not ready to sell?</h4>
-          <p>That is completely fine, and worth saying out loud: I will send the valuation and then
-            leave you alone. No drip campaign, no weekly calls. If and when you are ready, you know
-            where I am.</p>
-        </div>
       </div>
 
-      <div class="form-card reveal">
-        <h2 style="font-size:clamp(1.6rem,3vw,2rem)">Request your valuation</h2>
-        <p style="color:var(--muted);font-size:.95rem">Takes about a minute. I reply personally, usually
-          the same day.</p>
-
-        {{> home-value-form}}
+      <div class="factors reveal">
+        <p class="factors__label">What a person weighs that a model cannot</p>
+        <dl class="factors__list">
+          <div class="factor">
+            <dt>Closed comparables</dt>
+            <dd>What genuinely similar homes near you actually sold for &mdash; not list prices.</dd>
+          </div>
+          <div class="factor">
+            <dt>Your property in particular</dt>
+            <dd>Condition, updates and the work that has already been done to it.</dd>
+          </div>
+          <div class="factor">
+            <dt>Street and setting</dt>
+            <dd>The lot, the block, and what sits on either side of it.</dd>
+          </div>
+          <div class="factor">
+            <dt>Current competition</dt>
+            <dd>What a buyer would be choosing between this month.</dd>
+          </div>
+        </dl>
       </div>
-
     </div>
   </div>
 </section>
 
-<section class="section section--cream section--tight">
-  <div class="wrap center">
-    <p class="eyebrow">Prefer to just talk?</p>
-    <h2 style="font-size:clamp(1.7rem,3.2vw,2.3rem)">Call or text &mdash; it reaches me directly.</h2>
-    <div class="btn-row center" style="margin-top:1.75rem">
-      <a class="btn btn--primary" href="tel:+14192454655">(419) 245-4655</a>
-      <a class="btn btn--ghost" href="mailto:crystal@crystalsellstoledo.com">Email Crystal</a>
+<!-- ------------------------------------------------------ what comes back -->
+<section class="section section--cream">
+  <div class="wrap">
+    <div class="returns">
+      <div class="sec-head reveal">
+        <p class="eyebrow">What comes back</p>
+        <h2>What you actually receive.</h2>
+        <p class="lede">Not a number on its own &mdash; the reasoning that produced it, and what to do
+          with it.</p>
+      </div>
+
+      <div class="returns__list reveal">
+        <div class="returns__item">
+          <h3>A realistic price range</h3>
+          <p>With the closed comparables it came from.</p>
+        </div>
+        <div class="returns__item">
+          <h3>What is selling near you right now</h3>
+          <p>And, just as usefully, what is sitting.</p>
+        </div>
+        <div class="returns__item">
+          <h3>The specific things that would move your number</h3>
+          <p>Before listing, for your house rather than houses in general.</p>
+        </div>
+        <div class="returns__item">
+          <h3>An honest read on timing</h3>
+          <p>Including &ldquo;wait&rdquo; if that is the answer.</p>
+        </div>
+      </div>
+
+      <!-- Was a dashed box. It is a quiet aside from Crystal, so it reads as
+           one now: a hairline and a change of voice, no card. -->
+      <aside class="quietnote reveal">
+        <p class="quietnote__t">Just curious, not ready to sell?</p>
+        <p>That is completely fine, and worth saying out loud: I will send the valuation and then
+          leave you alone. No drip campaign, no weekly calls. If and when you are ready, you know
+          where I am.</p>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- -------------------------------------------------------- direct route --
+     Kept, and kept subordinate to the form: a text route rather than a pair
+     of buttons competing with the page's one job. -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="direct">
+      <div class="direct__say">
+        <p class="eyebrow">Prefer to just talk?</p>
+        <h2>Call or text &mdash; it reaches me directly.</h2>
+      </div>
+      <div class="direct__routes">
+        <a class="direct__tel" href="tel:+14192454655">(419)&nbsp;245-4655</a>
+        <a class="direct__mail" href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>
+      </div>
     </div>
   </div>
 </section>

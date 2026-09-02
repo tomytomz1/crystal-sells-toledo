@@ -22,134 +22,247 @@
   }
 } -->
 
-<section class="pagehead">
+<!-- ==================================================================
+     /sell - the definitive seller-process page.
+     Job: "How will she actually sell my house?"
+     The homepage answers why Crystal is worth listening to; /home-value
+     takes the lead. This page owns the process, and nothing else on the
+     site explains the six stages.
+     ================================================================== -->
+
+<section class="pagehead pagehead--lead">
   <div class="wrap">
-    <p class="eyebrow">Selling in greater Toledo</p>
-    <h1>Sell for what it&rsquo;s actually worth.</h1>
-    <p class="lede">Preparation, pricing and marketing are the only three things that move the final
-      number. Here is exactly how I handle all three.</p>
-    <div class="btn-row" style="margin-top:2rem">
-      <a class="btn btn--gold" href="/home-value">Start With My Home&rsquo;s Value</a>
-      <a class="btn btn--light" href="/contact">Book a Walkthrough</a>
+    <div class="lead">
+      <div class="lead__say">
+        <p class="eyebrow">Selling in Perrysburg &amp; greater Toledo</p>
+        <h1>Sell for what it&rsquo;s actually worth.</h1>
+        <p class="lede">Preparation, pricing and marketing are the only three things that move the
+          final number. Here is exactly how I handle all three.</p>
+
+        <div class="lead__act">
+          <a class="btn btn--gold btn--lg" href="/home-value">Start With My Home&rsquo;s Value</a>
+          <p class="lead__alt">Not ready for a number yet?
+            <a href="/contact">Book a walkthrough <span aria-hidden="true">&rarr;</span></a></p>
+        </div>
+      </div>
+
+      <!-- The right column is the page's own spine, not decoration: it names
+           the three phases and the six stages the visitor is about to read.
+           TODO REAL ASSET: approved Crystal listing photography could replace
+           this later. Placeholder artwork here would read as evidence of work
+           that has not been shown, so the column stays typographic. -->
+      <div class="lead__map">
+        <p class="lead__maplabel">The sale, end to end</p>
+        <ol class="lead__phases">
+          <li>
+            <span class="lead__k">Before market</span>
+            <span class="lead__v">Walkthrough &middot; Pricing &middot; Preparation &amp; media</span>
+          </li>
+          <li>
+            <span class="lead__k">On market</span>
+            <span class="lead__v">Launch &middot; Offers &amp; negotiation</span>
+          </li>
+          <li>
+            <span class="lead__k">Under contract</span>
+            <span class="lead__v">Inspection, appraisal, lender, title</span>
+          </li>
+        </ol>
+      </div>
     </div>
   </div>
 </section>
 
+<!-- --------------------------------------------- where leverage is lost --
+     The same three mistakes the page has always argued, recomposed as one
+     editorial argument rather than three marketing cards. -->
 <section class="section">
   <div class="wrap">
-    <div class="split">
-      <div class="reveal">
+    <div class="argument">
+      <div class="argument__head reveal">
         <p class="eyebrow">The honest version</p>
         <h2>Most homes leave money on the table before they ever hit the market.</h2>
+        <p class="argument__sub">Not because of the market. Because of three avoidable mistakes.</p>
       </div>
-      <div class="reveal">
-        <p class="lede">Not because of the market. Because of three avoidable mistakes.</p>
-        <p><strong>Listing before it is ready.</strong> The first ten days generate the most showings
-          a home will ever get. Going live with unfinished paint and a cluttered garage spends that
-          attention on a version of the house nobody wants to buy.</p>
-        <p><strong>Pricing on hope.</strong> An optimistic price does not attract a higher offer &mdash;
-          it attracts silence, then a price cut, and price cuts read as &ldquo;something is wrong with it.&rdquo;</p>
-        <p><strong>Marketing that stops at the MLS.</strong> Entering a listing into the system is the
-          bare minimum. It is not a marketing plan.</p>
+
+      <div class="argument__body reveal">
+        <div class="argument__item">
+          <h3>Listing before it is ready</h3>
+          <p>The first ten days generate the most showings a home will ever get. Going live with
+            unfinished paint and a cluttered garage spends that attention on a version of the house
+            nobody wants to buy.</p>
+        </div>
+        <div class="argument__item">
+          <h3>Pricing on hope</h3>
+          <p>An optimistic price does not attract a higher offer &mdash; it attracts silence, then a
+            price cut, and price cuts read as &ldquo;something is wrong with it.&rdquo;</p>
+        </div>
+        <div class="argument__item">
+          <h3>Marketing that stops at the MLS</h3>
+          <p>Entering a listing into the system is the bare minimum. It is not a marketing plan.</p>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ------------------------------------------------------- the roadmap --
+     All six stages kept in full. Grouped into the three phases of a sale so
+     the lifecycle reads at a glance without shortening any of the detail,
+     and so this does not repeat the flat 01/02/03 rhythm the homepage uses
+     for Prepare / Position / Launch. -->
 <section class="section section--cream">
   <div class="wrap">
-    <div class="center" style="margin-bottom:clamp(2.5rem,5vw,3.5rem)">
+    <div class="sec-head sec-head--wide reveal">
       <p class="eyebrow">Start to finish</p>
       <h2>How your sale actually goes</h2>
+      <p class="lede">Six stages, grouped into the three phases every sale passes through.</p>
     </div>
 
-    <div class="steps">
-      <div class="step reveal">
-        <span class="step__n"></span>
-        <div>
-          <h3>The walkthrough &mdash; free, no commitment</h3>
-          <p>We walk the house together, room by room. I tell you what buyers in your price band will
-            notice, what is worth fixing, and&mdash;just as important&mdash;what to leave alone. You get
-            a written list. You are under no obligation to list with me, or at all.</p>
+    <div class="roadmap reveal">
+      <div class="roadmap__phase">
+        <div class="roadmap__meta">
+          <h3 class="roadmap__name">Before market</h3>
+          <p class="roadmap__range">Stages 01&ndash;03</p>
+        </div>
+        <div class="roadmap__stages">
+          <div class="stage">
+            <p class="stage__n">01</p>
+            <div>
+              <h4 class="stage__t">The walkthrough &mdash; free, no commitment</h4>
+              <p class="stage__d">We walk the house together, room by room. I tell you what buyers in
+                your price band will notice, what is worth fixing, and&mdash;just as important&mdash;what
+                to leave alone. You get a written list. You are under no obligation to list with me,
+                or at all.</p>
+            </div>
+          </div>
+          <div class="stage">
+            <p class="stage__n">02</p>
+            <div>
+              <h4 class="stage__t">A price built from the last 90 days</h4>
+              <p class="stage__d">Not a computer estimate. Real closed comparables from your streets,
+                adjusted for condition, lot, updates and the things an algorithm cannot see. You will
+                see the same data I see and understand exactly why the number is the number.</p>
+            </div>
+          </div>
+          <div class="stage">
+            <p class="stage__n">03</p>
+            <div>
+              <h4 class="stage__t">Prep, stage and shoot</h4>
+              <p class="stage__d">Repairs coordinated with trades I trust, staging advice using what
+                you already own, then a professional shoot: daylight stills, twilight exteriors,
+                walkthrough video and a measured floor plan. Everything ready before day one.</p>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="step reveal">
-        <span class="step__n"></span>
-        <div>
-          <h3>A price built from the last 90 days</h3>
-          <p>Not a computer estimate. Real closed comparables from your streets, adjusted for condition,
-            lot, updates and the things an algorithm cannot see. You will see the same data I see and
-            understand exactly why the number is the number.</p>
+
+      <div class="roadmap__phase">
+        <div class="roadmap__meta">
+          <h3 class="roadmap__name">On market</h3>
+          <p class="roadmap__range">Stages 04&ndash;05</p>
+        </div>
+        <div class="roadmap__stages">
+          <div class="stage">
+            <p class="stage__n">04</p>
+            <div>
+              <h4 class="stage__t">Launch, loudly</h4>
+              <p class="stage__d">MLS and full syndication, paid social targeted at buyers actively
+                searching your area, an email push to my agent network, a broker preview and open
+                houses that are actually promoted rather than just scheduled.</p>
+            </div>
+          </div>
+          <div class="stage">
+            <p class="stage__n">05</p>
+            <div>
+              <h4 class="stage__t">Offers, negotiated properly</h4>
+              <p class="stage__d">Every offer broken down beyond the headline price &mdash; financing
+                strength, appraisal risk, inspection exposure, timelines. The highest number is not
+                always the best offer, and you will know why before you sign.</p>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="step reveal">
-        <span class="step__n"></span>
-        <div>
-          <h3>Prep, stage and shoot</h3>
-          <p>Repairs coordinated with trades I trust, staging advice using what you already own, then a
-            professional shoot: daylight stills, twilight exteriors, walkthrough video and a measured
-            floor plan. Everything ready before day one.</p>
+
+      <div class="roadmap__phase">
+        <div class="roadmap__meta">
+          <h3 class="roadmap__name">Under contract</h3>
+          <p class="roadmap__range">Stage 06</p>
         </div>
-      </div>
-      <div class="step reveal">
-        <span class="step__n"></span>
-        <div>
-          <h3>Launch, loudly</h3>
-          <p>MLS and full syndication, paid social targeted at buyers actively searching your area,
-            an email push to my agent network, a broker preview and open houses that are actually
-            promoted rather than just scheduled.</p>
-        </div>
-      </div>
-      <div class="step reveal">
-        <span class="step__n"></span>
-        <div>
-          <h3>Offers, negotiated properly</h3>
-          <p>Every offer broken down beyond the headline price &mdash; financing strength, appraisal
-            risk, inspection exposure, timelines. The highest number is not always the best offer, and
-            you will know why before you sign.</p>
-        </div>
-      </div>
-      <div class="step reveal">
-        <span class="step__n"></span>
-        <div>
-          <h3>Contract to keys</h3>
-          <p>Inspection, appraisal, lender, title. I chase every deadline so you do not have to, and
-            you hear from me before you have to wonder.</p>
+        <div class="roadmap__stages">
+          <div class="stage">
+            <p class="stage__n">06</p>
+            <div>
+              <h4 class="stage__t">Contract to keys</h4>
+              <p class="stage__d">Inspection, appraisal, lender, title. I chase every deadline so you
+                do not have to, and you hear from me before you have to wonder.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ------------------------------------------------ included on listing --
+     The same eight services, set as an index rather than a ticked checklist
+     beside a photograph. The previous composition put
+     /assets/img/listing-marketing.jpg here as though it were proof of the
+     work described; it is still placeholder artwork, so it has been removed
+     rather than presented as evidence.
+     TODO REAL ASSET: approved Crystal listing photography, once one exists
+     and the client has cleared it for use. -->
 <section class="section">
   <div class="wrap">
-    <div class="split split--media-right">
-      <div class="reveal">
-        <p class="eyebrow">Included on every listing</p>
-        <h2>No tiers. No upsells.</h2>
-        <p class="lede">A $220,000 house gets exactly the same marketing as a $700,000 house.</p>
-        <ul class="checklist" style="margin-top:2rem">
-          <li><span><strong>Professional photography</strong> &mdash; daylight interiors and twilight exteriors</span></li>
-          <li><span><strong>Walkthrough video</strong> and a measured, accurate floor plan</span></li>
-          <li><span><strong>Aerial photography</strong> where the lot or setting deserves it</span></li>
-          <li><span><strong>Paid social campaigns</strong> targeted to active buyers in your area</span></li>
-          <li><span><strong>Full syndication</strong> &mdash; Zillow, Realtor.com, Redfin, Homes.com and more</span></li>
-          <li><span><strong>Staging consultation</strong> and a written pre-list preparation plan</span></li>
-          <li><span><strong>Promoted open houses</strong>, not just scheduled ones</span></li>
-          <li><span><strong>Weekly seller updates</strong> with real showing feedback and traffic numbers</span></li>
-        </ul>
+    <div class="sec-head sec-head--wide reveal">
+      <p class="eyebrow">Included on every listing</p>
+      <h2>No tiers. No upsells.</h2>
+      <p class="lede">A $220,000 house gets exactly the same marketing as a $700,000 house.</p>
+    </div>
+
+    <div class="included reveal">
+      <div class="included__item">
+        <h3 class="included__t">Professional photography</h3>
+        <p class="included__d">Daylight interiors and twilight exteriors.</p>
       </div>
-      <div class="frame reveal">
-        <img src="/assets/img/listing-marketing.jpg" data-fallback="/assets/img/placeholder-wide.svg"
-             alt="A professionally photographed Perrysburg listing" width="1400" height="900" loading="lazy">
+      <div class="included__item">
+        <h3 class="included__t">Walkthrough video</h3>
+        <p class="included__d">With a measured, accurate floor plan.</p>
+      </div>
+      <div class="included__item">
+        <h3 class="included__t">Aerial photography</h3>
+        <p class="included__d">Where the lot or the setting deserves it.</p>
+      </div>
+      <div class="included__item">
+        <h3 class="included__t">Paid social campaigns</h3>
+        <p class="included__d">Targeted to active buyers in your area.</p>
+      </div>
+      <div class="included__item">
+        <h3 class="included__t">Full syndication</h3>
+        <p class="included__d">Zillow, Realtor.com, Redfin, Homes.com and more.</p>
+      </div>
+      <div class="included__item">
+        <h3 class="included__t">Staging consultation</h3>
+        <p class="included__d">And a written pre-list preparation plan.</p>
+      </div>
+      <div class="included__item">
+        <h3 class="included__t">Promoted open houses</h3>
+        <p class="included__d">Not just scheduled ones.</p>
+      </div>
+      <div class="included__item">
+        <h3 class="included__t">Weekly seller updates</h3>
+        <p class="included__d">Real showing feedback and traffic numbers.</p>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ------------------------------------------------------------- faq ----
+     Markup, ids, aria wiring and accordion behaviour are unchanged from the
+     previous page; only the heading block above it has been brought into the
+     left-aligned editorial system. -->
 <section class="section section--cream">
   <div class="wrap wrap--narrow">
-    <div class="center" style="margin-bottom:2.5rem">
+    <div class="sec-head reveal">
       <p class="eyebrow">Straight answers</p>
       <h2>Questions sellers actually ask</h2>
     </div>
