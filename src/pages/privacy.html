@@ -94,10 +94,14 @@
         and browser details as part of that request. No cookie is set by the font files.</p>
 
       <h3>Google Places &mdash; address suggestions</h3>
-      <p>Where address autocomplete is switched on, the characters you type into a property-address
-        field are sent to Google&rsquo;s Places service to return matching addresses. Nothing else on
-        the form is sent, and nothing is sent until you start typing in that field. If the feature is
-        not configured, the field is an ordinary text box and Google sees nothing.</p>
+      <p>Where address autocomplete is configured, Google&rsquo;s Maps JavaScript library is
+        requested as the page loads &mdash; on every page, before you interact with anything. Like
+        any request to another site, it tells Google the ordinary things a request carries: your IP
+        address and your browser details.</p>
+      <p>What you type is separate, and is sent only once you start typing. Those characters go to
+        Google&rsquo;s Places service so it can return matching addresses; nothing else on the form
+        goes with them. If the feature is not configured, nothing is requested from Google here at
+        all and the address field is an ordinary text box.</p>
 
       <h3>HubSpot &mdash; contact records</h3>
       <p>When you submit a form, the details above are sent to <strong>HubSpot</strong>, the customer
@@ -117,7 +121,10 @@
         estate brokerage require. They are deleted on request, subject to those obligations.</p>
       <p>Analytics data is kept according to the retention period configured in each provider&rsquo;s
         own console; it is not tied to your name or email in either one. The IP address used for
-        submission rate limiting is discarded within minutes.</p>
+        submission rate limiting is kept only in the memory of the serverless function that receives
+        the form, and only to limit abuse. This site does not write it to the CRM or to any database;
+        it goes when that memory is cleared in the ordinary course or the function instance is
+        recycled.</p>
 
       <h2>Asking what is held, or asking for deletion</h2>
       <p>Email <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>

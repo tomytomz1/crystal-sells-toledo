@@ -782,22 +782,24 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   font-size: calc(var(--lk) * .44); line-height: .95;
   letter-spacing: -.01em; color: var(--cream);
 }
+/* TOLEDO is the same device as .brand__sub in the header: sans, 600, wide
+   tracking, uppercase. Setting it in the serif made the two lockups read as
+   two different marks. Only the colour differs, because the ground does. */
 .lockup__place {
-  font-family: var(--serif);
+  font-family: var(--sans); font-weight: 600;
   font-size: calc(var(--lk) * .21); line-height: 1;
   letter-spacing: .3em; text-transform: uppercase; color: var(--gold-lt);
   padding-left: .1em;
 }
 
 /* --- third-party compliance marks -------------------------------------
-   Plate-less and in the brand gold, at Crystal's direction. NOT checked
-   against NAR's or HUD's published usage rules - both bodies publish
-   approved reversed artwork, which should replace these recolours when it
-   is to hand.
+   Equal Housing is HUD's own vector, filled with currentColor, so it takes
+   the brand gold and stands on the footer ground with nothing behind it.
 
-   Matched on ink mass rather than any single dimension: the MLS lockup is
-   2.6:1 landscape and the Equal Housing logo 0.94:1 portrait, so equal
-   heights would leave one dominating the other. */
+   REALTOR(R)/MLS cannot: the file is dark artwork baked onto opaque white,
+   and NAR's reversed artwork is not to hand. It keeps a white plate, which
+   is the only ground that artwork disappears into. Recolouring it instead
+   would be altering a mark we do not own. */
 .brandmark { display: inline-flex; align-items: center; color: var(--gold); }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
@@ -815,24 +817,40 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   align-items: center; justify-content: space-between;
   font-size: .78rem; color: #948d83; line-height: 1.6;
 }
-/* Bare marks need more air between them than plated ones did. */
+/* A bare mark and a plated one need more air between them than two plates
+   did, or the plate edge reads as a border around both. */
 .footer__badges { display: flex; align-items: center; flex-wrap: wrap;
   gap: clamp(1.15rem, 2.5vw, 1.75rem); }
-/* The two marks are different shapes - the MLS lockup is 2.6:1 landscape,
-   the official Equal Housing logo is 0.94:1 portrait - so they are matched on
-   ink mass, not on any single dimension.
+/* The MLS mark is sized off the block "R" device, not off the file. The
+   file is 600x234 with its own margins baked in, and the R device occupies
+   source rows 41-167 - 127/234 of the file - so it renders at 0.543 of
+   whatever height is set here. The previous 28px made a 15.2px R, under
+   the 20px floor. 46px puts the R at 25.0px and the MLS portion at 65.5px,
+   and squares the artwork height with Equal Housing beside it. Do not
+   reduce this height; scale the plate with it if it ever has to grow.
+
+   What this size cannot buy is the microtype inside the artwork: the
+   REALTOR(R) wordmark under the R is 18/234 of the file and renders at
+   3.5px, the reversed MULTIPLE LISTING SERVICE strapline at about 4px.
+   Neither resolves, and the wordmark would need a 78px artwork height -
+   a plate near 200x95 - to do so. Both identifiers are stated in readable
+   text in the disclaimer beside them; the marks do the recognition.
 
    Equal Housing carries its own wordmark, which is 19% of its height in two
-   lines: at 44px each line renders about 3px and cannot resolve. That is
+   lines: at 46px each line renders about 3px and cannot resolve. That is
    inherent to the official artwork, not a sizing mistake. The words are stated
    legibly in the disclosure paragraph beside it, so the mark does the
    recognition and the text does the disclosure. Making the type readable would
    need a badge near 90px tall. */
-/* The gold is baked into realtor-mls-gold.png - its source is an opaque
-   white PNG with no alpha, so it cannot follow this token. Regenerate that
-   file if --gold ever moves. HUD's vector fills with currentColor and does
-   follow it. */
-.brandmark--mls img { height: 28px; width: auto; display: block; }
+.brandmark--mls {
+  height: 62px; padding-inline: 11px; justify-content: center;
+  background: #fff;
+  border: 1px solid rgba(184, 134, 59, .30);
+  border-radius: var(--radius);
+}
+/* 46px img + the file's own 16% top and bottom margins leaves ~16px of
+   clear space on every side of the ink. Trimming the plate eats that. */
+.brandmark--mls img { height: 46px; width: auto; display: block; }
 .brandmark--eho svg { height: 46px; width: auto; display: block; }
 .footer__disclaimer { max-width: 60ch; }
 
