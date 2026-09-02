@@ -113,6 +113,7 @@ Zoho code is retained but imported by nothing; it is a rollback path, not the li
 ```bash
 npm run build        # src/ + assets/ -> public/
 npm run check        # static validation
+npm run verify:live  # post-deploy: does the live site match what was built?
 npm run test:unit    # api/ endpoint and validation
 npm run test:browser # browser behaviour
 npm run test:hubspot # HubSpot delivery

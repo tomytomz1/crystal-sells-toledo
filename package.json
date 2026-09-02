@@ -8,6 +8,7 @@
     "build": "node tools/build.mjs",
     "dev": "node tools/build.mjs && npx --yes serve@14 public -l 3000",
     "check": "node tools/check.mjs",
+    "verify:live": "node tools/verify-live.mjs",
     "test": "node tools/build.mjs && node tools/check.mjs && node --test tests/*.test.mjs",
     "test:unit": "node --test tests/api.test.mjs",
     "test:browser": "node --test tests/browser.test.mjs",
