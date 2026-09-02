@@ -790,24 +790,15 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 
 /* --- third-party compliance marks -------------------------------------
-   These two are NOT ours to restyle: the REALTOR®/MLS mark is NAR's and
-   both files carry an opaque white ground with no alpha. They keep a white
-   plate, which is the only colour their baked ground disappears into.
+   Plate-less and in the brand gold, at Crystal's direction. NOT checked
+   against NAR's or HUD's published usage rules - both bodies publish
+   approved reversed artwork, which should replace these recolours when it
+   is to hand.
 
-   Normalised on optical weight rather than box height. Measured: the MLS
-   ink fills 90% of its file width and includes a solid bar, so at a shared
-   30px it out-weighed everything near it; Equal Housing is a 3.4-weight
-   outline with no fill and needs more size to hold the same presence. The
-   plate height and inline padding are shared; only the artwork differs. */
-.brandchip {
-  display: inline-flex; align-items: center; justify-content: center;
-  height: 56px; padding-inline: 13px;
-  background: #fff;
-  border: 1px solid rgba(184, 134, 59, .30);
-  border-radius: var(--radius);
-  /* equal-housing.svg fills with currentColor, so the plate sets its ink. */
-  color: var(--ink);
-}
+   Matched on ink mass rather than any single dimension: the MLS lockup is
+   2.6:1 landscape and the Equal Housing logo 0.94:1 portrait, so equal
+   heights would leave one dominating the other. */
+.brandmark { display: inline-flex; align-items: center; color: var(--gold); }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
@@ -824,8 +815,9 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   align-items: center; justify-content: space-between;
   font-size: .78rem; color: #948d83; line-height: 1.6;
 }
-.footer__badges { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
-.footer__badges img { width: auto; display: block; }
+/* Bare marks need more air between them than plated ones did. */
+.footer__badges { display: flex; align-items: center; flex-wrap: wrap;
+  gap: clamp(1.15rem, 2.5vw, 1.75rem); }
 /* The two marks are different shapes - the MLS lockup is 2.6:1 landscape,
    the official Equal Housing logo is 0.94:1 portrait - so they are matched on
    ink mass, not on any single dimension.
@@ -836,8 +828,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
    legibly in the disclosure paragraph beside it, so the mark does the
    recognition and the text does the disclosure. Making the type readable would
    need a badge near 90px tall. */
-.brandchip--mls img { height: 26px; }
-.brandchip--eho svg { height: 44px; }
+/* The gold is baked into realtor-mls-gold.png - its source is an opaque
+   white PNG with no alpha, so it cannot follow this token. Regenerate that
+   file if --gold ever moves. HUD's vector fills with currentColor and does
+   follow it. */
+.brandmark--mls img { height: 28px; width: auto; display: block; }
+.brandmark--eho svg { height: 46px; width: auto; display: block; }
 .footer__disclaimer { max-width: 60ch; }
 
 /* ------------------------------------------------------- sticky mobile -- */
