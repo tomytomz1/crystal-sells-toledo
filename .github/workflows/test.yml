@@ -1,12 +1,13 @@
-name: Live Production Verification
+name: test
 
 on:
-  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
-  verify-live:
+  test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +18,14 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run build
+      # Only Chromium — it is the sole browser tests/browser.test.mjs launches.
+      - run: npx playwright install --with-deps chromium
 
-      - run: npm run verify:live
+      # tests/browser.test.mjs defaults to a container-specific Chromium path
+      # and honours PW_CHROMIUM. Point it at the one just installed rather than
+      # editing the test.
+      - name: Resolve Chromium path
+        run: |
+          echo "PW_CHROMIUM=$(node -e "console.log(require('playwright').chromium.executablePath())")" >> "$GITHUB_ENV"
+
+      - run: npm test
