@@ -413,7 +413,43 @@
     return Array.prototype.slice.call(form.querySelectorAll("[data-step]"));
   }
 
-  function showStep(form, index) {
+  /**
+   * Bring a step that has just reappeared under the fixed header, then put
+   * the caret in it.
+   *
+   * Measured AFTER the swap, so the numbers describe settled layout. The
+   * scroll runs first and the focus uses preventScroll, so focusing cannot
+   * undo the scroll - and neither happens at all when the step is already
+   * sitting clear of the header and inside the viewport, which is the common
+   * case on a page where the form starts near the top.
+   *
+   * The header offset is not computed here: `html { scroll-padding-top }`
+   * already declares it for the whole site and scrollIntoView honours it, so
+   * one number governs anchors, skip links and this. Behaviour is left as
+   * `auto` so the CSS `scroll-behavior` - and its reduced-motion override -
+   * decides whether the move animates.
+   */
+  function revealStep(step, field) {
+    var header = document.querySelector(".site-header");
+    var headerBottom = header ? header.getBoundingClientRect().bottom : 0;
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    var box = step.getBoundingClientRect();
+    if (box.top < headerBottom || box.bottom > vh) step.scrollIntoView({ block: "start" });
+    if (field) field.focus({ preventScroll: true });
+  }
+
+  /**
+   * `opts.reveal` is set only by "Back to address".
+   *
+   * Going back from the bottom of a tall step 2 collapses the document, and
+   * the browser clamps the scroll position - leaving the visitor looking at
+   * whatever now occupies that space, with the restored address field
+   * off-screen above them and focus dropped on <body>. Forward moves and the
+   * page-load call keep the behaviour they had: forward already lands on the
+   * fields that just appeared, and taking focus on load would scroll the
+   * page for every visitor.
+   */
+  function showStep(form, index, opts) {
     var steps = stepsOf(form);
     steps.forEach(function (s, i) { s.hidden = i !== index; });
     form.dataset.currentStep = String(index);
@@ -426,7 +462,8 @@
     var target = steps[index];
     if (target) {
       var first = target.querySelector("input, select, textarea, button");
-      if (first && index > 0) first.focus();
+      if (opts && opts.reveal) revealStep(target, first);
+      else if (first && index > 0) first.focus();
     }
   }
 
@@ -457,7 +494,7 @@
 
       form.querySelectorAll("[data-step-back]").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          showStep(form, Math.max(Number(form.dataset.currentStep || 0) - 1, 0));
+          showStep(form, Math.max(Number(form.dataset.currentStep || 0) - 1, 0), { reveal: true });
         });
       });
     });
