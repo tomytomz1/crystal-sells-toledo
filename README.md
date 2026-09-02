@@ -37,11 +37,11 @@ imported once before. You do not need a new name. Either:
 - **Import under a different project name** — the name only affects the temporary
   `*.vercel.app` URL, never the custom domain.
 
-### Branch note
+### Production branch
 
-The site currently lives on the **`claude/crystal-perrysburg-realtor-site-so38qa`** branch.
-Vercel deploys the production branch (usually `main`). Either merge this branch into `main`,
-or point Vercel at this branch under **Settings → Git → Production Branch**.
+**`main` is the production branch.** Vercel deploys it on every push; nothing else
+deploys to the live domain. Feature branches get a preview deployment and are merged
+into `main` when they are approved.
 
 ### Custom domain
 
@@ -76,10 +76,11 @@ npm run build
 ### The email
 
 `crystal@crystalsellstoledo.com` is wired through the site — the footer, the contact page, the
-valuation page and the mailto fallback in `assets/js/main.js`. **Create that mailbox in Zoho
-before launch**, or the fallback sends mail into a void.
+valuation page and the mailto fallback in `assets/js/main.js`. **Create that mailbox before
+launch**, or the fallback sends mail into a void. (Zoho Mail is the mailbox host — nothing to
+do with Zoho CRM, which is rollback-only code the site does not use.)
 
-Worth adding as a *free alias* on the same Zoho mailbox, not as separate accounts:
+Worth adding as *free aliases* on the same mailbox, not as separate accounts:
 
 - `hello@crystalsellstoledo.com` — the friendly one to put on signs, cards and social bios
 - `crystal.saylor@crystalsellstoledo.com` — catches anyone who guesses the full-name form
@@ -96,11 +97,15 @@ sed -i 's/crystal@crystalsellstoledo\.com/new@address.com/g' \
 npm run build && npm run check
 ```
 
-### Still placeholder
+### Still outstanding
 
-- **Photography** (below) and the **form endpoint** (below)
+- **Photography.** 14 images are still branded placeholders: the homepage hero
+  (`hero-perrysburg.jpg`, which falls back to a branded gradient) and the 13 listed
+  below that render a placeholder card — the 12 neighborhood photographs and the
+  `/buy` porch image. The portrait, logo lockup, REALTOR®/MLS badge and social card
+  are real and in place.
 
-`npm run check` names each one that is still outstanding, so it tells you when you are done.
+`npm run check` names every image still outstanding, so it tells you when you are done.
 
 > **A note on the address.** The JSON-LD `address` is the Key Realty office in Toledo 43617,
 > because that is the real business address and search engines will cross-check it against the
@@ -129,10 +134,7 @@ replaces its branded placeholder — no code change needed.
 
 | Filename | What it is | Suggested size |
 |---|---|---|
-| `crystal-headshot.jpg` | Crystal's portrait (the one in the green blouse) | 800 × 1000, portrait |
 | `hero-perrysburg.jpg` | Homepage hero — a Perrysburg street or home | 1800 × 1200, landscape |
-| `logo-lockup.png` | The Key Realty ∣ Crystal Sells Toledo lockup, **transparent PNG** | ~600px wide |
-| `realtor-mls.png` | The REALTOR® ∣ MLS badge, transparent PNG | ~300px wide |
 | `hood-old-west-end.jpg` | The Old West End, Toledo | 800 × 600 |
 | `hood-ottawa-hills.jpg` | Ottawa Hills | 800 × 600 |
 | `hood-sylvania.jpg` | Sylvania | 800 × 600 |
@@ -145,72 +147,85 @@ replaces its branded placeholder — no code change needed.
 | `hood-fort-meigs.jpg` | Fort Meigs / riverfront | 800 × 600 |
 | `hood-levis-commons.jpg` | Levis Commons | 800 × 600 |
 | `hood-established.jpg` | An established subdivision | 800 × 600 |
-| `listing-marketing.jpg` | A well-photographed listing (for `/sell`) | 1400 × 900 |
 | `buying.jpg` | A front porch / welcoming exterior (for `/buy`) | 1400 × 900 |
-| `og-default.jpg` | Social share card | **1200 × 630** |
+
+Already supplied and in use: `crystal-headshot.jpg`, `logo-lockup.png`,
+`realtor-mls.png`, `og-default.jpg`.
+
+`/sell` is deliberately text-led rather than carrying a listing photograph: presenting
+generic artwork beside "included on every listing" would read as evidence of work that
+has not been shown. Add one there only when Crystal has an approved photograph of her
+own listing.
 
 Compress everything at [squoosh.app](https://squoosh.app) before committing — aim under
 300 KB each. Slow photos are the number one reason agent sites lose mobile visitors.
 
 ### Make the forms deliver
 
-Leads POST to `/api/lead`, a same-origin Vercel function. The browser never
-sees a credential. Until the Zoho variables below are set the endpoint returns
-`503 NOT_CONFIGURED` and the form shows a recovery panel with Crystal's phone,
-email and a pre-filled mailto - it never claims a lead was received when it
-was not.
+Leads POST to `/api/lead`, a same-origin Vercel function that talks to
+**HubSpot**. The browser never sees a credential and no key is ever prefixed so
+it reaches the client. Until the three required variables below are set the
+endpoint returns `503 NOT_CONFIGURED` and the form shows a recovery panel with
+Crystal's phone, email and a pre-filled mailto - it never claims a lead was
+received when it was not.
 
-**Environment variables** (Vercel -> Settings -> Environment Variables). Never
-prefix any of these so they reach the browser. See `.env.example`.
+**Environment variables** (Vercel -> Settings -> Environment Variables). See
+`.env.example` for the annotated list.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `ZOHO_CLIENT_ID` | yes | Self-client from the Zoho API console |
-| `ZOHO_CLIENT_SECRET` | yes | |
-| `ZOHO_REFRESH_TOKEN` | yes | Generated once, does not expire |
-| `ZOHO_ACCOUNTS_DOMAIN` | no | Default `https://accounts.zoho.com`; change for .eu / .in / .com.au / .jp / .ca |
-| `ZOHO_API_DOMAIN` | no | Default `https://www.zohoapis.com` |
-| `ALLOWED_ORIGINS` | no | Extra hostnames permitted to POST |
+| `HUBSPOT_ACCESS_TOKEN` | yes | Private app / service key |
+| `HUBSPOT_PORTAL_ID` | yes | Numeric hub id, for the Forms Submission API |
+| `HUBSPOT_FORM_GUID` | yes | The form the submission is posted to |
+| `HUBSPOT_API_BASE` | no | Default `https://api.hubapi.com` |
+| `HUBSPOT_FORMS_BASE` | no | Default `https://api.hsforms.com` |
+| `GOOGLE_MAPS_API_KEY` | no | Address autocomplete; unset, the field is a plain text input |
+| `GA4_MEASUREMENT_ID` | no | Overrides the compiled-in id; the tag only ships when `VERCEL_ENV=production` |
+| `ALLOWED_ORIGINS` | no | Extra hostnames permitted to POST — see the note below |
 
-**Zoho scope required:** `ZohoCRM.modules.leads.CREATE`,
-`ZohoCRM.modules.leads.UPDATE`, `ZohoCRM.modules.notes.CREATE`. The simplest
-grant that covers all three is `ZohoCRM.modules.ALL`.
+**HubSpot scopes required:** `crm.objects.contacts.read`,
+`crm.objects.contacts.write`, `forms`. There is no engagement or notes scope on
+a service key, which is why the per-submission activity is written through the
+Forms Submission API rather than as a Note.
 
-**Getting the refresh token**
+**What lands in HubSpot.** A Contact, matched on `email` so a repeat enquiry
+updates the same record rather than creating a second one, plus a dated
+**Form submitted** activity carrying the full enquiry - so a later message never
+overwrites what the person said the first time.
 
-1. <https://api-console.zoho.com> -> Self Client -> Create.
-2. Generate a code with the scopes above, a 10-minute expiry, and your own
-   domain as the scope description.
-3. Exchange the code once, from a terminal:
-
-```bash
-curl -X POST https://accounts.zoho.com/oauth/v2/token \
-  -d grant_type=authorization_code \
-  -d client_id=YOUR_ID -d client_secret=YOUR_SECRET \
-  -d code=THE_CODE
-```
-
-4. Copy `refresh_token` from the response into Vercel. The `access_token` is
-   short-lived and is not stored - the endpoint refreshes it and caches it in
-   memory.
-
-**What lands in the CRM.** A Lead upserted on `Email` (so repeat enquiries do
-not create duplicates), plus a **Note on every submission** carrying the full
-detail - so a second enquiry updates the record without overwriting what the
-person said the first time.
-
-| Zoho field | Source |
+| HubSpot property | Source |
 |---|---|
-| `First_Name` / `Last_Name` | form |
-| `Email` | form, lowercased |
-| `Phone` | form, normalised to `(419) 555-1234` where it is a US number |
-| `Street` | property address, when supplied |
-| `Lead_Source` | `Website` |
-| `Lead_Status` | `New Lead` |
-| `Description` | fixed-order block: form, timeline, condition, topic, message, notes, landing page, current page, referrer, all UTM/click IDs, first touch, submitted, submission ID |
+| `email` | form, lowercased |
+| `firstname` / `lastname` | form |
+| `phone` | form, normalised to `(419) 555-1234` where it is a US number; omitted when blank so a PATCH cannot blank an existing value |
+| `address` | property address, when supplied; omitted when blank for the same reason |
+| `message` | the fixed-order enquiry block: form, timeline, condition, topic, message, notes, landing page, current page, referrer, every UTM and click id, first touch, submitted, submission id |
 
-Everything beyond the standard fields goes in `Description` because Zoho Free
-has no custom fields.
+`message` is a HubSpot **default** contact property, not an invented one. If a
+portal admin archives it or makes it read-only the endpoint fails the lead
+rather than saving a contact with the enquiry silently missing.
+
+**Which origins may POST.** `crystalsellstoledo.com`, `www.`, `localhost`,
+`127.0.0.1`, and the hostname of the current deployment as Vercel reports it in
+`VERCEL_URL`. Arbitrary `*.vercel.app` hostnames are **not** accepted — that
+domain is shared, so a suffix match would let any Vercel project on earth drive
+a browser into posting here. One consequence worth knowing before you test a
+preview: Vercel also serves each deployment on a *branch alias*
+(`...-git-<branch>-<team>.vercel.app`), which is a different string from
+`VERCEL_URL` and so returns `403 FORBIDDEN_ORIGIN` on submit. Test on the
+deployment URL Vercel prints, or add the alias to `ALLOWED_ORIGINS`.
+
+None of this is authentication — an `Origin` header is trivially forged by
+anything that is not a browser. It is CSRF hygiene, and nothing downstream
+treats a passing origin as proof of anything.
+
+### Zoho: rollback only, not the live path
+
+`api/_lib/zoho.mjs` and `tools/zoho-verify.mjs` are retained as a rollback path
+and are **imported by nothing**. Setting the `ZOHO_*` variables does not switch
+delivery to Zoho - `api/lead.js` talks to HubSpot. The code and its tests are
+kept so a rollback is a small change rather than a rewrite; leave the variables
+blank in production, and treat any instruction to configure Zoho as historical.
 
 ### Rate limiting
 
@@ -232,14 +247,23 @@ Two files contain drafted copy that Crystal should read and rewrite in her own v
   starting draft, **but Crystal knows these streets and the site should say what she knows.**
   Local specificity is exactly what makes these pages rank and convert.
 
-Also swap the three placeholder testimonials on the homepage for real reviews as soon as she
-has them, and delete the `quote--placeholder` class from those cards.
+There are **no testimonials on the site**, and that is deliberate: mocked-up quotes read as
+fabricated endorsements (NAR Article 12, FTC Endorsement Guides). `src/pages/index.html`
+carries a commented-out placeholder marking where a real testimonials section would go —
+restore it only with verbatim quotes and the client's permission to use their name.
 
 ### Legal review
 
-`src/pages/privacy.html` is a plain-language starting point, not legal advice. Have Key
-Realty's compliance contact review it, plus the footer disclosures, against the brokerage's
-own policies and Ohio Division of Real Estate advertising rules before launch.
+`src/pages/privacy.html` is a plain-language description of what the site actually does —
+which services it loads, what each one sees, how long things are kept — **not legal advice,
+and not yet reviewed**. Have Key Realty's compliance contact review it, plus the footer
+disclosures, against the brokerage's own policies and Ohio Division of Real Estate
+advertising rules.
+
+Two things in it need a decision rather than a proofread: the retention and deletion wording,
+and the fact that Google Analytics sets cookies while the site shows no consent banner. The
+page states both plainly; whether that is the brokerage's chosen position is not a call this
+repository can make.
 
 ---
 
@@ -248,7 +272,7 @@ own policies and Ohio Division of Real Estate advertising rules before launch.
 ```bash
 npm run build     # rebuild the HTML from src/
 npm run check     # validate links, alt text, meta, JSON-LD, lead pipeline
-npm test          # build + check + 40 automated tests
+npm test          # build + check + the whole test suite (CI's job, not the loop)
 npm run dev       # build, then serve public/ on http://localhost:3000
 ```
 
@@ -291,7 +315,8 @@ Run `npm run build`. It appears at `/whatever` and is added to `sitemap.xml` aut
 
 - [ ] Real phone, email, license number and office address (`npm run check` confirms)
 - [ ] Real photography in `assets/img/`
-- [ ] `formEndpoint` set and a test submission received
+- [ ] `HUBSPOT_ACCESS_TOKEN`, `HUBSPOT_PORTAL_ID` and `HUBSPOT_FORM_GUID` set in Vercel,
+      and a test submission confirmed in the HubSpot portal
 - [ ] About page and neighborhood guides rewritten in Crystal's voice
 - [ ] Privacy page and footer disclosures reviewed by Key Realty compliance
 - [ ] Custom domain connected

@@ -32,15 +32,33 @@ export function clientIp(req) {
   return req.socket?.remoteAddress || "unknown";
 }
 
-/** Hosts permitted to submit. Configurable so preview deploys work. */
+/**
+ * Hosts permitted to submit.
+ *
+ * `*.vercel.app` used to be accepted as a suffix so preview deploys worked.
+ * That let ANY vercel.app hostname - including someone else's project, which
+ * anyone can create in seconds - past this check. The current deployment's
+ * own hostname is supplied by Vercel as VERCEL_URL, so preview deploys still
+ * work without opening the whole shared domain; any other preview host that
+ * genuinely needs to submit goes in ALLOWED_ORIGINS by name.
+ *
+ * VERCEL_URL is a bare hostname, not a URL, so it is lowercased and used as
+ * given; a value that somehow arrives with a scheme is normalised through the
+ * same parser as the request header.
+ */
 export function allowedHosts() {
   const extra = (process.env.ALLOWED_ORIGINS || "")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const deployment = (process.env.VERCEL_URL || "").trim().toLowerCase();
+  const deploymentHost = deployment
+    ? (deployment.includes("://") ? hostOf(deployment) : deployment.split("/")[0])
+    : null;
   return new Set([
     "crystalsellstoledo.com",
     "www.crystalsellstoledo.com",
     "localhost",
     "127.0.0.1",
+    ...(deploymentHost ? [deploymentHost] : []),
     ...extra,
   ]);
 }
@@ -53,13 +71,18 @@ function hostOf(value) {
 /**
  * Same-origin check. A missing Origin is tolerated (some privacy tools
  * strip it) but a *present and foreign* Origin is refused.
+ *
+ * This is CSRF hygiene, not authentication: a header is trivially forged by
+ * anything that is not a browser, so nothing downstream may treat a passing
+ * Origin as proof of anything. It exists to stop a page on another site from
+ * driving a visitor's browser into posting here.
  */
 export function originAllowed(req) {
   const allow = allowedHosts();
   const origin = hostOf(req.headers.origin);
-  if (origin) return allow.has(origin) || origin.endsWith(".vercel.app");
+  if (origin) return allow.has(origin);
   const ref = hostOf(req.headers.referer);
-  if (ref) return allow.has(ref) || ref.endsWith(".vercel.app");
+  if (ref) return allow.has(ref);
   return true;
 }
 

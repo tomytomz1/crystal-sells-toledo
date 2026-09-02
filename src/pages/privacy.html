@@ -17,44 +17,119 @@
   <div class="wrap">
     <div class="prose">
       <!-- ============================================================
-           NOTE FOR CRYSTAL: this is a plain-language starting point,
-           not legal advice. Have Key Realty's compliance contact review
-           it before launch, and confirm it matches the brokerage's own
-           policies and Ohio Division of Real Estate advertising rules.
+           AWAITING KEY REALTY COMPLIANCE APPROVAL.
+
+           This is a plain-language description of what the site actually
+           does, not legal advice, and it has NOT yet been reviewed by Key
+           Realty's compliance contact. That review is outstanding and
+           should cover the whole page - in particular the retention and
+           deletion wording, the lawful-basis sentence, and the absence of
+           a cookie banner while Google Analytics sets cookies.
+
+           It was rewritten on 2 September 2026 because the previous
+           version was inaccurate about the runtime: it named Vercel
+           Analytics as the only analytics, said the site set no analytics
+           cookies, and said nothing was collected unless a form was
+           submitted. GA4 ships on production builds and sets cookies, and
+           Google Fonts and (when configured) Google Places are contacted
+           on page load. Anything stated here must keep matching
+           tools/build.mjs and src/partials/_shell.html.
            ============================================================ -->
-      <p class="lede">The short version: information you send through this site is used to reply to you
-        and nothing else. It is never sold.</p>
+      <p class="lede">The short version: what you send through a form is used to answer you and
+        nothing else, and it is never sold. This page also names every third-party service this
+        site loads, because some of them see something about your visit whether or not you ever
+        fill in a form.</p>
 
-      <h2>What is collected</h2>
-      <p>Only what you type into a form on this site &mdash; typically your name, email address, phone
-        number, the property address you asked about, and any message you write. Nothing is collected
-        about you unless you choose to submit it.</p>
+      <p class="prose__note">Written in plain language, and not legal advice. Effective and last
+        updated <strong>September&nbsp;2,&nbsp;2026</strong>.</p>
 
-      <h2>How it is used</h2>
-      <p>To prepare and send what you requested, and to follow up about that request. If you have asked
-        for a valuation and told me you are simply curious, you will receive the valuation and then be
-        left alone.</p>
+      <h2>What is collected when you submit a form</h2>
+      <p>The valuation and contact forms collect what you type: your first and last name, your email
+        address, your phone number if you give one, the property address you asked about, when you
+        might sell, the condition of the property, and any message or notes you write.</p>
+      <p>Submitted alongside it, automatically, is the context of the enquiry: the page you landed
+        on, the page you submitted from, the site that referred you, any campaign tags in the link
+        you arrived through (UTM parameters and Google, Meta or Microsoft click identifiers), when
+        you first arrived, when you submitted, and an internal submission reference. This is how
+        Crystal can tell which of her efforts actually reach people; none of it identifies you
+        beyond what you typed.</p>
+      <p>Your IP address is briefly held in the server&rsquo;s memory to limit how many submissions
+        can come from one address in a short window. It is not written to the contact record and is
+        not stored beyond that window.</p>
 
-      <h2>Who it is shared with</h2>
-      <p>Your information is never sold or traded to third parties, and it is not shared for anyone
-        else&rsquo;s marketing.</p>
-      <p>It is processed by the service providers that make this site work: the hosting provider that
-        runs the website, and the customer relationship system where Crystal keeps her contact records
-        and follow-ups. They process it on her behalf and for no other purpose.</p>
-      <p>Beyond that it is shared only where it is necessary to complete a transaction you have asked
-        for &mdash; for example a title company, lender or inspector you have chosen to work with &mdash;
-        or where the law requires it.</p>
+      <h2>Why it is processed</h2>
+      <p>To prepare and send what you asked for, and to follow up about that request. If you have
+        asked for a valuation and told me you are simply curious, you will receive the valuation and
+        then be left alone.</p>
+      <p>The lawful basis, in plain terms, is that you asked for something and this is what is
+        needed to give it to you &mdash; plus a legitimate interest in understanding, at an aggregate
+        level, which pages and campaigns are working.</p>
 
-      <h2>Analytics and cookies</h2>
-      <p>This site sets no advertising or tracking cookies of its own, and nothing here follows you
-        around the internet.</p>
-      <p>It does use <strong>Vercel Web Analytics</strong> to count visits and see which pages people
-        find useful. It is cookieless and privacy-focused: it records the page visited, a referrer,
-        and a coarse country, device and browser type. It does not use cookies, does not store your
-        IP address, does not build a profile of you, and cannot follow you to other websites. No data
-        is sold or shared with advertisers.</p>
-      <p>If anything more invasive is ever added, this section will be updated to say so before it is
-        switched on.</p>
+      <h2>What runs on this site</h2>
+      <p>Your information is never sold or traded, and it is not shared for anyone else&rsquo;s
+        marketing. It is handled by the service providers listed below, each of which processes it
+        on Crystal&rsquo;s behalf and under its own privacy terms.</p>
+
+      <h3>Vercel &mdash; hosting and Web Analytics</h3>
+      <p>The site is hosted on Vercel, which necessarily sees the requests your browser makes to
+        it. Vercel Web Analytics counts visits: it is cookieless and records the page visited, a
+        referrer, and a coarse country, device and browser type. It does not build a profile of you
+        and cannot follow you to other sites.</p>
+
+      <h3>Google Analytics 4 &mdash; on the live site</h3>
+      <p>The live site loads <strong>Google Analytics 4</strong>. Preview and local builds do not.
+        It records the pages you view, a coarse location derived from your IP address, your device
+        and browser, and a small set of events this site defines itself &mdash; clicking a call or
+        email link, starting or completing a step of a form, and whether a submission succeeded or
+        failed. The events record that the action happened, not what you typed.</p>
+      <p><strong>Google Analytics sets first-party cookies</strong> (named <code>_ga</code> and
+        <code>_ga_&hellip;</code>) so repeat visits can be told apart. There is no cookie banner on
+        this site today. If you would rather not be counted, you can block cookies for this site in
+        your browser, use private browsing, or install Google&rsquo;s
+        <a href="https://tools.google.com/dlpage/gaoptout" rel="noopener">Analytics opt-out
+        add-on</a>. Nothing on the site is withheld if you do.</p>
+
+      <h3>Google Fonts</h3>
+      <p>Typefaces are served from Google Fonts. Loading them means Google receives your IP address
+        and browser details as part of that request. No cookie is set by the font files.</p>
+
+      <h3>Google Places &mdash; address suggestions</h3>
+      <p>Where address autocomplete is switched on, the characters you type into a property-address
+        field are sent to Google&rsquo;s Places service to return matching addresses. Nothing else on
+        the form is sent, and nothing is sent until you start typing in that field. If the feature is
+        not configured, the field is an ordinary text box and Google sees nothing.</p>
+
+      <h3>HubSpot &mdash; contact records</h3>
+      <p>When you submit a form, the details above are sent to <strong>HubSpot</strong>, the customer
+        relationship system where Crystal keeps her contact records and follow-ups. A contact record
+        is created or, if you have written before, updated &mdash; matched on your email address so
+        you do not end up as two people &mdash; and the enquiry is recorded against it as a dated
+        submission so an earlier message is never overwritten by a later one.</p>
+
+      <h3>Anyone else</h3>
+      <p>Beyond the providers above, your information is shared only where it is necessary to
+        complete a transaction you have asked for &mdash; a title company, lender or inspector you
+        have chosen to work with &mdash; or where the law requires it.</p>
+
+      <h2>How long it is kept</h2>
+      <p>Contact records are kept while you are working with Crystal or might reasonably want to,
+        and for as long afterwards as the record-keeping obligations that apply to a licensed real
+        estate brokerage require. They are deleted on request, subject to those obligations.</p>
+      <p>Analytics data is kept according to the retention period configured in each provider&rsquo;s
+        own console; it is not tied to your name or email in either one. The IP address used for
+        submission rate limiting is discarded within minutes.</p>
+
+      <h2>Asking what is held, or asking for deletion</h2>
+      <p>Email <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>
+        from &mdash; or naming &mdash; the address you used, and say whether you want a copy of what
+        is held, a correction, or deletion. Crystal will confirm and act on it as promptly as she
+        reasonably can. If a request cannot be met in full, you will be told which part and why.</p>
+      <p>Analytics records are not linked to your name or email, so a deletion request covers the
+        contact record and the enquiry detail held with it.</p>
+
+      <h2>Changes to this page</h2>
+      <p>If a service is added or removed, this page is updated to say so and the date at the top of
+        it changes. There is no separate notification.</p>
 
       <h2>Listing information</h2>
       <p>Any property information shown on this site is deemed reliable but is not guaranteed and is
@@ -71,7 +146,8 @@
       <p>To ask what information is held about you, or to have it deleted, email
         <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>.</p>
 
-      <p style="font-size:.9rem;color:var(--muted)">Last updated <span data-year>2026</span>.
+      <p style="font-size:.9rem;color:var(--muted)">Effective and last updated
+        September&nbsp;2,&nbsp;2026.
         Crystal Saylor is a licensed real estate agent in the State of Ohio (License #&nbsp;2025003655),
         affiliated with Key Realty LTD.</p>
     </div>

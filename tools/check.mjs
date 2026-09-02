@@ -581,6 +581,106 @@ for (const file of pages) {
     fail(file, "main.js is not fingerprinted — immutable caching would pin old form code");
 }
 
+/* --- Phase 3 integrity guards ------------------------------------------
+   Narrow, structural checks for four regressions that are silent: nothing
+   breaks, the site still builds, and the repository simply starts lying
+   about what it does. They assert facts and shapes, not prose - a rewrite
+   that keeps the facts keeps passing. */
+{
+  const REPO = join(ROOT, "..");
+
+  /* 1. .env.example must document the live HubSpot path, and must not
+        present Zoho as the path to configure. Zoho is retained rollback
+        code that nothing imports; a fresh operator following an
+        active-Zoho .env.example would configure the wrong CRM and get a
+        503 with no clue why. Checked by ORDER rather than by wording:
+        every Zoho variable must sit below a heading that marks the
+        section as rollback-only. */
+  const envPath = join(REPO, ".env.example");
+  if (!existsSync(envPath)) fail(".env.example", "missing - the live configuration is undocumented");
+  else {
+    const env = readFileSync(envPath, "utf8");
+    for (const v of ["HUBSPOT_ACCESS_TOKEN", "HUBSPOT_PORTAL_ID", "HUBSPOT_FORM_GUID"])
+      if (!new RegExp(`^${v}=`, "m").test(env))
+        fail(".env.example", `does not document the required live variable ${v}`);
+    for (const v of ["HUBSPOT_API_BASE", "HUBSPOT_FORMS_BASE", "GOOGLE_MAPS_API_KEY",
+                     "GA4_MEASUREMENT_ID", "ALLOWED_ORIGINS"])
+      if (!new RegExp(`^${v}=`, "m").test(env))
+        fail(".env.example", `does not document the optional variable ${v}`);
+
+    const rollbackAt = env.search(/ROLLBACK ONLY/i);
+    const firstZohoAt = env.search(/^ZOHO_/m);
+    if (firstZohoAt !== -1) {
+      if (rollbackAt === -1)
+        fail(".env.example", "documents ZOHO_* variables with no ROLLBACK ONLY heading - reads as the live path");
+      else if (firstZohoAt < rollbackAt)
+        fail(".env.example", "a ZOHO_* variable appears above the ROLLBACK ONLY heading - reads as the live path");
+    }
+  }
+
+  /* 2. The lead endpoint must not accept every hostname on a shared
+        preview domain. vercel.app is shared: anyone can hold a hostname on
+        it in seconds, so a suffix match let any Vercel project on earth
+        drive a browser into posting here. The deployment's own host comes
+        from VERCEL_URL instead. */
+  const secPath = join(REPO, "api/_lib/security.mjs");
+  if (!existsSync(secPath)) fail("api/_lib/security.mjs", "missing");
+  else {
+    const sec = readFileSync(secPath, "utf8");
+    if (/endsWith\(\s*["'`]\.vercel\.app/.test(sec))
+      fail("api/_lib/security.mjs", "accepts any *.vercel.app origin by suffix - vercel.app is a shared domain");
+    if (!/VERCEL_URL/.test(sec))
+      fail("api/_lib/security.mjs", "does not consult VERCEL_URL - preview deploys cannot submit at all");
+    for (const host of ["crystalsellstoledo.com", "localhost"])
+      if (!sec.includes(host))
+        fail("api/_lib/security.mjs", `lost ${host} from the origin allow-list`);
+  }
+
+  /* 3. /privacy must describe the runtime that actually ships. The page
+        once named Vercel Analytics as the only analytics, said the site
+        set no analytics cookies, and said nothing was collected unless a
+        form was submitted - all three untrue while GA4, Google Fonts and
+        Google Places are in the build. Positive facts are asserted (a
+        rewrite keeping them keeps passing); the two negatives target the
+        exact retired claims. */
+  const privacy = existsSync(join(ROOT, "privacy.html"))
+    ? readFileSync(join(ROOT, "privacy.html"), "utf8") : null;
+  const buildSrc = existsSync(join(REPO, "tools/build.mjs"))
+    ? readFileSync(join(REPO, "tools/build.mjs"), "utf8") : "";
+  const shellSrc = existsSync(join(REPO, "src/partials/_shell.html"))
+    ? readFileSync(join(REPO, "src/partials/_shell.html"), "utf8") : "";
+
+  if (!privacy) fail("site", "privacy.html is missing");
+  else {
+    /* Only what a visitor actually reads counts: an HTML comment explaining
+       what the page used to claim must not satisfy - or trip - these. */
+    const text = privacy.replace(/<!--[\s\S]*?-->/g, "");
+    const ships = [
+      [/googletagmanager\.com\/gtag/.test(buildSrc), "Google Analytics", "GA4 ships on production builds"],
+      [/fonts\.googleapis\.com/.test(shellSrc), "Google Fonts", "the shell loads Google Fonts"],
+      [/maps\.googleapis\.com/.test(buildSrc), "Google Places", "the build can emit the Maps/Places loader"],
+      [/_vercel\/insights/.test(shellSrc), "Vercel", "the shell loads Vercel Web Analytics"],
+      [true, "HubSpot", "leads are delivered to HubSpot"],
+    ];
+    for (const [inBuild, name, why] of ships)
+      if (inBuild && !text.includes(name))
+        fail("privacy.html", `does not mention ${name}, but ${why}`);
+
+    if (/googletagmanager\.com\/gtag/.test(buildSrc) && !/_ga\b/.test(text))
+      fail("privacy.html", "does not disclose the Google Analytics cookies (_ga) that GA4 sets");
+
+    const retired = [
+      [/sets? no[^.]{0,60}cookies/i, "claims the site sets no cookies"],
+      [/collected about you unless/i, "claims nothing is collected unless a form is submitted"],
+    ];
+    for (const [re, what] of retired)
+      if (re.test(text)) fail("privacy.html", `${what} - untrue while GA4 and Google Fonts ship`);
+
+    if (!/(January|February|March|April|May|June|July|August|September|October|November|December)&nbsp;?\s*\d{1,2},&nbsp;?\s*\d{4}/.test(text))
+      fail("privacy.html", "carries no exact effective/last-updated date");
+  }
+}
+
 /* --- report ---------------------------------------------------------- */
 const uniqWarn = [...new Set(warnings)];
 if (uniqWarn.length) {

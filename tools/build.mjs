@@ -36,7 +36,7 @@ const SITE = "https://www.crystalsellstoledo.com";
    deployed; an automatic date would silently assert a review that never
    happened every time an unrelated CSS tweak shipped.
    --------------------------------------------------------------------- */
-const CONTENT_UPDATED = "August 31, 2026";
+const CONTENT_UPDATED = "September 2, 2026";
 
 const partial = (name) => readFileSync(join(ROOT, "src/partials", name + ".html"), "utf8");
 const PARTIALS = Object.fromEntries(

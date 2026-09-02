@@ -272,9 +272,20 @@ than saving a contact with the enquiry silently missing**, and logs
 `hubspot.detail_property_unavailable` with the remediation. Restore the property
 — do not point the code at an invented property name.
 
-### Step 4 — Verify end to end (NOT YET DONE)
+### Step 4 — Verify end to end (DONE — see section 2b)
 
-**No live HubSpot call has ever been made.** This is the outstanding step.
+**This step is complete.** The live run described in **section 2b** was carried
+out against the real portal: a first submission created one Contact with the
+address and phone populated and a native `Form submitted` activity carrying the
+full enquiry, and a second submission on the same email produced a second
+distinct activity with exactly one Contact remaining.
+
+An earlier revision of this document said "no live HubSpot call has ever been
+made" while section 2b recorded the live run. That was a stale line, not a
+second opinion: **HubSpot delivery is live-verified.** The procedure is kept
+below because it is the right regression check to re-run after any change to
+`api/_lib/hubspot.mjs`, after a HubSpot property or form change, and before
+handing the portal to anyone new.
 
 1. Submit a real test lead through `/home-value`.
 2. Confirm the success panel appears (not the recovery panel).
@@ -287,9 +298,10 @@ than saving a contact with the enquiry silently missing**, and logs
 5. Check the Vercel function logs for `hubspot.contact.saved` with
    `action: "create"` then `action: "update"`.
 
-**Until step 2 is done the endpoint returns `503 NOT_CONFIGURED` by design** and
-forms show the recovery panel. This is deliberate: returning success with nothing
-stored is the exact failure this system exists to prevent.
+**Without the environment variables the endpoint returns `503 NOT_CONFIGURED` by
+design** and forms show the recovery panel. This is deliberate: returning success
+with nothing stored is the exact failure this system exists to prevent. In
+production those variables are set and the live path is in use.
 
 ### Step 5 — Google Business Profile and Search Console
 
@@ -463,9 +475,10 @@ run against the live Google API** — every test stubs Google.
   **14 address-autocomplete tests against a stubbed Google**
 
 All HubSpot tests run against a **stubbed global fetch**. They prove the client
-behaves correctly against HubSpot's documented contract. They do **not** prove a
-real portal accepts the payload — only the live submission in section 3 step 4
-can do that.
+behaves correctly against HubSpot's documented contract. They do **not** by
+themselves prove a real portal accepts the payload — that was established by the
+live run recorded in section 2b, and re-running the section 3 step 4 procedure is
+what re-establishes it after a change.
 
 **Every guard is negative-tested** — deliberately broken once to prove the suite
 catches it, then restored. 18 of 18 in the first pass, 16 of 16 in the

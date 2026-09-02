@@ -829,6 +829,10 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .prose ul, .prose ol { padding-left: 1.35rem; margin: 0 0 1.35em; display: grid; gap: .6rem; }
 .prose li::marker { color: var(--gold); }
 .prose a { color: var(--gold-dk); text-decoration: underline; text-underline-offset: 3px; }
+/* The effective-date / not-legal-advice line at the top of /privacy. */
+.prose__note { font-size: .92rem; color: var(--muted); }
+.prose code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9em; background: var(--cream-dk); padding: .1em .35em; border-radius: var(--radius); }
 .prose blockquote {
   margin: 2rem 0; padding-left: 1.75rem; border-left: 2px solid var(--gold);
   font-family: var(--serif); font-size: 1.2rem; line-height: 1.6; color: var(--ink);

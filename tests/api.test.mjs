@@ -8,7 +8,7 @@ import handler from "../api/lead.js";
 import { validateLead, FieldError, normalizePhone } from "../api/_lib/validate.mjs";
 import { buildDescription, DESCRIPTION_LABELS } from "../api/_lib/description.mjs";
 import { toLeadRecord, withoutPicklists, COMPANY_BY_FORM } from "../api/_lib/zoho.mjs";
-import { _resetRateLimit } from "../api/_lib/security.mjs";
+import { _resetRateLimit, originAllowed, allowedHosts } from "../api/_lib/security.mjs";
 import { safeShape } from "../api/_lib/log.mjs";
 import { mockReq, mockRes, validContact, validHomeValue } from "./helpers.mjs";
 
@@ -47,6 +47,109 @@ describe("POST /api/lead - method and transport", () => {
   test("accepts a missing origin (privacy tools strip it)", async () => {
     const res = await call({ body: validContact, headers: { origin: "", referer: "" } });
     assert.notEqual(res.statusCode, 403);
+  });
+
+  /* ---------------------------------------------------------------
+     Origin allow-list.
+
+     `*.vercel.app` was once accepted as a suffix so preview deploys
+     worked. vercel.app is a shared domain - anyone can hold a hostname
+     on it in seconds - so that allowed every Vercel project on earth to
+     drive a visitor's browser into posting here. The deployment's own
+     hostname comes from VERCEL_URL instead.
+
+     None of this is authentication: a header is trivially forged by
+     anything that is not a browser. It is CSRF hygiene, and the tests
+     below only assert that the surface is no wider than intended.
+     --------------------------------------------------------------- */
+  const withEnv = async (vars, fn) => {
+    const saved = {};
+    for (const k of Object.keys(vars)) saved[k] = process.env[k];
+    for (const [k, v] of Object.entries(vars)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try { return await fn(); } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+  const allows = (origin) => originAllowed({ headers: { origin } });
+
+  test("an unrelated *.vercel.app origin is rejected", async () => {
+    await withEnv({ VERCEL_URL: undefined, ALLOWED_ORIGINS: undefined }, async () => {
+      for (const host of [
+        "https://someone-elses-project.vercel.app",
+        "https://crystal-sells-toledo-evil.vercel.app",
+        "https://vercel.app",
+        "https://notvercel.app",
+        "https://crystalsellstoledo.com.evil.vercel.app",
+      ]) {
+        assert.equal(allows(host), false, `${host} must not be allowed`);
+      }
+      const res = await call({
+        body: validContact,
+        headers: { origin: "https://someone-elses-project.vercel.app" },
+      });
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json().code, "FORBIDDEN_ORIGIN");
+    });
+  });
+
+  test("the current VERCEL_URL hostname is accepted", async () => {
+    await withEnv({ VERCEL_URL: "crystal-sells-toledo-abc123.vercel.app", ALLOWED_ORIGINS: undefined },
+      async () => {
+        assert.equal(allows("https://crystal-sells-toledo-abc123.vercel.app"), true);
+        /* and only that one, not its neighbours on the shared domain */
+        assert.equal(allows("https://crystal-sells-toledo-def456.vercel.app"), false);
+        const res = await call({
+          body: validContact,
+          headers: { origin: "https://crystal-sells-toledo-abc123.vercel.app" },
+        });
+        assert.notEqual(res.statusCode, 403);
+      });
+  });
+
+  test("a referer is held to the same allow-list as an origin", async () => {
+    await withEnv({ VERCEL_URL: "crystal-sells-toledo-abc123.vercel.app", ALLOWED_ORIGINS: undefined },
+      async () => {
+        const byRef = (referer) => originAllowed({ headers: { referer } });
+        assert.equal(byRef("https://someone-elses-project.vercel.app/x"), false);
+        assert.equal(byRef("https://crystal-sells-toledo-abc123.vercel.app/x"), true);
+        assert.equal(byRef("https://www.crystalsellstoledo.com/home-value"), true);
+      });
+  });
+
+  test("explicitly allowed origins remain accepted", async () => {
+    await withEnv({ VERCEL_URL: undefined, ALLOWED_ORIGINS: "staging.example.com, preview-1.vercel.app" },
+      async () => {
+        assert.equal(allows("https://staging.example.com"), true);
+        assert.equal(allows("https://preview-1.vercel.app"), true);
+        assert.equal(allows("https://preview-2.vercel.app"), false);
+        const res = await call({ body: validContact, headers: { origin: "https://staging.example.com" } });
+        assert.notEqual(res.statusCode, 403);
+      });
+  });
+
+  test("production and localhost origins remain accepted", async () => {
+    await withEnv({ VERCEL_URL: undefined, ALLOWED_ORIGINS: undefined }, async () => {
+      for (const host of [
+        "https://crystalsellstoledo.com",
+        "https://www.crystalsellstoledo.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+      ]) {
+        assert.equal(allows(host), true, `${host} must stay allowed`);
+      }
+      assert.ok(allowedHosts().has("crystalsellstoledo.com"));
+      const res = await call({
+        body: validContact,
+        headers: { origin: "https://www.crystalsellstoledo.com" },
+      });
+      assert.notEqual(res.statusCode, 403);
+    });
   });
 
   test("rejects an oversized payload", async () => {
