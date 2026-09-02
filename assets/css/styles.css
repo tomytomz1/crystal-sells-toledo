@@ -795,14 +795,19 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
    1254). --kr sizes that whole canvas; the negative margins take the empty
    pixels back out of the layout box, so the mark aligns with the column
    edge and the gaps you set are the gaps you see. flow-root stops the
-   negative top margin collapsing out through the wrapper. */
-.footer__brokerage { --kr: 106px; display: flow-root; margin: 1.1rem 0 0; }
+   negative top margin collapsing out through the wrapper.
+
+   74px renders the artwork 67.6 x 54.1, which is the height of the Crystal
+   lockup above it to within a pixel. Matching that height is the whole
+   point: at 106px the brokerage mark stood 43% taller than the brand it is
+   meant to sit under, and read as the senior of the two. */
+.footer__brokerage { --kr: 74px; display: flow-root; margin: 1.1rem 0 0; }
 .footer__brokerage img {
   width: var(--kr); height: auto; display: block;
   margin-block: calc(var(--kr) * -.1691) calc(var(--kr) * -.1005);
   margin-inline-start: calc(var(--kr) * -.0718);
 }
-@media (max-width: 560px) { .footer__brokerage { --kr: 96px; } }
+@media (max-width: 560px) { .footer__brokerage { --kr: 68px; } }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
@@ -811,7 +816,20 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .footer__list a { transition: color .2s var(--ease); }
 .footer__list a:hover { color: var(--gold-lt); }
 .footer__contact a { display: flex; gap: .6rem; align-items: baseline; }
-.site-footer .btn { margin-top: 1.25rem; }
+/* The label is 183.6px on one line; the contact column is 244.1px. At the
+   global 2.1rem inline padding it needed 250.8px, overflowed by seven, and
+   wrapped - which turned a button into a 78px slab. 1.5rem brings it to
+   231.6px and one line, and the button back to a normal 55px. */
+.site-footer .btn { margin-top: 1.25rem; padding-inline: 1.5rem; }
+/* Between 920 and 1160 the four-column grid squeezes the contact column to
+   217px and 1.5rem is not enough either. The label's .16em tracking is what
+   makes it wide, so that is what gives: at .12em it measures 174px, which
+   with 1rem of padding leaves eleven pixels of slack rather than the two a
+   padding-only fix would have left. Tightening the tracking keeps the type
+   at full size; shrinking the type to fit would not. */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .site-footer .btn { padding-inline: 1rem; letter-spacing: .12em; }
+}
 
 .footer__legal {
   border-top: 1px solid rgba(255,255,255,.1); padding-block: 2rem;
