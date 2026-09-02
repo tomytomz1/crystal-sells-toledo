@@ -801,10 +801,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
    plate height and inline padding are shared; only the artwork differs. */
 .brandchip {
   display: inline-flex; align-items: center; justify-content: center;
-  height: 44px; padding-inline: 13px;
+  height: 56px; padding-inline: 13px;
   background: #fff;
   border: 1px solid rgba(184, 134, 59, .30);
   border-radius: var(--radius);
+  /* equal-housing.svg fills with currentColor, so the plate sets its ink. */
+  color: var(--ink);
 }
 .site-footer h4 {
   color: var(--white); font-size: .71rem; font-weight: 600;
@@ -824,8 +826,18 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 .footer__badges { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
 .footer__badges img { width: auto; display: block; }
-.brandchip--mls img { height: 25px; }
-.brandchip--eho img { height: 33px; }
+/* The two marks are different shapes - the MLS lockup is 2.6:1 landscape,
+   the official Equal Housing logo is 0.94:1 portrait - so they are matched on
+   ink mass, not on any single dimension.
+
+   Equal Housing carries its own wordmark, which is 19% of its height in two
+   lines: at 44px each line renders about 3px and cannot resolve. That is
+   inherent to the official artwork, not a sizing mistake. The words are stated
+   legibly in the disclosure paragraph beside it, so the mark does the
+   recognition and the text does the disclosure. Making the type readable would
+   need a badge near 90px tall. */
+.brandchip--mls img { height: 26px; }
+.brandchip--eho svg { height: 44px; }
 .footer__disclaimer { max-width: 60ch; }
 
 /* ------------------------------------------------------- sticky mobile -- */
