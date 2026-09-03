@@ -682,6 +682,60 @@ for (const file of pages) {
   }
 }
 
+/* ---------------------------------------------------------------------
+   THE LEAD FORM IS ONE IMPLEMENTATION, AND TWO PAGES OWN ITS WORDING
+   ---------------------------------------------------------------------
+   /43551-seller-review needs different button text, so six presentation
+   strings in src/partials/home-value-form.html became build variables.
+   Parameterising shared copy is exactly how the homepage quietly acquires
+   somebody else's call to action six months later, so both halves are
+   pinned here:
+
+     1. index.html and home-value.html must still render the ORIGINAL
+        wording, character for character.
+     2. every page carrying the form must expose an identical set of field
+        names, so "presentation only" cannot quietly become "and one extra
+        input".
+   --------------------------------------------------------------------- */
+{
+  const DEFAULT_FORM_COPY = [
+    ["step-1 button", "Get My Home Value"],
+    ["microcopy", "No obligation &middot; Human valuation &middot; Not an automated estimate"],
+    ["submit button", "Send My Valuation Request"],
+    ["success heading", "Your request is in"],
+    ["success lede", "Crystal will personally review your property and follow up with you shortly."],
+    ["email subject", 'data-subject="Home valuation request"'],
+  ];
+
+  for (const file of ["index.html", "home-value.html"]) {
+    if (!existsSync(join(ROOT, file))) { fail(file, "expected page is missing"); continue; }
+    const html = readFileSync(join(ROOT, file), "utf8");
+    const flat = html.replace(/\s+/g, " ");
+    for (const [what, copy] of DEFAULT_FORM_COPY)
+      if (!flat.includes(copy))
+        fail(file, `form ${what} no longer renders the default wording - formCopy defaults in tools/build.mjs must keep this page unchanged`);
+  }
+
+  /* The lead contract, spelled out. Comparing the pages only against each
+     other passes happily when a field is added to the SHARED partial, which
+     is the likeliest way it would actually happen, so the expected set is
+     absolute. Changing this list means changing /api/lead and the HubSpot
+     mapping too - that is the point of making it noisy. */
+  const EXPECTED_FIELDS =
+    "_gotcha,condition,email,first_name,last_name,notes,phone,property_address,timeline";
+  const FIELDS = /<(?:input|select|textarea)\b[^>]*\bname="([^"]+)"/g;
+  let formPages = 0;
+  for (const file of pages) {
+    const html = readFileSync(join(ROOT, file), "utf8");
+    if (!/data-form-type="home_value"/.test(html)) continue;
+    formPages++;
+    const got = [...html.matchAll(FIELDS)].map((m) => m[1]).sort().join(",");
+    if (got !== EXPECTED_FIELDS)
+      fail(file, `home_value form fields changed\n      expected: ${EXPECTED_FIELDS}\n      found:    ${got}`);
+  }
+  if (!formPages) fail("site", "no page carries the home_value form - the funnel has gone missing");
+}
+
 /* --- report ---------------------------------------------------------- */
 const uniqWarn = [...new Set(warnings)];
 if (uniqWarn.length) {

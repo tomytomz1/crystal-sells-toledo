@@ -1,0 +1,557 @@
+<!-- meta {
+  "title": "43551 Seller Strategy Review | Perrysburg Home Value",
+  "description": "Selling in Perrysburg 43551? See how your home competes against the sales and listings buyers actually weigh, reviewed by Crystal Saylor before you price it.",
+  "slug": "43551-seller-review",
+  "priority": 0.9,
+  "formCopy": {
+    "formSubject": "43551 Seller Strategy Review request",
+    "formStep1Cta": "Start My 43551 Review",
+    "formMicrocopy": "Human-reviewed &middot; No obligation &middot; Not an instant estimate",
+    "formSubmitCta": "Request My Seller Strategy Review",
+    "formSuccessTitle": "Your 43551 review request is in",
+    "formSuccessLede": "Crystal will review your property details and follow up about the Seller Strategy Review."
+  },
+  "jsonld": {
+    "@context": "https://schema.org",
+    "@type": "Service",
+    "name": "43551 Seller Strategy Review",
+    "serviceType": "Seller Strategy Review",
+    "provider": { "@type": "RealEstateAgent", "name": "Crystal Sells Toledo", "@id": "https://crystalsellstoledo.com/#agent" },
+    "areaServed": { "@type": "PostalAddress", "addressLocality": "Perrysburg", "addressRegion": "OH", "postalCode": "43551", "addressCountry": "US" },
+    "audience": { "@type": "Audience", "audienceType": "Homeowners in Perrysburg, Ohio 43551 considering a sale" },
+    "description": "A pre-listing review of how a specific 43551 home is likely to compete: the closed sales that genuinely apply, the listings buyers can choose instead, the property details that separate similar homes, preparation priorities and pricing options. Prepared for listing strategy and reviewed by a licensed Ohio salesperson. Not a licensed appraisal."
+  }
+} -->
+
+<!-- ==================================================================
+     /43551-seller-review - the 43551 pre-listing decision page.
+
+     Job: "I own a house in 43551 and I am thinking about selling. How
+     will it compete, what should I do before listing, and how should I
+     think about price?"
+
+     Deliberately NOT the other two seller pages:
+       /home-value  answers "what might it be worth" for all of greater
+                    Toledo, and leads with the form.
+       /sell        answers "how does she run a listing" and owns the
+                    six-stage process.
+     This page owns the DECISION a 43551 owner makes before either of
+     those questions is worth asking, and it has to be worth reading by
+     someone who never submits the form. That is the standard it is
+     written to, not a word count.
+
+     Claim discipline: no transaction counts, no years of experience, no
+     market statistics, no days-on-market, no renovation ROI figures, no
+     invented seller stories. Anything numerical about the current market
+     belongs in a dated, maintained product, not in evergreen page copy.
+
+     The form is the shared partial. Only its presentation strings differ,
+     through `formCopy` above; fields, validation and the lead contract are
+     untouched.
+     ================================================================== -->
+
+<section class="hero hero--capture hero--value">
+  <div class="hero__bg"></div>
+  <div class="hero__inner wrap">
+    <div class="hero__grid">
+      <div class="hero__content">
+        <p class="eyebrow">Perrysburg 43551 sellers</p>
+        <h1>Before you list your 43551 home, know how it will compete.</h1>
+        <p class="hero__lede">Built from the closed sales that genuinely apply to your house and
+          the listings a buyer can choose instead. Crystal Saylor reads it herself before you
+          decide anything.</p>
+
+        <!-- Subordinate route for the visitor who is past the decision this
+             page exists to help with. Text, not a second button. -->
+        <p class="hero__secondary">
+          <a href="/sell">Already decided to sell? How a listing works
+          <span aria-hidden="true">&rarr;</span></a>
+        </p>
+      </div>
+
+      <!-- Shared partial. Different button text and success wording only,
+           set through the page's formCopy meta block. -->
+      <div class="valueform reveal">
+        <h2 class="valueform__label">Start your 43551 review</h2>
+        <p class="valueform__note">Address first. The rest takes about a minute.</p>
+        {{> home-value-form}}
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- --------------------------------------------------- the wider decision -->
+<section class="section">
+  <div class="wrap">
+    <div class="whyhuman">
+      <div class="whyhuman__body reveal">
+        <p class="eyebrow">Before the number</p>
+        <h2>A list price is a decision, not a measurement.</h2>
+        <p>Most valuation requests give back one figure. A figure on its own does not tell you what
+          your house is competing against, which sales produced it, or what is worth doing between
+          now and the day it goes live. Those are the parts that move the outcome.</p>
+        <p>The review is organised around six inputs. None of them is a number by itself, and the
+          number is more defensible when all six have been looked at.</p>
+      </div>
+
+      <div class="factors reveal">
+        <p class="factors__label">What the review actually weighs</p>
+        <dl class="factors__list">
+          <div class="factor">
+            <dt>The homes buyers can choose instead</dt>
+            <dd>A buyer comparing your house is comparing it with what is on the market the week
+              they are looking, not with what sold last spring.</dd>
+          </div>
+          <div class="factor">
+            <dt>Which closed sales genuinely apply</dt>
+            <dd>Proximity on its own is a weak reason to include a sale. A house two streets over can be
+              less relevant than one further out that matches yours more closely.</dd>
+          </div>
+          <div class="factor">
+            <dt>What your property does differently</dt>
+            <dd>Finished space, basement, garage, lot, setting, layout and what has actually been
+              updated. Two homes with the same bedroom count can present very differently.</dd>
+          </div>
+          <div class="factor">
+            <dt>What is worth preparing</dt>
+            <dd>Fix everything is not a plan, and neither is fix nothing. Some work changes how the
+              house shows for very little. Some costs more than it returns.</dd>
+          </div>
+          <div class="factor">
+            <dt>What each pricing position asks of you</dt>
+            <dd>Where you enter the market affects how many buyers consider the house early, and
+              what your options are if it does not move.</dd>
+          </div>
+          <div class="factor">
+            <dt>What would change the answer</dt>
+            <dd>A recommendation nobody can argue with is usually one nobody has examined. Knowing
+              what would move the range matters as much as the range.</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------ method ----
+     Transparent methodology, described only as far as the workflow can
+     actually deliver. No turnaround promise, no fixed comp count, no
+     deliverable format claim. -->
+<section class="section section--cream">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">How it is built</p>
+      <h2>Six steps, in this order</h2>
+      <p class="lede">The order matters. Most of the disagreement about a list price comes from
+        skipping straight to comparable sales before anyone has agreed what the house is.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal"><span class="step__n"></span><div>
+        <h3>Start with the property</h3>
+        <p>Confirm the facts of the house itself and add what only you know: the work you have done,
+          the year you did it, what you have chosen to leave alone, and anything a record will not
+          show.</p></div></div>
+
+      <div class="step reveal"><span class="step__n"></span><div>
+        <h3>Select the closed sales that apply</h3>
+        <p>Not every recent sale nearby belongs in the analysis, and a comparison set chosen for
+          convenience will produce a range you cannot defend when a buyer&rsquo;s agent pushes
+          back.</p></div></div>
+
+      <div class="step reveal"><span class="step__n"></span><div>
+        <h3>Look at what is available now</h3>
+        <p>Closed sales say what buyers paid. Active listings say what the same buyer can choose
+          this week instead of your house, which is the comparison they will actually make.</p></div></div>
+
+      <div class="step reveal"><span class="step__n"></span><div>
+        <h3>Compare the differences that matter</h3>
+        <p>Condition, updates, finished area, lot and setting, layout, garage, basement, and the
+          specific features buyers in your band tend to notice. Some differences move value.
+          Several do not.</p></div></div>
+
+      <div class="step reveal"><span class="step__n"></span><div>
+        <h3>Crystal reviews the analysis</h3>
+        <p>A person reads the evidence and forms a view, including where the evidence is thin. That
+          judgement is the product, and the analysis underneath it is only the input.</p></div></div>
+
+      <div class="step reveal"><span class="step__n"></span><div>
+        <h3>Decide the sensible next step</h3>
+        <p>Sometimes that is a walkthrough. Sometimes it is a piece of preparation, a question worth
+          researching further, or simply waiting. Listing is one possible answer, not the assumed
+          one.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- --------------------------------------------------------------- comps --
+     The strongest standalone passage on the page. Written to be useful to
+     a homeowner who never submits anything, including one who is about to
+     sit through someone else's listing appointment. -->
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Worth knowing either way</p>
+      <h2>What makes a comparable sale actually useful?</h2>
+      <p class="lede">A comparable sale is evidence, not an answer. Its usefulness depends on how
+        much of the buying decision it genuinely reproduces.</p>
+    </div>
+
+    <div class="reveal">
+      <p>There is no fixed formula, and anyone who presents one is describing their process rather
+        than the market. What a careful comparison tends to weigh:</p>
+
+      <ul class="checklist">
+        <li><span><strong>Immediate geography.</strong> Not a radius. The set of streets a buyer would
+          consider interchangeable with yours, which is sometimes smaller than a subdivision and
+          sometimes larger.</span></li>
+        <li><span><strong>Property type and era.</strong> A 1990s two-storey and a recent build are
+          different products even at the same square footage.</span></li>
+        <li><span><strong>Finished square footage, and where it is.</strong> Above grade and below grade
+          are not read the same way by buyers or by lenders.</span></li>
+        <li><span><strong>Condition and renovation level.</strong> The single most common reason a nearby
+          sale misleads.</span></li>
+        <li><span><strong>Bedrooms, bathrooms and layout.</strong> Count matters less than whether the
+          layout works for the way a house of this kind is actually lived in.</span></li>
+        <li><span><strong>Lot and setting.</strong> Size, orientation, what backs onto it, and what sits
+          on either side.</span></li>
+        <li><span><strong>Basement and garage.</strong> Finished, tall, dry, tandem, third bay. These
+          separate otherwise similar houses.</span></li>
+        <li><span><strong>Features that carry weight in your band.</strong> They differ by price point,
+          and assuming they transfer between bands is a common error.</span></li>
+        <li><span><strong>Recency, and what was happening then.</strong> A sale from a very different
+          moment has to be interpreted, not simply dated.</span></li>
+      </ul>
+
+      <aside class="quietnote">
+        <p class="quietnote__t">The test to apply</p>
+        <p>For each sale in the set, ask whether a buyer who seriously considered that house would
+          also have seriously considered yours. If the answer is no, it is context. It is not a
+          comparable.</p>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ---------------------------------------------------------- competition -->
+<section class="section section--ink">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">The other half of the picture</p>
+      <h2>Current competition matters too</h2>
+    </div>
+    <div class="reveal">
+      <p>Closed sales are the historical record. They tell you what somebody paid, under conditions
+        that have already finished playing out. They are the firmest evidence available and they are
+        always slightly out of date.</p>
+      <p>Active listings do something different. They show what a buyer can choose instead of your
+        house right now, which is the only comparison that happens at the moment of decision. A
+        house priced without reference to what it is standing next to is priced in isolation.</p>
+      <p>Pending listings sit between the two. They suggest where demand is moving, with the
+        important caveat that the final terms are not public yet and a pending sale can still change
+        or fall through. They inform a view. They do not settle one.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- prepare --
+     Framework, not prescriptions. Deliberately does not tell an unseen
+     house what to renovate, and carries no return-on-investment figures. -->
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Before you spend money</p>
+      <h2>Preparing the house is a budgeting decision</h2>
+      <p class="lede">The useful question is not what improves a home. It is what changes how this
+        home competes, at a cost that makes sense against your timeline.</p>
+    </div>
+
+    <div class="returns__list reveal">
+      <div class="returns__item">
+        <h3>Usually worth doing</h3>
+        <p>Deferred maintenance, deep cleaning, decluttering, and visible defects that a buyer will
+          otherwise read as a warning about everything they cannot see. These are mostly cheap and
+          they change first impressions.</p>
+      </div>
+      <div class="returns__item">
+        <h3>Worth investigating first</h3>
+        <p>Anything where cost, current condition, what buyers in your band expect, and how soon you
+          want to be on the market all pull in different directions. Paint, flooring, fixtures and
+          landscaping usually live here. The answer is specific to the house.</p>
+      </div>
+      <div class="returns__item">
+        <h3>Do not commit yet</h3>
+        <p>Large renovations undertaken because of a general belief about what buyers like. A
+          kitchen or bathroom project can be right, but it should follow from your property and its
+          competition, not from a rule of thumb.</p>
+      </div>
+    </div>
+
+    <aside class="quietnote reveal">
+      <p class="quietnote__t">Why there are no numbers here</p>
+      <p>Published figures on what a given project returns are averages across regions, price bands
+        and years. They are a poor guide to one house in one ZIP code at one moment, and quoting
+        them would make this page sound more certain than it can honestly be.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- pricing --
+     Three positions described as tradeoffs. No claim that one earns more,
+     no invented dollar examples. -->
+<section class="section section--cream">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Positioning</p>
+      <h2>Three ways a list price can be positioned</h2>
+      <p class="lede">These are not price points. They are three different bets about how buyers
+        will respond, each with a cost attached.</p>
+    </div>
+
+    <div class="returns__list reveal">
+      <div class="returns__item">
+        <h3>Competitive</h3>
+        <p>Set to earn strong consideration early against the alternatives available. Trades some of
+          the upper end for attention in the first weeks, when interest is usually highest.</p>
+      </div>
+      <div class="returns__item">
+        <h3>Market-centered</h3>
+        <p>Anchored as closely as the evidence allows to the most relevant closed sales and current
+          competition. The most defensible position to explain, and the least eventful.</p>
+      </div>
+      <div class="returns__item">
+        <h3>Aspirational</h3>
+        <p>Tests the top of what the evidence supports. Accepts longer exposure and the possibility
+          of repositioning later, which carries its own cost in buyer perception.</p>
+      </div>
+    </div>
+
+    <div class="reveal" style="max-width:60ch;margin-top:clamp(2rem,4vw,3rem)">
+      <p>No one of these produces more money in every case. Which fits depends on the property, what
+        it is competing with when it launches, how firm the comparable evidence is, and what you
+        need from the sale. Deciding that in advance, with the tradeoffs named out loud, is more
+        useful than discovering it in week six.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------ questions -
+     Written to be useful during someone else's listing appointment. That
+     is deliberate: a page that only pays off after you submit a form is an
+     advertisement, not a resource. -->
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Take this with you</p>
+      <h2>Five questions to ask before you accept any list-price recommendation</h2>
+      <p class="lede">From Crystal, from anyone else you interview, or from an online estimate. Good
+        answers to these five are the difference between a price and a strategy.</p>
+    </div>
+
+    <div class="steps reveal">
+      <div class="step"><span class="step__n"></span><div>
+        <h3>Which homes on the market now will buyers compare mine with?</h3>
+        <p>If the answer is only a list of past sales, the recommendation is looking backwards.</p></div></div>
+
+      <div class="step"><span class="step__n"></span><div>
+        <h3>Why these particular closed sales, and what did you leave out?</h3>
+        <p>The exclusions are as informative as the inclusions, and a considered set can explain
+          both.</p></div></div>
+
+      <div class="step"><span class="step__n"></span><div>
+        <h3>Which differences between my house and those actually changed your number?</h3>
+        <p>A useful answer names two or three specifics. A vague answer usually means the
+          adjustment was an impression rather than a comparison.</p></div></div>
+
+      <div class="step"><span class="step__n"></span><div>
+        <h3>What would make you revise this range?</h3>
+        <p>Anyone who cannot answer has either not tested their own view or is not telling you where
+          it is soft.</p></div></div>
+
+      <div class="step"><span class="step__n"></span><div>
+        <h3>What would you spend money on before listing, and what would you leave alone?</h3>
+        <p>The second half of that question is the one that saves you money, and it is the half most
+          often skipped.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------- what you get ---
+     Precise about the deliverable. No appraisal language, no fixed comp
+     count, no format or turnaround promise. -->
+<section class="section section--cream">
+  <div class="wrap">
+    <div class="returns">
+      <div class="sec-head reveal">
+        <p class="eyebrow">What comes back</p>
+        <h2>What the review is designed to return</h2>
+        <p class="lede">The reasoning as well as the range, so you can judge the recommendation
+          rather than take it on trust.</p>
+      </div>
+
+      <div class="returns__list reveal">
+        <div class="returns__item">
+          <h3>An initial selling-price range</h3>
+          <p>With the evidence it rests on, and an honest note where that evidence is thin.</p>
+        </div>
+        <div class="returns__item">
+          <h3>The closed sales judged most relevant</h3>
+          <p>As many as genuinely apply. A short, well-chosen set beats a long, padded one.</p>
+        </div>
+        <div class="returns__item">
+          <h3>The current listings a buyer would weigh against yours</h3>
+          <p>What your house would be standing next to if it launched now.</p>
+        </div>
+        <div class="returns__item">
+          <h3>The property details that affect positioning</h3>
+          <p>Drawn from the record and from what you tell Crystal about the house.</p>
+        </div>
+        <div class="returns__item">
+          <h3>Preparation priorities and open questions</h3>
+          <p>Including what to leave alone, and what needs a look in person before deciding.</p>
+        </div>
+        <div class="returns__item">
+          <h3>Pricing options and their tradeoffs</h3>
+          <p>With a recommended next step, which may well be to wait.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- who for --
+     Qualification, and a clean route out of 43551 so this page does not
+     pretend to cover greater Toledo. -->
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Who this is for</p>
+      <h2>Homeowners in 43551 thinking about a sale</h2>
+    </div>
+    <div class="reveal">
+      <p>The review is built for people who own residential property in Perrysburg ZIP 43551 and
+        are:</p>
+      <ul class="checklist">
+        <li>considering selling in the near term</li>
+        <li>planning several months or more ahead</li>
+        <li>deciding whether preparation work is worth the money</li>
+        <li>unsure what price range they could actually defend</li>
+        <li>comparing recommendations from more than one agent</li>
+        <li>trying to understand the decision before committing to anything</li>
+      </ul>
+
+      <aside class="quietnote">
+        <p class="quietnote__t">Your home is not in 43551?</p>
+        <p>The 43551 review depends on knowing one market closely, so it is scoped to that ZIP
+          deliberately. For a property anywhere else in greater Toledo, the
+          <a href="/home-value">human home valuation</a> covers the same ground more broadly. If you
+          have already decided to sell and want to know how the listing itself is handled, that is
+          on the <a href="/sell">selling page</a>.</p>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- --------------------------------------------------------- reviewed by --
+     Identity and accountability. The licensed name and the brokerage carry
+     the shared .legalid rule at equal prominence, and neither appears in a
+     heading. -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="whyhuman">
+      <div class="frame frame--portrait reveal" style="max-width:280px">
+        <img src="/assets/img/crystal-headshot.jpg" data-fallback="/assets/img/placeholder-headshot.svg"
+             alt="Crystal Saylor" width="800" height="1000" loading="lazy">
+      </div>
+      <div class="whyhuman__body reveal">
+        <p class="eyebrow">Reviewed by</p>
+        <h2>A person signs off on the analysis</h2>
+        <p class="legalid">
+          <span class="legalid__name">Crystal Saylor</span><span class="legalid__sep" aria-hidden="true">|</span><span class="legalid__name">Key Realty LTD</span>
+          <span class="legalid__lic">Ohio salesperson #&nbsp;2025003655</span>
+        </p>
+        <p>Perrysburg and greater Toledo, with 43551 seller representation as the deliberate focus
+          of her seller work. Every Seller Strategy Review is read and interpreted by Crystal
+          before it reaches you, which is also why it is not instant.</p>
+        <p>The Seller Strategy Review is prepared for prospective listing strategy and is not a
+          licensed appraisal. If you need an appraisal, for a lender or for any legal purpose, that
+          is separate work performed by a licensed appraiser.</p>
+        <p><a class="textlink" href="/about">More about Crystal <span aria-hidden="true">&rarr;</span></a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ---------------------------------------------------------------- faq --->
+<section class="section section--cream">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Straight answers</p>
+      <h2>Questions about the review</h2>
+    </div>
+
+    <div class="faq">
+      <div class="faq__item">
+        <h3 style="margin:0"><button class="faq__q" type="button" aria-expanded="false" aria-controls="sq1">
+          Is this an automated estimate? <span class="faq__icon" aria-hidden="true"></span></button></h3>
+        <div class="faq__a" id="sq1"><p>No. An automated model scores a record. This is a comparison
+          set chosen on purpose, read against what is currently on the market, and interpreted by a
+          person. That is why it takes longer than a website widget.</p></div>
+      </div>
+      <div class="faq__item">
+        <h3 style="margin:0"><button class="faq__q" type="button" aria-expanded="false" aria-controls="sq2">
+          Do I need to be ready to list? <span class="faq__icon" aria-hidden="true"></span></button></h3>
+        <div class="faq__a" id="sq2"><p>No, and planning a year ahead is often when the review is
+          most useful, because there is still time to act on what it says about preparation.</p></div>
+      </div>
+      <div class="faq__item">
+        <h3 style="margin:0"><button class="faq__q" type="button" aria-expanded="false" aria-controls="sq3">
+          Do I have to list with Crystal? <span class="faq__icon" aria-hidden="true"></span></button></h3>
+        <div class="faq__a" id="sq3"><p>No. The review carries no obligation. The five questions
+          above are on this page precisely so they are useful to you even if you interview several
+          agents and choose someone else.</p></div>
+      </div>
+      <div class="faq__item">
+        <h3 style="margin:0"><button class="faq__q" type="button" aria-expanded="false" aria-controls="sq4">
+          Is this an appraisal? <span class="faq__icon" aria-hidden="true"></span></button></h3>
+        <div class="faq__a" id="sq4"><p>No. It is prepared for listing strategy. An appraisal is a
+          separate, regulated opinion of value produced by a licensed appraiser, usually for a lender
+          or a legal process, and this does not substitute for one.</p></div>
+      </div>
+      <div class="faq__item">
+        <h3 style="margin:0"><button class="faq__q" type="button" aria-expanded="false" aria-controls="sq5">
+          What happens after I submit my address? <span class="faq__icon" aria-hidden="true"></span></button></h3>
+        <div class="faq__a" id="sq5"><p>The address is the one detail the review cannot start
+          without. Step two asks how to reach you and gives you room to add what the record will not
+          show. Crystal follows up about the review and, if anything is unclear, asks before
+          assuming.</p></div>
+      </div>
+      <div class="faq__item">
+        <h3 style="margin:0"><button class="faq__q" type="button" aria-expanded="false" aria-controls="sq6">
+          What if my property is outside 43551? <span class="faq__icon" aria-hidden="true"></span></button></h3>
+        <div class="faq__a" id="sq6"><p>Use the <a href="/home-value">home valuation</a> instead. It
+          covers greater Toledo and is prepared by the same person. The 43551 review is scoped
+          tightly on purpose rather than stretched to fit every market.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------ final cta -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="direct">
+      <div class="direct__say">
+        <p class="eyebrow">When you are ready</p>
+        <h2>Start with the address.</h2>
+        <p class="lede" style="margin-top:.75rem">Everything above stays here whether or not you ask
+          for the review. If you want the version written about your house, that begins at the top
+          of this page.</p>
+      </div>
+      <div class="direct__routes">
+        <a class="direct__tel" href="tel:+14192454655">(419)&nbsp;245-4655</a>
+        <a class="direct__mail" href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>
+      </div>
+    </div>
+  </div>
+</section>

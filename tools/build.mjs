@@ -48,7 +48,48 @@ const SITE = "https://crystalsellstoledo.com";
    deployed; an automatic date would silently assert a review that never
    happened every time an unrelated CSS tweak shipped.
    --------------------------------------------------------------------- */
-const CONTENT_UPDATED = "September 2, 2026";
+const CONTENT_UPDATED = "September 3, 2026";
+
+/* ---------------------------------------------------------------------
+   FORM PRESENTATION COPY
+   ---------------------------------------------------------------------
+   src/partials/home-value-form.html is the single implementation of the
+   lead funnel and must stay that way. A page that needs different BUTTON
+   TEXT is not a reason to fork it.
+
+   These six strings are the only parameterised parts of that partial:
+   labels, microcopy, the success wording and the email subject. Field
+   names, validation, step behaviour, the honeypot, data-form-type and the
+   /api/lead contract are deliberately absent from this object.
+
+   The defaults below reproduce the homepage and /home-value wording
+   character for character. A page overrides one by declaring `formCopy`
+   in its meta block; tools/check.mjs fails the build if index.html or
+   home-value.html ever stop rendering these exact defaults.
+   --------------------------------------------------------------------- */
+const FORM_COPY_DEFAULTS = {
+  formSubject: "Home valuation request",
+  formStep1Cta: "Get My Home Value",
+  formMicrocopy: "No obligation &middot; Human valuation &middot; Not an automated estimate",
+  formSubmitCta: "Send My Valuation Request",
+  formSuccessTitle: "Your request is in",
+  formSuccessLede:
+    "Crystal will personally review your property and follow up with you shortly.",
+};
+
+/** Merge a page's formCopy over the defaults, refusing anything unknown -
+ *  a typo would otherwise substitute silently to an empty string and ship
+ *  a button with no label. */
+function formCopyFor(meta, file) {
+  const over = meta.formCopy ?? {};
+  for (const k of Object.keys(over)) {
+    if (!(k in FORM_COPY_DEFAULTS))
+      throw new Error(`${file}: unknown formCopy key "${k}" - allowed: ${Object.keys(FORM_COPY_DEFAULTS).join(", ")}`);
+    if (typeof over[k] !== "string" || !over[k].trim())
+      throw new Error(`${file}: formCopy.${k} must be a non-empty string`);
+  }
+  return { ...FORM_COPY_DEFAULTS, ...over };
+}
 
 const partial = (name) => readFileSync(join(ROOT, "src/partials", name + ".html"), "utf8");
 const PARTIALS = Object.fromEntries(
@@ -239,6 +280,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     analytics: analyticsTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
+    ...formCopyFor(meta, file),
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",
     content: body.trim(),
   };

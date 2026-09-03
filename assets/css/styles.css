@@ -9,6 +9,12 @@
   --gold:        #b8863b;
   --gold-lt:     #d9bc7f;
   --gold-dk:     #8f6828;
+  /* Inline links in body copy. --gold-dk clears AA on the cream ground
+     (4.74) but only reaches 4.27 on --cream-dk, which is where the FAQ
+     answers sit. This is the lightest gold that passes 4.5 on cream,
+     cream-dk and white alike, so one value covers every surface a prose
+     link actually lands on. */
+  --gold-link:   #866024;
   --ink:         #14120f;
   --ink-soft:    #2a2621;
   --muted:       #6d665c;
@@ -889,6 +895,14 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .prose ul, .prose ol { padding-left: 1.35rem; margin: 0 0 1.35em; display: grid; gap: .6rem; }
 .prose li::marker { color: var(--gold); }
 .prose a { color: var(--gold-dk); text-decoration: underline; text-underline-offset: 3px; }
+
+/* Inline links in body copy had no visual treatment whatsoever: the base
+   rule is `a { color: inherit; text-decoration: none }` and only .prose
+   overrode it, so a link inside an aside or an FAQ answer rendered in body
+   colour with no underline and no border. That is not a low-contrast link,
+   it is an invisible one. Same treatment .prose already uses. */
+.quietnote a, .faq__a a, .factor dd a { color: var(--gold-link); text-decoration: underline; text-underline-offset: 3px; }
+.quietnote a:hover, .faq__a a:hover, .factor dd a:hover { color: var(--gold); }
 /* The effective-date / not-legal-advice line at the top of /privacy. */
 .prose__note { font-size: .92rem; color: var(--muted); }
 .prose code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

@@ -13,10 +13,19 @@
      Behaviour comes from assets/js/main.js: initForms() binds any
      form[data-form]; initSteps() binds any [data-steps]. Nothing here is
      homepage-specific.
+
+     The six form-copy tokens below are PRESENTATION COPY ONLY: button labels,
+     microcopy, the success wording and the email subject. Field names,
+     validation, step behaviour, the honeypot, data-form-type and the
+     /api/lead contract are NOT parameterised and must never be. Defaults
+     live in tools/build.mjs and reproduce the homepage and /home-value
+     wording exactly; a page overrides one only via `formCopy` in its meta
+     block, and tools/check.mjs fails the build if the two existing pages
+     ever stop rendering the defaults.
      ===================================================================== -->
 <div class="form-region" data-form-region>
 <form class="form hv-form" data-form data-form-type="home_value" data-steps="2"
-      data-subject="Home valuation request" novalidate>
+      data-subject="{{formSubject}}" novalidate>
   <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
 
   <p class="form__step" data-step-indicator aria-live="polite">Step 1 of 2</p>
@@ -35,12 +44,11 @@
                placeholder="123 Main St, Perrysburg, OH" maxlength="200" required>
       </div>
       <button class="btn btn--gold btn--lg hv-form__go" type="button" data-step-next>
-        Get My Home Value
+        {{formStep1Cta}}
       </button>
     </div>
 
-    <p class="form__note hv-form__micro">No obligation &middot; Human valuation &middot;
-      Not an automated estimate</p>
+    <p class="form__note hv-form__micro">{{formMicrocopy}}</p>
   </div>
 
   <!-- Step 2 — contact details -->
@@ -99,7 +107,7 @@
 
     <div class="form-status" aria-live="polite"></div>
 
-    <button class="btn btn--primary btn--block btn--lg" type="submit">Send My Valuation Request</button>
+    <button class="btn btn--primary btn--block btn--lg" type="submit">{{formSubmitCta}}</button>
 
     <button class="btn btn--ghost btn--block" type="button" data-step-back
             style="margin-top:.75rem">Back to address</button>
@@ -122,9 +130,8 @@
      drift. Focus moves to the heading, which is why it is tabbable. -->
 <div class="success-panel" data-form-success hidden>
   <p class="success-panel__mark" aria-hidden="true">&check;</p>
-  <h2 class="success-panel__title" data-success-heading tabindex="-1">Your request is in</h2>
-  <p class="success-panel__lede">Crystal will personally review your property and follow up
-    with you shortly.</p>
+  <h2 class="success-panel__title" data-success-heading tabindex="-1">{{formSuccessTitle}}</h2>
+  <p class="success-panel__lede">{{formSuccessLede}}</p>
   <p class="success-panel__call">If you need to reach her sooner, call
     <a href="tel:+14192454655">(419)&nbsp;245-4655</a>.</p>
 </div>
