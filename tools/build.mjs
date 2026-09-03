@@ -91,6 +91,20 @@ function formCopyFor(meta, file) {
   return { ...FORM_COPY_DEFAULTS, ...over };
 }
 
+/* The two promotional CTAs in the shared chrome. Navigation, legal
+   identity, contact details and compliance marks are deliberately absent
+   from this object - only the gold "buy now" of the header and footer is
+   overridable, and only so a page running its own funnel does not ship a
+   fixed link into a competing one. */
+const CHROME_CTA_DEFAULTS = {
+  headerCtaHref: "/home-value",
+  headerCtaLabel: "What&rsquo;s My Home Worth?",
+  headerCtaData: "",
+  footerCtaHref: "/home-value",
+  footerCtaLabel: "Get My Home&rsquo;s Value",
+  footerCtaData: "",
+};
+
 /* The mobile sticky bar's second cell. Same rule as the form copy: one
    implementation, defaults identical to what every page renders today. */
 const STICKY_CTA_DEFAULTS = {
@@ -99,8 +113,20 @@ const STICKY_CTA_DEFAULTS = {
   stickyCtaData: "",
 };
 
-/** Same contract for the sticky bar. stickyCtaData may be empty, so it is
- *  checked for type only. */
+/** Same contract for the header/footer CTAs. The *Data fields may be
+ *  empty, so they are checked for type only. */
+function chromeCtaFor(meta, file) {
+  const over = meta.chromeCta ?? {};
+  for (const k of Object.keys(over)) {
+    if (!(k in CHROME_CTA_DEFAULTS))
+      throw new Error(`${file}: unknown chromeCta key "${k}" - allowed: ${Object.keys(CHROME_CTA_DEFAULTS).join(", ")}`);
+    if (typeof over[k] !== "string")
+      throw new Error(`${file}: chromeCta.${k} must be a string`);
+  }
+  return { ...CHROME_CTA_DEFAULTS, ...over };
+}
+
+/** Same contract again for the sticky bar. */
 function stickyCtaFor(meta, file) {
   const over = meta.stickyCta ?? {};
   for (const k of Object.keys(over)) {
@@ -303,6 +329,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     ...formCopyFor(meta, file),
     ...stickyCtaFor(meta, file),
+    ...chromeCtaFor(meta, file),
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",
     content: body.trim(),
   };

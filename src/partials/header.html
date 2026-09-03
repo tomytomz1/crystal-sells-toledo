@@ -18,7 +18,11 @@
       <a class="nav__link" href="/neighborhoods"{{nav_hoods}}>Neighborhoods</a>
       <a class="nav__link" href="/about"{{nav_about}}>About Crystal</a>
       <a class="nav__link" href="/contact"{{nav_contact}}>Contact</a>
-      <a class="nav__cta" href="/home-value">What&rsquo;s My Home Worth?</a>
+      <!-- Overridable per page (headerCta* in tools/build.mjs). A page that
+           runs its own funnel should not carry a fixed promotional CTA
+           pointing at a different one. Defaults are the site-wide values and
+           are pinned in check.mjs. -->
+      <a class="nav__cta" href="{{headerCtaHref}}"{{headerCtaData}}>{{headerCtaLabel}}</a>
     </nav>
   </div>
 </header>

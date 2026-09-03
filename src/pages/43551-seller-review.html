@@ -11,9 +11,17 @@
     "formSuccessTitle": "Your 43551 review request is in",
     "formSuccessLede": "Crystal will review your property details and follow up about the Seller Strategy Review."
   },
+  "chromeCta": {
+    "headerCtaHref": "#start-review",
+    "headerCtaLabel": "Start My 43551 Review",
+    "headerCtaData": " data-review-cta=\"header\"",
+    "footerCtaHref": "#start-review",
+    "footerCtaLabel": "Start My 43551 Review",
+    "footerCtaData": " data-review-cta=\"footer\""
+  },
   "stickyCta": {
     "stickyCtaHref": "#start-review",
-    "stickyCtaLabel": "Start My Review",
+    "stickyCtaLabel": "Start My 43551 Review",
     "stickyCtaData": " data-review-cta=\"sticky\""
   },
   "jsonld": {
@@ -41,12 +49,22 @@
        /sell        answers "how does she run a listing" and owns the
                     six-stage process.
 
-     SEQUENCE (Phase 4.1). The page argues one belief - that a useful list
+     SEQUENCE (Phase 4.2). The page argues one belief - that a useful list
      price cannot come from one number or a pile of nearby sales - and each
-     section proves a different piece of it:
+     section proves a different piece of it, in this order:
 
-       offer -> difference -> belief -> mechanism -> education ->
-       decision framework -> authority -> objections -> action
+       offer -> difference -> belief -> COMPETITION -> method ->
+       comps -> preparation -> pricing -> five questions -> deliverable ->
+       qualification -> identity -> objections -> action
+
+     Competition moved ahead of the methodology and the comparable-sale
+     education in 4.2: it is the page's strongest differentiator and was
+     arriving after the two longest blocks on the page.
+
+     Every section has exactly one job. Where two made the same point, the
+     duplicate was cut rather than both being kept - the six-input list
+     under the belief restated the offer stack above it and the sections
+     below it, so it is gone.
 
      Five invitations to act, all pointing at #start-review, which is the
      ONE form at the top. There is no second form implementation and no
@@ -69,8 +87,8 @@
         <p class="eyebrow">Perrysburg 43551 sellers</p>
         <h1>Before you list your 43551 home, know how it will compete.</h1>
         <p class="hero__lede">A Seller Strategy Review shows you the sales that genuinely apply to
-          your house, the homes a buyer could pick instead, and what both mean for your price.
-          Crystal Saylor reads it and tells you what it means for your house.</p>
+          your house and the homes a buyer could pick instead. Crystal Saylor reads it and tells
+          you what both mean for your price.</p>
         <!-- No secondary link above the fold. A visitor who is already past
              this decision finds /sell further down; a visitor who is not
              should have exactly one thing to consider here. -->
@@ -83,6 +101,21 @@
         <h2 class="valueform__label">Start your 43551 review</h2>
         <p class="valueform__note">Address first. The rest takes about a minute.</p>
         {{> home-value-form}}
+
+        <!-- Who receives the address, before it is handed over. Verified
+             facts only: name, brokerage, licence number. Subordinate to the
+             H1, the field and the button, and no biography. -->
+        <p class="byline">
+          <img class="byline__face" src="/assets/img/crystal-headshot.jpg"
+               data-fallback="/assets/img/placeholder-headshot.svg" alt="" aria-hidden="true"
+               width="800" height="1000" loading="lazy">
+          <span class="byline__who">
+            Personally reviewed by <span class="legalid__name">Crystal Saylor</span>
+            <span class="byline__sep" aria-hidden="true">|</span>
+            <span class="legalid__name">Key Realty LTD</span>
+            <span class="byline__lic">Ohio salesperson #&nbsp;2025003655</span>
+          </span>
+        </p>
       </div>
     </div>
   </div>
@@ -175,71 +208,72 @@
 
     <!-- CTA #2. Placed the moment the mechanism lands. -->
     <div class="cuepoint reveal">
-      <p class="cuepoint__say"><strong>Want this for your house?</strong> Start with the address.
-        Everything else can wait until you have seen it.</p>
-      <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="offer">See How My Home Compares</a>
+      <p class="cuepoint__say"><strong>Want to see how your home compares?</strong> Start with the
+        address. Everything else can wait until you have seen it.</p>
+      <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="offer">Start My 43551 Review</a>
     </div>
   </div>
 </section>
 
-<!-- ---------------------------------------------------------- the belief -->
+<!-- ---------------------------------------------------------- the belief --
+     Job: why a single number is not enough. Nothing else. The six-input
+     list that used to sit here restated the offer stack above and the
+     sections below, so it is gone; each of those points now lives in
+     exactly one place. -->
 <section class="section">
-  <div class="wrap">
-    <div class="whyhuman">
-      <div class="whyhuman__body reveal">
-        <p class="eyebrow">Before the number</p>
-        <h2>A list price is a decision, not a measurement.</h2>
-        <p>Most valuation requests give back one figure. A figure on its own does not tell you what
-          your house is competing against, which sales produced it, or what is worth doing between
-          now and the day it goes live. Those are the parts that shape the decision.</p>
-        <p>The review is organised around six inputs. None of them is a number by itself, and the
-          number is easier to stand behind when all six have been looked at.</p>
-      </div>
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Before the number</p>
+      <h2>A list price is a decision, not a measurement.</h2>
+    </div>
+    <div class="reveal" style="max-width:62ch">
+      <p>Most valuation requests give back one figure. A figure on its own does not tell you what
+        your house is competing against, which sales produced it, or what is worth doing between now
+        and the day it goes live. Those are the parts that shape the decision.</p>
+      <p>It also does not tell you where it is weak. A recommendation is easier to trust when it
+        says which parts rest on thin evidence and what would move the range, so that is part of
+        what comes back.</p>
+    </div>
+  </div>
+</section>
 
-      <div class="factors reveal">
-        <p class="factors__label">What the review actually weighs</p>
-        <dl class="factors__list">
-          <div class="factor">
-            <dt>The homes buyers can choose instead</dt>
-            <dd>A buyer comparing your house is comparing it with what is on the market the week
-              they are looking, not with what sold last spring.</dd>
-          </div>
-          <div class="factor">
-            <dt>Which closed sales genuinely apply</dt>
-            <dd>Proximity on its own is a weak reason to include a sale. A house two streets over
-              can be less relevant than one further out that matches yours more closely.</dd>
-          </div>
-          <div class="factor">
-            <dt>What your property does differently</dt>
-            <dd>Finished space, basement, garage, lot, setting, layout and what has actually been
-              updated. Two homes with the same bedroom count can present very differently.</dd>
-          </div>
-          <div class="factor">
-            <dt>What is worth preparing</dt>
-            <dd>Fix everything is not a plan, and neither is fix nothing. Some work changes how the
-              house shows for very little. Some may not make sense once cost, timing and current
-              competition are considered.</dd>
-          </div>
-          <div class="factor">
-            <dt>What each pricing position asks of you</dt>
-            <dd>Where you enter the market affects how many buyers consider the house early, and
-              what your options are if it does not move.</dd>
-          </div>
-          <div class="factor">
-            <dt>What would change the answer</dt>
-            <dd>Knowing what could move the range matters as much as the range itself, so the review
-              says where the evidence is thin.</dd>
-          </div>
-        </dl>
+<!-- ---------------------------------------------------------- competition --
+     Job: why the homes a buyer can choose instead matter. This is the
+     page's strongest differentiator, so in Phase 4.2 it moved up to sit
+     directly after the belief, ahead of the methodology and the comparable
+     -sale education rather than after them. -->
+<section class="section section--ink">
+  <div class="wrap wrap--narrow">
+    <div class="sec-head reveal">
+      <p class="eyebrow">The part most pricing skips</p>
+      <h2>Your house is not priced in isolation</h2>
+    </div>
+    <div class="reveal">
+      <p>Closed sales are the historical record. They tell you what somebody paid, under conditions
+        that have already finished playing out. They are the firmest evidence available and they are
+        always slightly out of date.</p>
+      <p>Active listings do something different. They show what a buyer can choose instead of your
+        house right now, which is the comparison that happens at the moment of decision. A house
+        priced without reference to what it is standing next to is priced in isolation.</p>
+      <p>Pending listings sit between the two. They suggest where demand is moving, with the caveat
+        that the final terms are not public yet and a pending sale can still change or fall through.
+        They inform a view rather than settle one.</p>
+
+      <!-- Decision point. The visitor has just met the mechanism. -->
+      <div class="cuepoint">
+        <p class="cuepoint__say"><strong>Want to know what yours would be standing next to?</strong>
+          Start with the address.</p>
+        <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="competition">Start My 43551 Review</a>
       </div>
     </div>
   </div>
 </section>
 
 <!-- ------------------------------------------------------------ method ----
-     Transparent methodology, described only as far as the workflow can
-     actually deliver. No turnaround promise, no fixed comp count, no
-     deliverable format claim. -->
+     Job: the workflow, and only the workflow. Phase 4.2 halved the body
+     copy: why comps must be chosen well, and why competition matters, are
+     now argued once each in their own sections rather than restated here.
+     No turnaround promise, no fixed comp count, no format claim. -->
 <section class="section section--cream">
   <div class="wrap wrap--narrow">
     <div class="sec-head reveal">
@@ -252,33 +286,31 @@
     <div class="steps">
       <div class="step reveal"><span class="step__n"></span><div>
         <h3>Start with the property</h3>
-        <p>Confirm the facts of the house and add what only you know: the work you have done, the
-          year you did it, and anything a public record will not show.</p></div></div>
+        <p>The facts of the house, plus what only you know: the work you have done, when, and
+          anything a public record will not show.</p></div></div>
 
       <div class="step reveal"><span class="step__n"></span><div>
         <h3>Select the closed sales that apply</h3>
-        <p>Not every recent sale nearby belongs in the analysis. A set picked for convenience gives
-          you a range you cannot defend when a buyer&rsquo;s agent pushes back.</p></div></div>
+        <p>Chosen deliberately, so the range holds up when a buyer&rsquo;s agent pushes back.</p></div></div>
 
       <div class="step reveal"><span class="step__n"></span><div>
         <h3>Look at what is available now</h3>
-        <p>Closed sales say what buyers paid. Active listings say what the same buyer can choose
-          this week instead of your house.</p></div></div>
+        <p>The listings your buyer can walk into this week instead of yours.</p></div></div>
 
       <div class="step reveal"><span class="step__n"></span><div>
         <h3>Compare the differences that matter</h3>
-        <p>Condition, updates, finished area, lot and setting, layout, garage, basement. Some
-          differences move value. Several do not.</p></div></div>
+        <p>Condition, updates, finished area, lot, layout, garage, basement. Some move value.
+          Several do not.</p></div></div>
 
       <div class="step reveal"><span class="step__n"></span><div>
         <h3>Crystal reviews the analysis</h3>
-        <p>The data does not make the decision. Crystal reads it and explains what it means for your
-          house, including where the evidence is thin.</p></div></div>
+        <p>The data does not make the decision. Crystal weighs it against the house itself and
+          says where the evidence is thin.</p></div></div>
 
       <div class="step reveal"><span class="step__n"></span><div>
         <h3>Decide the sensible next step</h3>
-        <p>Sometimes that is a walkthrough. Sometimes it is a piece of preparation, a question worth
-          researching, or simply waiting. Listing is one possible answer, not the assumed one.</p></div></div>
+        <p>A walkthrough, a piece of preparation, more research, or waiting. Listing is one possible
+          answer, not the assumed one.</p></div></div>
     </div>
   </div>
 </section>
@@ -286,20 +318,24 @@
 <!-- ==================================================================
      SAMPLE REVIEW INSERTION POINT
      ------------------------------------------------------------------
-     A real, redacted 43551 Seller Strategy Review belongs here, between
-     the methodology and the education: the reader has just been told how
-     it is built and is best placed to judge an example of the output.
+     A real, anonymised 43551 Seller Strategy Review belongs here, right
+     after the methodology: the reader has just been told how one is built
+     and is best placed to judge an example of the output. The alternative
+     home is immediately after the competition section, if the sample leads
+     with the competing-listings comparison instead.
 
-     It must be built from an actual property and actual research. Nothing
-     is rendered until that exists - no placeholder, no "sample coming
-     soon", no mock report artwork. Drop a <section> in at this point and
-     the surrounding sequence still reads correctly.
+     It must come from an actual property with permission, or be properly
+     anonymised. Nothing renders until that exists - no placeholder, no
+     "sample coming soon", no mock report artwork, no invented comps. Drop
+     a <section> in at this point and the surrounding sequence still reads.
      ================================================================== -->
 
 <!-- --------------------------------------------------------------- comps --
-     The strongest standalone passage on the page. Written to be useful to
-     a homeowner who never submits anything, including one who is about to
-     sit through someone else's listing appointment. -->
+     Job: how relevant comparisons get selected. Still the strongest
+     standalone passage, and still fully public - Phase 4.2 combined nine
+     closely related factors into six and cut the supporting sentences,
+     because this was the tallest block on mobile. The central line and the
+     test both stay. -->
 <section class="section">
   <div class="wrap wrap--narrow">
     <div class="sec-head reveal">
@@ -315,22 +351,17 @@
 
       <ul class="checklist">
         <li><span><strong>Immediate geography.</strong> Not a radius. The streets a buyer would
-          treat as interchangeable with yours, which is sometimes smaller than a subdivision and
-          sometimes larger.</span></li>
-        <li><span><strong>Property type and era.</strong> A 1990s two-storey and a recent build are
-          different products even at the same square footage.</span></li>
-        <li><span><strong>Finished square footage, and where it is.</strong> Above grade and below
-          grade are not read the same way by buyers or by lenders.</span></li>
+          treat as interchangeable with yours.</span></li>
+        <li><span><strong>Type, era and size.</strong> A 1990s two-storey and a recent build are
+          different products at the same square footage, and finished space above grade is not read
+          like finished space below it.</span></li>
         <li><span><strong>Condition and renovation level.</strong> A common reason a nearby sale can
           be a poor comparison.</span></li>
-        <li><span><strong>Bedrooms, bathrooms and layout.</strong> Count matters less than whether
-          the layout works for the way a house of this kind is actually lived in.</span></li>
-        <li><span><strong>Lot and setting.</strong> Size, orientation, what backs onto it, and what
+        <li><span><strong>Layout, basement and garage.</strong> Bedroom count matters less than
+          whether the plan works; finished, dry, tandem or third bay separates otherwise similar
+          houses.</span></li>
+        <li><span><strong>Lot and setting.</strong> Size, orientation, what backs onto it and what
           sits on either side.</span></li>
-        <li><span><strong>Basement and garage.</strong> Finished, tall, dry, tandem, third bay.
-          These separate otherwise similar houses.</span></li>
-        <li><span><strong>Features that carry weight in your price range.</strong> They differ by
-          price point, and assuming they transfer between them is a common error.</span></li>
         <li><span><strong>Recency, and what was happening then.</strong> A sale from a very
           different moment has to be interpreted, not simply dated.</span></li>
       </ul>
@@ -341,35 +372,6 @@
           also have seriously considered yours. If the answer is no, it is context. It is not a
           comparable.</p>
       </aside>
-    </div>
-  </div>
-</section>
-
-<!-- ---------------------------------------------------------- competition -->
-<section class="section section--ink">
-  <div class="wrap wrap--narrow">
-    <div class="sec-head reveal">
-      <p class="eyebrow">The other half of the picture</p>
-      <h2>Current competition matters too</h2>
-    </div>
-    <div class="reveal">
-      <p>Closed sales are the historical record. They tell you what somebody paid, under conditions
-        that have already finished playing out. They are the firmest evidence available and they are
-        always slightly out of date.</p>
-      <p>Active listings do something different. They show what a buyer can choose instead of your
-        house right now, which is the comparison that happens at the moment of decision. A house
-        priced without reference to what it is standing next to is priced in isolation.</p>
-      <p>Pending listings sit between the two. They suggest where demand is moving, with the caveat
-        that the final terms are not public yet and a pending sale can still change or fall through.
-        They inform a view rather than settle one.</p>
-
-      <!-- CTA #3. The visitor has just accepted that comps and competition
-           both take judgement, which is exactly what the review supplies. -->
-      <div class="cuepoint">
-        <p class="cuepoint__say"><strong>This is the part that takes a person.</strong> Send the
-          address and Crystal will do it for your house.</p>
-        <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="competition">Build My 43551 Review</a>
-      </div>
     </div>
   </div>
 </section>
@@ -454,9 +456,9 @@
 
     <!-- CTA #4. The reader now knows there are options and wants theirs. -->
     <div class="cuepoint reveal">
-      <p class="cuepoint__say"><strong>Which one fits your house?</strong> That depends on what it
-        is competing with, which is what the review works out.</p>
-      <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="pricing">Show Me My Options</a>
+      <p class="cuepoint__say"><strong>Want to understand your pricing options?</strong> Which one
+        fits depends on what your house is competing with.</p>
+      <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="pricing">Start My 43551 Review</a>
     </div>
   </div>
 </section>
@@ -514,44 +516,54 @@
 </section>
 
 <!-- ------------------------------------------------------- what you get ---
-     Precise about the deliverable. No appraisal language, no fixed comp
-     count, no format or turnaround promise. -->
+     Job: the tangible deliverable. Phase 4.2 made it concrete without
+     claiming a format: no PDF, no page count, no fixed number of comps, no
+     turnaround, and "interpretation and recommended next step" rather than
+     "written report", because the delivery format is not locked yet. -->
 <section class="section section--cream">
   <div class="wrap">
     <div class="returns">
       <div class="sec-head reveal">
         <p class="eyebrow">What comes back</p>
-        <h2>What the review is designed to return</h2>
-        <p class="lede">The reasoning as well as the range, so you can judge the recommendation
-          rather than take it on trust.</p>
+        <h2>What you actually receive</h2>
+        <p class="lede">A review of your specific property, covering six things and ending in a
+          recommendation you can question.</p>
       </div>
 
       <div class="returns__list reveal">
         <div class="returns__item">
           <h3>An initial selling-price range</h3>
-          <p>With the evidence it rests on, and a note where that evidence is thin.</p>
+          <p>For your address, with the evidence it rests on and a note where that evidence is
+            thin.</p>
         </div>
         <div class="returns__item">
-          <h3>The closed sales judged most relevant</h3>
-          <p>As many as genuinely apply. A short, well-chosen set beats a long, padded one.</p>
+          <h3>The closed sales it is built on</h3>
+          <p>Named, with the reason each one belongs. As many as genuinely apply.</p>
         </div>
         <div class="returns__item">
-          <h3>The current listings a buyer would weigh against yours</h3>
-          <p>What your house would be standing next to if it launched now.</p>
+          <h3>The listings you would be competing with</h3>
+          <p>What a buyer could choose instead of your house if it launched now.</p>
         </div>
         <div class="returns__item">
-          <h3>The property details that affect positioning</h3>
-          <p>Drawn from the record and from what you tell Crystal about the house.</p>
+          <h3>The differences that affect your position</h3>
+          <p>Condition, updates, lot, layout and the rest, drawn from the record and from what you
+            tell Crystal.</p>
         </div>
         <div class="returns__item">
           <h3>Preparation priorities and open questions</h3>
-          <p>Including what to leave alone, and what needs a look in person before deciding.</p>
+          <p>What is worth doing, what to leave alone, and what needs a look in person first.</p>
         </div>
         <div class="returns__item">
           <h3>Pricing options and their tradeoffs</h3>
-          <p>With a recommended next step, which may well be to wait.</p>
+          <p>The three positions, applied to your house rather than described in general.</p>
         </div>
       </div>
+
+      <aside class="quietnote reveal">
+        <p class="quietnote__t">And a person to argue with</p>
+        <p>Crystal&rsquo;s interpretation and recommended next step come with it, and she will walk
+          through any part of the reasoning with you. The next step may well be to wait.</p>
+      </aside>
     </div>
   </div>
 </section>
@@ -676,16 +688,19 @@
 </section>
 
 <!-- ------------------------------------------------------------ final cta -
-     CTA #5. The offer restated, not a contact-details footer. Phone and
-     email stay available underneath, deliberately quieter. -->
+     The close restates the offer rather than listing contact details:
+     what you do, what Crystal does, what you get back, and that it commits
+     you to nothing. No turnaround, no format, no urgency, no appraisal. -->
 <section class="cta-band">
   <div class="wrap wrap--narrow">
     <p class="eyebrow">Your property, not a generic estimate</p>
     <h2>See how your 43551 home would compete.</h2>
-    <p class="lede">Start with the address. Crystal will use the property details, the sales that
-      genuinely apply and what is on the market now to prepare your review.</p>
+    <p class="lede">Start with the address. Crystal reviews the details you give her and compares
+      the closed sales that genuinely apply against the listings a buyer could choose instead. What
+      comes back is a selling-price range for your house, the evidence behind it, your pricing
+      options and a recommended next step. There is no obligation to list, or to sell at all.</p>
     <div class="btn-row center" style="margin-top:2rem">
-      <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="final">Start With My Address</a>
+      <a class="btn btn--gold btn--lg" href="#start-review" data-review-cta="final">Start My 43551 Review</a>
     </div>
     <p class="lede" style="margin-top:1.5rem;font-size:.92rem">
       Or reach her directly on <a class="textlink" href="tel:+14192454655">(419)&nbsp;245-4655</a>

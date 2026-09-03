@@ -212,7 +212,10 @@
        IntersectionObserver only, and where it is missing the bar simply
        keeps the old scroll-distance behaviour. */
     var formOnScreen = false;
-    var regions = document.querySelectorAll("[data-form-region]");
+    /* Also stand down around a visible inline CTA. A fixed bar offering the
+       same action as a button the visitor can already see is just noise. */
+    var regions = document.querySelectorAll(
+      "[data-form-region], .cuepoint, .cta-band [data-review-cta]");
     if (regions.length && "IntersectionObserver" in window) {
       var seen = new WeakSet();
       var io = new IntersectionObserver(function (entries) {

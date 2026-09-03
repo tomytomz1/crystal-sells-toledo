@@ -716,6 +716,19 @@ for (const file of pages) {
         fail(file, `form ${what} no longer renders the default wording - formCopy defaults in tools/build.mjs must keep this page unchanged`);
   }
 
+  /* The header and footer promotional CTAs are overridable too, so the
+     pages that never override them must still render the site-wide
+     destination and label. Navigation, legal identity and contact details
+     are not parameterised at all and are covered by the other checks. */
+  for (const file of pages) {
+    if (file === "43551-seller-review.html") continue;
+    const html = readFileSync(join(ROOT, file), "utf8").replace(/\s+/g, " ");
+    if (!/class="nav__cta" href="\/home-value"[^>]*>What&rsquo;s My Home Worth\?/.test(html))
+      fail(file, "header CTA no longer renders the default destination and label - chromeCta defaults in tools/build.mjs must keep this page unchanged");
+    if (!/class="btn btn--gold" href="\/home-value"[^>]*>Get My Home&rsquo;s Value/.test(html))
+      fail(file, "footer CTA no longer renders the default destination and label - chromeCta defaults in tools/build.mjs must keep this page unchanged");
+  }
+
   /* The lead contract, spelled out. Comparing the pages only against each
      other passes happily when a field is added to the SHARED partial, which
      is the likeliest way it would actually happen, so the expected set is

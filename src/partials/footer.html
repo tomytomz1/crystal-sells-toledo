@@ -66,7 +66,10 @@
           <li><a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a></li>
           <li>Key Realty LTD<br>6800 W. Central Ave, Unit B<br>Toledo, OH 43617</li>
         </ul>
-        <a class="btn btn--gold" href="/home-value">Get My Home&rsquo;s Value</a>
+        <!-- Overridable per page (footerCta* in tools/build.mjs), same reason
+             as the header CTA. The nav lists, legal identity, contact details
+             and compliance marks below are NOT parameterised. -->
+        <a class="btn btn--gold" href="{{footerCtaHref}}"{{footerCtaData}}>{{footerCtaLabel}}</a>
       </div>
     </div>
 

@@ -864,6 +864,30 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .brandmark--eho svg { height: 46px; width: auto; display: block; }
 .footer__disclaimer { max-width: 60ch; }
 
+/* Who receives the address, shown before it is handed over. Sits under the
+   hero form, deliberately quieter than the field and the button. The two
+   names carry .legalid__name, so the shared equal-prominence rule governs
+   them here exactly as it does in the footer. */
+.byline {
+  display: flex; align-items: center; gap: .8rem;
+  margin: 1.15rem 0 0; padding-top: 1.05rem;
+  border-top: 1px solid rgba(255,255,255,.12);
+  font-size: .82rem; line-height: 1.45; color: rgba(255,255,255,.62);
+}
+.byline__face {
+  width: 40px; height: 40px; flex: none; border-radius: 50%;
+  object-fit: cover; object-position: 50% 18%;
+  border: 1px solid rgba(184,134,59,.5);
+}
+.byline__who { display: block; }
+.byline .legalid__name { font-size: inherit; color: rgba(255,255,255,.9); }
+.byline__sep { padding: 0 .35rem; opacity: .45; }
+.byline__lic {
+  display: block; margin-top: .1rem;
+  font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--gold-lt);
+}
+
 /* --- /43551-seller-review conversion modules ---------------------------
    Five invitations to one form. The mid-page ones are deliberately quiet:
    a hairline, a line of context and a single button, so the rhythm reads
