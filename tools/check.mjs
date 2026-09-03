@@ -723,6 +723,18 @@ for (const file of pages) {
      mapping too - that is the point of making it noisy. */
   const EXPECTED_FIELDS =
     "_gotcha,condition,email,first_name,last_name,notes,phone,property_address,timeline";
+  /* Same reasoning for the sticky bar: its second cell is overridable, so
+     the pages that never override it must still render the site-wide
+     wording and destination. */
+  for (const file of ["index.html", "home-value.html", "sell.html"]) {
+    if (!existsSync(join(ROOT, file))) continue;
+    const bar = readFileSync(join(ROOT, file), "utf8").match(/<div class="sticky-cta"[\s\S]*?<\/div>/);
+    if (!bar) { fail(file, "sticky CTA bar is missing"); continue; }
+    const flat = bar[0].replace(/\s+/g, " ");
+    if (!flat.includes('href="/home-value"') || !flat.includes("Free Home Value"))
+      fail(file, "sticky CTA no longer renders the default destination and label - stickyCta defaults in tools/build.mjs must keep this page unchanged");
+  }
+
   const FIELDS = /<(?:input|select|textarea)\b[^>]*\bname="([^"]+)"/g;
   let formPages = 0;
   for (const file of pages) {

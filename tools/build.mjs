@@ -91,6 +91,27 @@ function formCopyFor(meta, file) {
   return { ...FORM_COPY_DEFAULTS, ...over };
 }
 
+/* The mobile sticky bar's second cell. Same rule as the form copy: one
+   implementation, defaults identical to what every page renders today. */
+const STICKY_CTA_DEFAULTS = {
+  stickyCtaHref: "/home-value",
+  stickyCtaLabel: "Free Home Value",
+  stickyCtaData: "",
+};
+
+/** Same contract for the sticky bar. stickyCtaData may be empty, so it is
+ *  checked for type only. */
+function stickyCtaFor(meta, file) {
+  const over = meta.stickyCta ?? {};
+  for (const k of Object.keys(over)) {
+    if (!(k in STICKY_CTA_DEFAULTS))
+      throw new Error(`${file}: unknown stickyCta key "${k}" - allowed: ${Object.keys(STICKY_CTA_DEFAULTS).join(", ")}`);
+    if (typeof over[k] !== "string")
+      throw new Error(`${file}: stickyCta.${k} must be a string`);
+  }
+  return { ...STICKY_CTA_DEFAULTS, ...over };
+}
+
 const partial = (name) => readFileSync(join(ROOT, "src/partials", name + ".html"), "utf8");
 const PARTIALS = Object.fromEntries(
   readdirSync(join(ROOT, "src/partials"))
@@ -281,6 +302,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
     ...formCopyFor(meta, file),
+    ...stickyCtaFor(meta, file),
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",
     content: body.trim(),
   };

@@ -205,15 +205,61 @@
   function initStickyCta() {
     var bar = document.querySelector(".sticky-cta");
     if (!bar) return;
+
+    /* A fixed bar asking for the form, sitting on top of the form, is a
+       tax on the visitor who already scrolled to it. Track whether any
+       lead form is on screen and stand down while one is. Native
+       IntersectionObserver only, and where it is missing the bar simply
+       keeps the old scroll-distance behaviour. */
+    var formOnScreen = false;
+    var regions = document.querySelectorAll("[data-form-region]");
+    if (regions.length && "IntersectionObserver" in window) {
+      var seen = new WeakSet();
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target);
+        });
+        formOnScreen = Array.prototype.some.call(regions, function (r) { return seen.has(r); });
+        check();
+      }, { rootMargin: "-15% 0px -15% 0px" });
+      Array.prototype.forEach.call(regions, function (r) { io.observe(r); });
+    }
+
     var ticking = false;
     function check() {
-      bar.classList.toggle("is-visible", window.scrollY > 520);
+      bar.classList.toggle("is-visible", window.scrollY > 520 && !formOnScreen);
       ticking = false;
     }
     window.addEventListener("scroll", function () {
       if (!ticking) { ticking = true; window.requestAnimationFrame(check); }
     }, { passive: true });
     check();
+  }
+
+  /* ------------------------------------------- in-page CTA to the form -
+     Several places on /43551-seller-review invite the visitor back to the
+     one form at the top. The href does the scrolling, so this works with
+     no JavaScript at all; all that is added here is moving focus to the
+     address field once the browser has arrived, with preventScroll so the
+     focus cannot fight the scroll that is still animating. */
+  function initFormCtas() {
+    document.addEventListener("click", function (e) {
+      var link = e.target.closest("a[data-review-cta]");
+      if (!link) return;
+      var href = link.getAttribute("href") || "";
+      if (href.charAt(0) !== "#") return;
+      var target = document.getElementById(href.slice(1));
+      if (!target) return;
+      /* The first input inside the form region is the honeypot, which is
+         hidden and tabindex="-1". Prefer the address field by name. */
+      var field = target.querySelector('input[name="property_address"]')
+        || target.querySelector('input:not(.hp):not([tabindex="-1"]), select, textarea');
+      if (!field) return;
+      var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.setTimeout(function () {
+        try { field.focus({ preventScroll: true }); } catch (err) { field.focus(); }
+      }, reduced ? 0 : 450);
+    });
   }
 
   /* --------------------------------------------------------- FAQ ------ */
@@ -508,6 +554,13 @@
       var link = e.target.closest("a");
       if (!link) return;
       var href = link.getAttribute("href") || "";
+
+      if (link.dataset.reviewCta) {
+        analytics.track("cta_review_click", {
+          position: link.dataset.reviewCta,
+          link_text: (link.textContent || "").trim().slice(0, 60)
+        });
+      }
 
       if (href.indexOf("tel:") === 0) {
         analytics.track("phone_click", { destination: href });
@@ -939,6 +992,7 @@
     initSteps();
     initForms();
     initCtaTracking();
+    initFormCtas();
     initAddressAutocomplete();
     initPhoneFormat();
     initYear();
