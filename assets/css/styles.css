@@ -179,7 +179,12 @@ p:last-child { margin-bottom: 0; }
 .btn--lg { padding: 1.25rem 2.6rem; }
 
 .btn-row { display: flex; flex-wrap: wrap; gap: .9rem; }
-.center .btn-row { justify-content: center; }
+/* A button row centres either way it is written: nested inside a .center
+   block, or carrying .center itself. Only the descendant form was here,
+   so every `class="btn-row center"` on one element - the shared cta-band
+   included - rendered its buttons flush left under centred copy. */
+.center .btn-row,
+.btn-row.center { justify-content: center; }
 
 .textlink {
   display: inline-flex; align-items: center; gap: .5rem;
