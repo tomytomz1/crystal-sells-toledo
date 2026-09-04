@@ -58,7 +58,7 @@ proxy. No URL was guessed to close a finding.
 | R10 | Fixed | Repairs no longer characterized as mostly cheap. |
 | R11 | Fixed | Absolute comparable-sale rules softened. |
 | R12 | Fixed | "Holds up" removed; a possible in-person visit acknowledged. |
-| R13 | Pending | **Fee is a launch decision.** Absence of a price does not settle it. |
+| R13 | Fixed | Owner confirmed September 4, 2026 that the review is free, and the page says so before any contact details are asked for. Delivery format is still open, tracked as C1 in `content-decisions.md`; it is not a launch blocker. |
 | R14 | Fixed | Standing-next-to, ask-an-estimate and early-usefulness phrasing corrected. |
 | R15 | Fixed | Appraisal wording directs the reader to the requiring party's scope. |
 | B01 | Fixed | Guaranteed outcomes and universal pre-approval removed; cash buyers acknowledged. |
@@ -107,9 +107,25 @@ proxy. No URL was guessed to close a finding.
 | M04 | Fixed | Manual content date; per-page sitemap `lastmod` replaces the build timestamp. |
 | M05 | Fixed | All seven descriptions replaced and propagated to Open Graph and Twitter. |
 
-**Totals: 79 fixed, 6 pending a named owner's answer, 2 deferred for an
-unreachable external source.**
+**Totals: 79 Fixed, 6 Pending, 2 Deferred = 87.**
 
-Fixed does not mean approved. The service, fee, delivery, response-time,
-retention and brokerage questions in `content-decisions.md` are still open, and
-two of them block launch.
+Counted from the rows above, not carried forward. The previous version of this
+line claimed the same 79/6/2 while the table actually held 78 Fixed and 7
+Pending — a miscount of one in each direction, caught in independent review.
+Resolving R13 moves one row from Pending to Fixed, so the totals and the table
+now agree at 87.
+
+**Pending (6):** G01, H03, V03, V04, P07, M01.
+**Deferred (2):** A04, P09.
+
+**Remaining content-audit launch blockers: 0.**
+
+That same previous version said "two of them block launch". Only one row was
+ever marked BLOCKS LAUNCH in `content-decisions.md` — C2, the review fee — and
+it is now resolved. A chat reply named C1 (delivery format) as a second; it was
+never marked as one and does not qualify: a visitor requesting a free,
+no-obligation review is not being asked to act without a fact they are entitled
+to beforehand.
+
+Fixed does not mean approved. The six Pending questions are real, and each one
+would let the site say something more specific than it does now.

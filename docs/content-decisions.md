@@ -16,6 +16,14 @@ the question behind it. Two kinds of item are marked below:
 - Everything else — answering it lets the site say something *more* specific
   than it says now. Not required to publish what is there.
 
+**Remaining content-audit launch blockers: 0.** C2 (the review fee) was the
+only row ever marked BLOCKS LAUNCH, and it is resolved. An earlier summary in
+`audit-disposition.md` said "two of them block launch" and a chat reply named
+C1 (delivery format) as the second; neither this file nor that one ever marked
+a second row, and C1 does not meet the test above — a visitor requesting a free,
+no-obligation review is not being asked to act without a fact they are entitled
+to. C1 stays open as a "lets us say more" item, not a blocker.
+
 Audited commit: `fb6e70c`. Verified at `8394893`.
 Branch: `claude/phase-4-43551-seller-review`.
 
@@ -26,7 +34,7 @@ Branch: `claude/phase-4-43551-seller-review`.
 | # | Question | What the site says now | Findings |
 |---|---|---|---|
 | C1 | Is the Seller Strategy Review delivered in writing, in conversation, or both? | No format is claimed. "A person reads it before you do", "Listed out" and the note-on-the-range wording all implied readable material and were removed at the verification pass. | R02, R13 |
-| C2 | **BLOCKS LAUNCH.** Does the review cost anything? | "No obligation" appears; no price is stated either way. Omitting a price does not settle whether a fee applies. A visitor is asked for contact details without knowing. If it is free, say "Free · No obligation to list"; if a fee applies, disclose it **before** the form. | R13 |
+| C2 | ~~Does the review cost anything?~~ **RESOLVED September 4, 2026 — the review is free.** | Owner-confirmed: there is no charge to the homeowner for requesting or receiving the 43551 Seller Strategy Review. The page now says "Free · No obligation to list · Not an instant estimate" directly under the step-one button, before any contact details are asked for. No compensation, commission or closing-payment claim was added. | R13 |
 | C3 | What is the turnaround, if any? | No turnaround is stated anywhere. | R13, G03 |
 | C4 | Does the review require an in-person visit? | Says an in-person visit may be needed. | R12 |
 | C5 | What response time can you actually commit to? | "I reply personally", with no timeframe. Same-day and few-hour promises were removed. | G03 |
