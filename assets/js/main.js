@@ -792,6 +792,13 @@
         li.addEventListener("pointerdown", function (e) { e.preventDefault(); choose(i); });
         list.appendChild(li);
       });
+      if (!values.length) {
+        /* A finished search with no matches: say so, rather than leaving the
+           visitor waiting on an announcement that never comes. */
+        close();
+        live.textContent = "No address suggestions found. You can enter the full address yourself.";
+        return;
+      }
       list.hidden = false;
       active = -1;
       input.setAttribute("aria-expanded", "true");

@@ -545,11 +545,25 @@ describe("privacy: rate-limit addresses do not outlive their window (P03)", () =
     assert.equal(_rateLimitSize(), 2);
 
     /* A later request from a third address must not leave the first two
-       sitting in memory - the previous implementation filtered timestamps
+       sitting in memory - the original implementation filtered timestamps
        but never removed the keys. */
     rateLimit("198.51.100.3", t + WIN + 1000);
     assert.equal(_rateLimitSize(), 1,
       "idle addresses were retained past the limiting window");
+  });
+
+  test("staggered arrivals leave only live addresses behind", () => {
+    /* The scenario that defeated the first fix: it swept only when a window
+       had elapsed since the LAST sweep, so C's arrival swept A but nothing
+       later swept B. Every call sweeps now. */
+    _resetRateLimit();
+    const t = 1_700_000_000_000;
+    rateLimit("A", t);              // expires at t + WIN
+    rateLimit("B", t + WIN - 1);    // expires at t + 2*WIN - 1
+    rateLimit("C", t + WIN);        // live
+    rateLimit("D", t + 2 * WIN - 1);// live; B is expired by now
+    assert.equal(_rateLimitSize(), 2,
+      "an expired address survived a staggered arrival pattern");
   });
 
   test("limiting still works, and the window still reopens", () => {

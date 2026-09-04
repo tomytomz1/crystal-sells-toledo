@@ -71,7 +71,8 @@ export default async function handler(req, res) {
   } catch (err) {
     if (err.message === "PAYLOAD_TOO_LARGE")
       return fail(res, 413, "PAYLOAD_TOO_LARGE",
-        "That submission is too large (limit " + Math.round(MAX_BODY_BYTES / 1024) + " KB).");
+        "That submission is too long to send. Please shorten your message and try again, " +
+        "or contact Crystal directly.");
     return fail(res, 400, "BAD_REQUEST", TRANSPORT_FAILURE);
   }
 

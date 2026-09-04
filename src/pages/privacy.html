@@ -55,15 +55,15 @@
         you followed (including Google, Meta or Microsoft click identifiers), when you first arrived,
         when you submitted, and a reference number for your request. This is how Crystal can tell
         which of her efforts reach people. This information is stored with your inquiry.</p>
-      <p>The submission service uses IP addresses to limit repeated requests. These addresses are
-        held in temporary server memory, are removed once the limiting window has passed, and are not
-        added to the contact record by this service. Hosting providers may separately process request
-        information under their own terms.</p>
+      <p>The submission service temporarily holds IP addresses in server memory to limit repeated
+        requests. Expired entries are cleared during later requests or when the server instance ends.
+        This service does not add them to your contact record. Hosting providers may separately
+        process request information under their own terms.</p>
 
       <h2>Why it is processed</h2>
       <p>To prepare and send what you asked for, and to follow up about that request. If you asked
-        for a valuation and chose &ldquo;Just curious about the value,&rdquo; Crystal will send the
-        valuation and contact you only as needed to complete that request.</p>
+        for a valuation, the form records how far along you are, including a &ldquo;Just curious about
+        the value&rdquo; option, and that is stored with your inquiry.</p>
       <p>We also record how you found the site so Crystal can understand which pages and campaigns
         lead to inquiries.</p>
 
@@ -122,7 +122,8 @@
         real estate brokerage require. They are deleted on request, subject to those obligations.</p>
       <p>Analytics data is kept according to the retention period configured in each provider&rsquo;s
         own console. The IP address used for submission rate limiting is held only in temporary
-        server memory and is removed once the limiting window has passed.</p>
+        server memory, and expired entries are cleared during later requests or when the server
+        instance ends.</p>
       <p>This site also uses your browser&rsquo;s local storage to remember your first visit and the
         campaign information in the link you followed, even if you never submit a form. That record
         stays on your device until it is cleared from the browser; this site does not currently set

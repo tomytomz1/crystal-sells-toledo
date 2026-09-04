@@ -71,9 +71,19 @@ const FIELD_LABELS = {
   notes: "notes", message: "message", topic: "topic",
 };
 
+/* Fields the visitor never sees. Telling someone to shorten their "form type"
+   or "page" is not an instruction they can act on, so these get the generic
+   recovery message instead. */
+const HIDDEN_FIELDS = new Set(["form_type", "page", "referrer", "landing_page"]);
+
+const RECOVERY =
+  "We could not process this request. Please refresh the page and try again, " +
+  "or contact Crystal directly.";
+
 function cap(field, value) {
   const max = LIMITS[field];
   if (max && value.length > max) {
+    if (HIDDEN_FIELDS.has(field)) throw new FieldError("FIELD_TOO_LONG", RECOVERY);
     const label = FIELD_LABELS[field] || field.replace(/_/g, " ");
     throw new FieldError("FIELD_TOO_LONG",
       "Please shorten your " + label + " to " + max.toLocaleString("en-US") +
@@ -88,15 +98,15 @@ function cap(field, value) {
  */
 export function validateLead(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    throw new FieldError("INVALID_PAYLOAD", "We could not process this request. Please refresh the page and try again.");
+    throw new FieldError("INVALID_PAYLOAD", RECOVERY);
 
   /* Honeypot - verified server-side, not merely on the client. */
   if (squash(raw._gotcha)) throw new FieldError("REJECTED", "Rejected");
 
   const form_type = squash(raw.form_type);
-  if (!form_type) throw new FieldError("MISSING_FORM_TYPE", "We could not process this request. Please refresh the page and try again.");
+  if (!form_type) throw new FieldError("MISSING_FORM_TYPE", RECOVERY);
   cap("form_type", form_type);
-  if (!FORM_TYPES.has(form_type)) throw new FieldError("UNKNOWN_FORM_TYPE", "We could not process this request. Please refresh the page and try again.");
+  if (!FORM_TYPES.has(form_type)) throw new FieldError("UNKNOWN_FORM_TYPE", RECOVERY);
 
   const first_name = cap("first_name", squash(raw.first_name));
   const last_name = cap("last_name", squash(raw.last_name));
