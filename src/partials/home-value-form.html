@@ -24,8 +24,20 @@
      ever stop rendering the defaults.
      ===================================================================== -->
 <div class="form-region" data-form-region>
+<noscript>
+  <!-- F05. Submission is entirely JavaScript: without it the browser fell
+       back to a GET of the current page, which sent no lead, showed no
+       confirmation, and put the name, email and property address into the
+       address bar. The form is hidden here rather than left submitting, and
+       method="post" below means no build of this page can leak fields into a
+       URL even if this block is ever removed. -->
+  <style>.form-region [data-form] { display: none; }</style>
+  <p class="form-noscript">This form needs JavaScript to send your request.
+    Please call <a href="tel:+14192454655">(419)&nbsp;245-4655</a> or email
+    <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>.</p>
+</noscript>
 <form class="form hv-form" data-form data-form-type="home_value" data-steps="2"
-      data-subject="{{formSubject}}" novalidate>
+      data-subject="{{formSubject}}" method="post" novalidate>
   <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
 
   <p class="form__step" data-step-indicator aria-live="polite">Step 1 of 2</p>
@@ -49,6 +61,7 @@
     </div>
 
     <p class="form__note hv-form__micro">{{formMicrocopy}}</p>
+    <p class="form__note hv-form__privacy"><a href="/privacy">Privacy &amp; terms</a></p>
   </div>
 
   <!-- Step 2 — contact details -->
@@ -70,14 +83,14 @@
         <input id="v-email" name="email" type="email" autocomplete="email" required maxlength="100">
       </div>
       <div class="field">
-        <label for="v-phone">Phone</label>
+        <label for="v-phone">Phone (optional)</label>
         <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000" maxlength="30">
       </div>
     </div>
 
     <div class="form__row">
       <div class="field">
-        <label for="v-timing">When might you sell?</label>
+        <label for="v-timing">When might you sell? (optional)</label>
         <select id="v-timing" name="timeline">
           <option value="">Select&hellip;</option>
           <option>Just curious about the value</option>
@@ -88,12 +101,12 @@
         </select>
       </div>
       <div class="field">
-        <label for="v-condition">Condition</label>
+        <label for="v-condition">Overall condition (optional)</label>
         <select id="v-condition" name="condition">
           <option value="">Select&hellip;</option>
           <option>Recently updated throughout</option>
           <option>Well maintained, some updates</option>
-          <option>Original but solid</option>
+          <option>Mostly original finishes</option>
           <option>Needs work</option>
         </select>
       </div>
@@ -101,8 +114,9 @@
 
     <div class="field">
       <label for="v-notes">Anything I should know?</label>
-      <textarea id="v-notes" name="notes"
-        placeholder="New roof in 2022, finished basement, backs onto the woods, planning to buy in Perrysburg after&hellip;"></textarea>
+      <textarea id="v-notes" name="notes" maxlength="4000" aria-describedby="v-notes-help"
+        placeholder="For example: roof replaced four years ago, finished basement, backs up to the woods, or planning to buy another home after selling."></textarea>
+      <p class="field__help" id="v-notes-help">Optional. Up to 4,000 characters.</p>
     </div>
 
     <div class="form-status" aria-live="polite"></div>
@@ -112,10 +126,7 @@
     <button class="btn btn--ghost btn--block" type="button" data-step-back
             style="margin-top:.75rem">Back to address</button>
 
-    <p class="form__note">Your details are used only to prepare and send your valuation. They are
-      never sold, and are shared only with the service providers that run this site and
-      Crystal&rsquo;s contact records. See the <a href="/privacy">privacy note</a>. By submitting
-      you agree that Crystal may contact you about this request.</p>
+    <p class="form__note">{{formPrivacy}}</p>
   </div>
 </form>
 

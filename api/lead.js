@@ -32,7 +32,14 @@ function send(res, status, payload) {
 const fail = (res, status, code, message) => send(res, status, { ok: false, code, message });
 
 const GENERIC_FAILURE =
-  "We could not submit that just now. Please call or email and it will be handled right away.";
+  "We could not confirm your submission. Your details are still in the form. " +
+  "You can try again, call, or email.";
+
+/* Transport failures are not something a visitor can act on by reading about
+   JSON. They get one instruction they can actually follow. */
+const TRANSPORT_FAILURE =
+  "We could not process this request. Please refresh the page and try again, " +
+  "or contact Crystal directly.";
 
 export default async function handler(req, res) {
   const started = Date.now();
@@ -54,7 +61,7 @@ export default async function handler(req, res) {
     res.setHeader("Retry-After", String(limit.retryAfter));
     log("lead.rate_limited", { retry_after: limit.retryAfter });
     return fail(res, 429, "RATE_LIMITED",
-      "That is a lot of submissions in a short time. Please wait a few minutes, or call instead.");
+      "Please wait a few minutes before trying again, or contact Crystal directly.");
   }
 
   /* --- body ------------------------------------------------------------ */
@@ -65,18 +72,18 @@ export default async function handler(req, res) {
     if (err.message === "PAYLOAD_TOO_LARGE")
       return fail(res, 413, "PAYLOAD_TOO_LARGE",
         "That submission is too large (limit " + Math.round(MAX_BODY_BYTES / 1024) + " KB).");
-    return fail(res, 400, "BAD_REQUEST", "Could not read the request.");
+    return fail(res, 400, "BAD_REQUEST", TRANSPORT_FAILURE);
   }
 
   const ct = String(req.headers["content-type"] || "");
   if (raw && ct && !ct.includes("application/json"))
-    return fail(res, 415, "UNSUPPORTED_MEDIA_TYPE", "Send JSON.");
+    return fail(res, 415, "UNSUPPORTED_MEDIA_TYPE", TRANSPORT_FAILURE);
 
   let body;
   try {
     body = JSON.parse(raw || "{}");
   } catch {
-    return fail(res, 400, "INVALID_JSON", "Body is not valid JSON.");
+    return fail(res, 400, "INVALID_JSON", TRANSPORT_FAILURE);
   }
 
   /* --- validate -------------------------------------------------------- */

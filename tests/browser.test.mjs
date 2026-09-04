@@ -1457,4 +1457,62 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     assert.equal(await p.inputValue("#v-phone"), "(586) 324-1248");
     await p.close();
   });
+
+  /* ===================================================================
+     Content-QA regressions. Both are reasons the privacy notice was
+     inaccurate rather than merely badly worded, so both are pinned by the
+     behaviour a visitor can actually observe.
+     =================================================================== */
+
+  test("the email-click event never carries what the visitor typed (P02)", async () => {
+    const p = await page();
+    await p.goto(base + "/contact");
+    /* The failure fallback offers a pre-filled mailto whose body holds every
+       entered value. The click tracker used to forward the entire href. */
+    const events = await p.evaluate(() => {
+      const seen = [];
+      window.gtag = function () { seen.push(JSON.stringify([...arguments])); };
+      const a = document.createElement("a");
+      a.href = "mailto:crystal@crystalsellstoledo.com?subject=Website%20inquiry&body=" +
+        encodeURIComponent("Name: Jane Doe\nEmail: jane@example.com\nAddress: 123 Main St");
+      a.textContent = "open a pre-filled message";
+      document.body.appendChild(a);
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return seen;
+    });
+    const emailEvents = events.filter((e) => e.includes("email_click"));
+    assert.equal(emailEvents.length, 1, "the email click should still be tracked");
+    for (const e of emailEvents) {
+      assert.doesNotMatch(e, /Jane|jane%40example|123%20Main|Main%20St/i,
+        "entered values must never reach an analytics event");
+      assert.match(e, /mailto:crystal@crystalsellstoledo\.com/,
+        "the address itself is still recorded");
+    }
+    await p.close();
+  });
+
+  test("without JavaScript the form cannot put details in the URL (F05)", async () => {
+    /* The form had no method, so a no-JS submit was a GET of the same page:
+       no lead, no confirmation, and the name, email and address in the
+       address bar. */
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    try {
+      for (const route of ["/home-value", "/contact", "/43551-seller-review"]) {
+        const p = await ctx.newPage();
+        await p.goto(base + route);
+        const form = p.locator("form[data-form]").first();
+        assert.equal(await form.getAttribute("method"), "post",
+          route + ": a GET submit would place entered fields in the URL");
+        assert.equal(await form.isVisible(), false,
+          route + ": the form must not accept input it cannot send");
+        const notice = await p.locator(".form-noscript").first().innerText();
+        assert.match(notice, /needs JavaScript/i);
+        assert.match(notice, /245-4655|crystalsellstoledo\.com/,
+          route + ": the fallback must give a route that works");
+        await p.close();
+      }
+    } finally {
+      await ctx.close();
+    }
+  });
 });

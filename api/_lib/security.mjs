@@ -12,7 +12,25 @@ const RATE_MAX = 5;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const hits = new Map();
 
+/* Drop every key whose last hit has aged out. Without this an idle key sat
+   in the map until the instance was recycled, so the privacy notice's claim
+   that addresses are not held beyond the window was not true of the code. */
+function sweep(now) {
+  for (const [k, times] of hits) {
+    const live = times.filter((t) => now - t < RATE_WINDOW_MS);
+    if (live.length) hits.set(k, live);
+    else hits.delete(k);
+  }
+}
+
+let lastSweep = 0;
+
 export function rateLimit(key, now = Date.now()) {
+  /* Sweeping on a timer rather than on every call: the cost is one pass per
+     window, and no key outlives the window it was recorded in by more than
+     that. */
+  if (now - lastSweep >= RATE_WINDOW_MS) { sweep(now); lastSweep = now; }
+
   const win = (hits.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS);
   if (win.length >= RATE_MAX) {
     hits.set(key, win);
@@ -20,11 +38,14 @@ export function rateLimit(key, now = Date.now()) {
   }
   win.push(now);
   hits.set(key, win);
-  if (hits.size > 5000) hits.clear(); // crude ceiling on memory growth
+  if (hits.size > 5000) { sweep(now); if (hits.size > 5000) hits.clear(); }
   return { allowed: true };
 }
 
-export function _resetRateLimit() { hits.clear(); }
+export function _resetRateLimit() { hits.clear(); lastSweep = 0; }
+
+/* Test seam: how many addresses the limiter is currently holding. */
+export function _rateLimitSize() { return hits.size; }
 
 export function clientIp(req) {
   const fwd = req.headers["x-forwarded-for"];

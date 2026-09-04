@@ -8,7 +8,7 @@ import handler from "../api/lead.js";
 import { validateLead, FieldError, normalizePhone } from "../api/_lib/validate.mjs";
 import { buildDescription, DESCRIPTION_LABELS } from "../api/_lib/description.mjs";
 import { toLeadRecord, withoutPicklists, COMPANY_BY_FORM } from "../api/_lib/zoho.mjs";
-import { _resetRateLimit, originAllowed, allowedHosts } from "../api/_lib/security.mjs";
+import { _resetRateLimit, _rateLimitSize, rateLimit, originAllowed, allowedHosts } from "../api/_lib/security.mjs";
 import { safeShape } from "../api/_lib/log.mjs";
 import { mockReq, mockRes, validContact, validHomeValue } from "./helpers.mjs";
 
@@ -526,5 +526,69 @@ describe("Overlength values are rejected, never truncated", () => {
           name + " maxlength in " + file + " disagrees with the server limit");
       }
     }
+  });
+});
+
+/* =====================================================================
+   Content-QA regressions. These three are the reasons the privacy notice
+   was inaccurate, not merely badly worded, so each is pinned by the
+   behaviour the notice now describes.
+   ===================================================================== */
+describe("privacy: rate-limit addresses do not outlive their window (P03)", () => {
+  const WIN = 10 * 60 * 1000;
+
+  test("an idle address is dropped once its window has passed", () => {
+    _resetRateLimit();
+    const t = 1_700_000_000_000;
+    rateLimit("198.51.100.1", t);
+    rateLimit("198.51.100.2", t);
+    assert.equal(_rateLimitSize(), 2);
+
+    /* A later request from a third address must not leave the first two
+       sitting in memory - the previous implementation filtered timestamps
+       but never removed the keys. */
+    rateLimit("198.51.100.3", t + WIN + 1000);
+    assert.equal(_rateLimitSize(), 1,
+      "idle addresses were retained past the limiting window");
+  });
+
+  test("limiting still works, and the window still reopens", () => {
+    _resetRateLimit();
+    const t = 1_700_000_000_000;
+    let blockedAt = null;
+    for (let i = 0; i < 6; i++) {
+      const r = rateLimit("203.0.113.9", t + i * 1000);
+      if (!r.allowed && blockedAt === null) blockedAt = i;
+    }
+    assert.equal(blockedAt, 5, "the sixth request in the window should be refused");
+    assert.equal(rateLimit("203.0.113.9", t + WIN + 1).allowed, true,
+      "the window should reopen once it has passed");
+  });
+});
+
+describe("privacy: visitor-facing failures say what to do (F01)", () => {
+  test("an over-long note names the field and the limit, not the field key", async () => {
+    const res = await call({ body: { ...validHomeValue, notes: "x".repeat(4001) } });
+    assert.equal(res.statusCode, 422);
+    const m = res.json().message;
+    assert.match(m, /notes/i);
+    assert.match(m, /4,000 characters/);
+    assert.doesNotMatch(m, /exceeds|form_type/i,
+      "implementation terms must not reach the public status box");
+  });
+
+  test("an over-long message names the message field, not 'message exceeds'", async () => {
+    const res = await call({ body: { ...validContact, message: "x".repeat(4001) } });
+    assert.equal(res.statusCode, 422);
+    assert.match(res.json().message, /shorten your message to 4,000 characters/i);
+  });
+
+  test("a malformed body does not ask the visitor to repair JSON", async () => {
+    const res = await call({ body: "{not json" });
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().code, "INVALID_JSON", "the code stays machine-readable");
+    assert.doesNotMatch(res.json().message, /JSON/i,
+      "the visitor-facing message must not mention JSON");
+    assert.match(res.json().message, /refresh the page|contact Crystal/i);
   });
 });

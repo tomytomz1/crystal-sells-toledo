@@ -703,7 +703,8 @@ for (const file of pages) {
     ["microcopy", "No obligation &middot; Human valuation &middot; Not an automated estimate"],
     ["submit button", "Send My Valuation Request"],
     ["success heading", "Your request is in"],
-    ["success lede", "Crystal will personally review your property and follow up with you shortly."],
+    ["success lede", "Crystal will review your property details and follow up about your valuation."],
+    ["privacy note", "Crystal uses your details to prepare and follow up about your home valuation."],
     ["email subject", 'data-subject="Home valuation request"'],
   ];
 

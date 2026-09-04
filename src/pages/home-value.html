@@ -1,13 +1,14 @@
 <!-- meta {
   "title": "What's My Home Worth? | Free Toledo Area Valuation",
-  "description": "Get a free, human home valuation for your greater Toledo property — built from real closed sales on your street, not an automated guess. No obligation, no spam.",
+  "description": "Request a free home valuation for your Greater Toledo property, based on relevant sales and your home's details. No obligation to list.",
   "slug": "home-value",
+  "updated": "2026-09-04",
   "priority": 0.9,
   "jsonld": {
     "@context": "https://schema.org",
     "@type": "WebPage",
     "name": "Free Home Valuation — Greater Toledo, Ohio",
-    "description": "Request a no-obligation comparative market analysis for a home anywhere in greater Toledo.",
+    "description": "Request a no-obligation comparative market analysis for a home anywhere in Greater Toledo.",
     "provider": { "@type": "RealEstateAgent", "name": "Crystal Sells Toledo", "@id": "https://crystalsellstoledo.com/#agent" }
   }
 } -->
@@ -30,11 +31,12 @@
     <div class="hero__grid">
       <div class="hero__content">
         <p class="eyebrow">Free &middot; No obligation</p>
-        <h1>What is your home actually worth?</h1>
-        <p class="hero__lede">Not a computer&rsquo;s guess. A real valuation, built by hand from the
-          homes that have actually closed near you in the last 90 days.</p>
-        <p class="hero__by">Read and answered by Crystal &mdash; a person who has seen the streets your
-          home will be compared with, not a computer scoring your address.</p>
+        <h1>What could your home sell for?</h1>
+        <p class="hero__lede">A personal review of relevant sales and your property details, with a
+          price range and an explanation of how it was reached.</p>
+        <p class="hero__by">Reviewed by Crystal, with questions about any details the available
+          records do not explain. This is a market analysis to help you plan a sale, not an appraisal
+          or a guaranteed sale price.</p>
       </div>
 
       <!-- The form panel sits on the same surface the homepage uses for its
@@ -44,7 +46,8 @@
            nothing here changes its fields, validation or behaviour. -->
       <div class="valueform reveal">
         <h2 class="valueform__label">Request your valuation</h2>
-        <p class="valueform__note">Takes about a minute. I reply personally, usually the same day.</p>
+        <p class="valueform__note">Start with your address, then add your contact details. I reply
+          personally.</p>
         {{> home-value-form}}
       </div>
     </div>
@@ -60,21 +63,20 @@
     <div class="whyhuman">
       <div class="whyhuman__body reveal">
         <p class="eyebrow">Why bother asking a person</p>
-        <h2>Online estimates miss the things that decide your price.</h2>
-        <p>Automated valuations are a starting point and nothing more. They cannot see the new roof,
-          the finished basement, the fact that your lot backs onto trees instead of a busy road, or the
-          kitchen you redid in 2023.</p>
-        <!-- TODO SOURCE: "routinely tens of thousands of dollars" is existing
-             copy carried over from the previous page and has no source on
-             file. It has been preserved, not strengthened. Either attach a
-             source or soften it before the next content review. -->
-        <p>In a market as varied as this one &mdash; where a century home in the Old West End, a new build
-          in Perrysburg and a ranch on an acre in Sylvania all sit within a short drive of each other
-          &mdash; that gap is routinely tens of thousands of dollars in either direction.</p>
+        <h2>Your home may have details an online estimate misses.</h2>
+        <p>An online estimate depends on the data available to it, and may not reflect recent work or
+          the full condition of your home. Tell Crystal about updates, repairs and anything the
+          available records may miss &mdash; a new roof, a finished basement, or what the lot backs
+          up to.</p>
+        <p>In a market as varied as this one &mdash; where a century home in the Old West End, a new
+          build in Perrysburg and a ranch on an acre in Sylvania all sit within a short drive of each
+          other &mdash; an estimate can change when the available information does not reflect the
+          home&rsquo;s condition, updates or relevant recent sales. A personal review helps identify
+          those gaps.</p>
       </div>
 
       <div class="factors reveal">
-        <p class="factors__label">What a person can see that a computer cannot</p>
+        <p class="factors__label">What Crystal reviews with you</p>
         <dl class="factors__list">
           <div class="factor">
             <dt>What has actually sold</dt>
@@ -111,8 +113,8 @@
 
       <div class="returns__list reveal">
         <div class="returns__item">
-          <h3>A realistic price range</h3>
-          <p>With the closed comparables it came from.</p>
+          <h3>A price range</h3>
+          <p>With the comparable sales it came from, and where the evidence is limited.</p>
         </div>
         <div class="returns__item">
           <h3>What is selling near you right now</h3>
@@ -132,17 +134,15 @@
            one now: a hairline and a change of voice, no card. -->
       <aside class="quietnote reveal">
         <p class="quietnote__t">Selling in Perrysburg 43551?</p>
-        <p>There is a deeper version of this, just for that ZIP code. The
-          <a href="/43551-seller-review">43551 Seller Strategy Review</a> looks at how your house
-          would compete against the homes buyers can choose instead, not only what it might be
-          worth.</p>
+        <p>The <a href="/43551-seller-review">43551 Seller Strategy Review</a> also walks through
+          three possible pricing approaches and the tradeoffs of each for your home.</p>
       </aside>
 
       <aside class="quietnote reveal">
         <p class="quietnote__t">Just curious, not ready to sell?</p>
-        <p>That is completely fine, and worth saying out loud: I will send the valuation and then
-          leave you alone. No automated email sequence, no weekly calls. If and when you are ready, you know
-          where I am.</p>
+        <p>That is completely fine, and worth saying out loud. If you choose &ldquo;Just curious
+          about the value,&rdquo; Crystal will send the valuation and contact you only as needed to
+          complete that request. If and when you are ready, you know where I am.</p>
       </aside>
     </div>
   </div>

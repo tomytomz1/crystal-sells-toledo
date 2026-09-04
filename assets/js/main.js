@@ -382,8 +382,8 @@
                Fall back to the inline confirmation, which is safe there
                because that form is a single step and nothing collapses. */
             setStatus(status, "ok",
-              "<strong>Thank you.</strong> Your request is in - Crystal personally replies to " +
-              "every inquiry, usually within a few hours.");
+              "<strong>Thank you.</strong> Your message has been received. " +
+              "Crystal will follow up with you.");
             form.reset();
             if (form.dataset.steps) resetSteps(form);
           }
@@ -397,7 +397,7 @@
           setStatus(status, "err",
             (err && err.userMessage
               ? err.userMessage
-              : "We could not submit that just now. Nothing you typed has been lost.") +
+              : "We could not confirm your submission. Your details are still in the form.") +
             " Please " + contactLine() + "." + extra);
           analytics.track("lead_submit_error", {
             form_type: formType,
@@ -568,7 +568,10 @@
       if (href.indexOf("tel:") === 0) {
         analytics.track("phone_click", { destination: href });
       } else if (href.indexOf("mailto:") === 0) {
-        analytics.track("email_click", { destination: href });
+        /* Address only. The fallback mailto carries every value the visitor
+           typed in its subject and body; forwarding the whole href would put
+           that into analytics, which the privacy notice says never happens. */
+        analytics.track("email_click", { destination: href.split("?")[0] });
       } else if (href === "/home-value" || href.indexOf("/home-value") === 0) {
         analytics.track("cta_home_value_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
       } else if (href === "/sell" || href.indexOf("/sell") === 0) {
@@ -708,6 +711,9 @@
       list.innerHTML = "";
       items = [];
       active = -1;
+      /* Leaving the old count announced would tell a screen reader there are
+         suggestions to arrow through after the list has gone. */
+      live.textContent = "";
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
     }
@@ -789,7 +795,9 @@
       list.hidden = false;
       active = -1;
       input.setAttribute("aria-expanded", "true");
-      live.textContent = values.length + " address suggestions available.";
+      live.textContent = values.length === 1
+        ? "1 address suggestion available. Use the arrow keys to review it."
+        : values.length + " address suggestions available. Use the arrow keys to review them.";
     }
 
     function request(value, opts) {

@@ -48,7 +48,7 @@ const SITE = "https://crystalsellstoledo.com";
    deployed; an automatic date would silently assert a review that never
    happened every time an unrelated CSS tweak shipped.
    --------------------------------------------------------------------- */
-const CONTENT_UPDATED = "September 3, 2026";
+const CONTENT_UPDATED = "September 4, 2026";
 
 /* ---------------------------------------------------------------------
    FORM PRESENTATION COPY
@@ -57,7 +57,7 @@ const CONTENT_UPDATED = "September 3, 2026";
    lead funnel and must stay that way. A page that needs different BUTTON
    TEXT is not a reason to fork it.
 
-   These six strings are the only parameterised parts of that partial:
+   These seven strings are the only parameterised parts of that partial:
    labels, microcopy, the success wording and the email subject. Field
    names, validation, step behaviour, the honeypot, data-form-type and the
    /api/lead contract are deliberately absent from this object.
@@ -74,7 +74,17 @@ const FORM_COPY_DEFAULTS = {
   formSubmitCta: "Send My Valuation Request",
   formSuccessTitle: "Your request is in",
   formSuccessLede:
-    "Crystal will personally review your property and follow up with you shortly.",
+    "Crystal will review your property details and follow up about your valuation.",
+  /* R03. This line named a valuation on every page, including the one whose
+     offer is a Seller Strategy Review, and said "only" while the notice it
+     links to discloses attribution. It is parameterised for the offer name;
+     the disclosure itself is not a page's to soften. */
+  formPrivacy:
+    "Crystal uses your details to prepare and follow up about your home valuation. " +
+    "The site also records how you found it. They are never sold, and are shared only " +
+    "with the service providers that run this site and Crystal&rsquo;s contact records. " +
+    "See <a href=\"/privacy\">Privacy &amp; terms</a>. By submitting you agree that " +
+    "Crystal may contact you about this request.",
 };
 
 /** Merge a page's formCopy over the defaults, refusing anything unknown -
@@ -341,17 +351,25 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
   const outPath = join(OUT, slug + ".html");
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, html);
-  built.push({ slug, url, changefreq: meta.changefreq ?? "monthly", priority: meta.priority ?? 0.6, noindex: !!meta.noindex });
+  if (meta.updated && !/^\d{4}-\d{2}-\d{2}$/.test(meta.updated))
+    throw new Error(`${file}: meta.updated must be YYYY-MM-DD, got "${meta.updated}"`);
+  built.push({ slug, url, changefreq: meta.changefreq ?? "monthly", priority: meta.priority ?? 0.6,
+    noindex: !!meta.noindex, updated: meta.updated });
   console.log(`  ✓ ${slug}.html`);
 }
 
 /* ---- sitemap.xml ------------------------------------------------------ */
-const today = new Date().toISOString().slice(0, 10);
+/* M04. lastmod was `new Date()`, so every route claimed to have changed
+   whenever a build ran. It is now a per-page fact: `updated` in a page's meta
+   block, maintained by hand alongside CONTENT_UPDATED. A page without one is
+   omitted from lastmod rather than given a date that is not true. */
 const sitemap =
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
   built
     .filter((p) => !p.noindex)
-    .map((p) => `  <url>\n    <loc>${p.url}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
+    .map((p) => `  <url>\n    <loc>${p.url}</loc>\n` +
+      (p.updated ? `    <lastmod>${p.updated}</lastmod>\n` : "") +
+      `    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
     .join("\n") +
   `\n</urlset>\n`;
 writeFileSync(join(OUT, "sitemap.xml"), sitemap);
