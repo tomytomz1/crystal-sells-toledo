@@ -30,7 +30,11 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400;500;600&display=swap">
+<!-- Inter is a variable font: 400;500;600 and 400..700 resolve to the SAME
+     15 woff2 files, so asking for the range costs nothing to download and
+     ~5KB less CSS. It buys a real 700, which the CTA labels use - at 600
+     the browser would synthesise the weight and smear small uppercase. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap">
 <script>document.documentElement.classList.add("js")</script>
 <link rel="stylesheet" href="/assets/css/styles.css?v={{css_v}}">
 {{jsonld}}

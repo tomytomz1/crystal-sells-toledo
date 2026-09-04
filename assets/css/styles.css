@@ -150,7 +150,7 @@ p:last-child { margin-bottom: 0; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: .6rem;
   padding: 1.05rem 2.1rem;
-  font-size: .78rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+  font-size: .84rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
   border: 1px solid transparent; border-radius: var(--radius);
   cursor: pointer; text-align: center;
   transition: background .25s var(--ease), color .25s var(--ease),
@@ -259,7 +259,7 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .nav__link[aria-current="page"] { color: var(--gold-dk); }
 .nav__cta {
   padding: .7rem 1.35rem; border: 1px solid var(--ink); border-radius: var(--radius);
-  font-size: .72rem; font-weight: 600; letter-spacing: .15em; text-transform: uppercase;
+  font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
   transition: background .25s var(--ease), color .25s var(--ease), border-color .25s var(--ease);
 }
 .nav__cta:hover { background: var(--ink); color: var(--white); }
@@ -953,7 +953,11 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 /* ------------------------------------------------------- sticky mobile -- */
 .sticky-cta {
   position: fixed; inset: auto 0 0 0; z-index: 90;
-  display: none; grid-template-columns: 1fr 1fr;
+  display: none;
+  /* Not 1fr 1fr. Call needs 61px of ink and was given half the bar, which
+     forced the primary action to wrap onto two lines in the other half.
+     The funnel action gets the room; Call stays a comfortable tap target. */
+  grid-template-columns: minmax(92px, 30%) 1fr;
   background: rgba(20,18,15,.97); backdrop-filter: blur(10px);
   border-top: 1px solid rgba(255,255,255,.12);
   transform: translateY(100%); transition: transform .35s var(--ease);
@@ -963,10 +967,17 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .sticky-cta a {
   display: flex; align-items: center; justify-content: center; gap: .55rem;
   padding: 1.05rem .5rem; color: var(--white);
-  font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  font-size: .76rem; font-weight: 700; letter-spacing: .10em; text-transform: uppercase;
+  /* justify-content centres the icon and the text BLOCK as a group; it does
+     not centre the lines inside that block. When the label wrapped, the short
+     second line sat flush left and the cell read visibly off-centre. */
+  text-align: center; line-height: 1.25;
 }
 .sticky-cta a + a { border-left: 1px solid rgba(255,255,255,.12); background: var(--gold); color: var(--ink); }
-.sticky-cta svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.sticky-cta svg {
+  width: 16px; height: 16px; flex: none;
+  stroke: currentColor; fill: none; stroke-width: 1.6;
+}
 @media (max-width: 780px) {
   .sticky-cta { display: grid; }
   /* Reserve room under the footer so the fixed call bar never covers the
