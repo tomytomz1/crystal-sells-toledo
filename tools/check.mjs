@@ -166,6 +166,10 @@ else {
 /* No secret may ever appear in anything that ships to the browser. */
 const SECRET_NAMES = [
   "HUBSPOT_ACCESS_TOKEN",
+  /* Zoho Mail SMTP. The mailbox password above all, but the host, port and
+     user have no business in browser code either - the acknowledgement is
+     sent entirely inside the Vercel function. */
+  "ZOHO_SMTP_PASSWORD", "ZOHO_SMTP_USER", "ZOHO_SMTP_HOST", "ZOHO_SMTP_PORT",
   "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "ZOHO_CLIENT_ID",
 ];
 for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
@@ -608,13 +612,31 @@ for (const file of pages) {
       if (!new RegExp(`^${v}=`, "m").test(env))
         fail(".env.example", `does not document the optional variable ${v}`);
 
+    /* Zoho Mail SMTP is a LIVE path that happens to share the vendor name
+       with the dormant CRM client. It is documented in its own section and
+       is deliberately exempt from the rollback ordering rule below - which
+       is about Zoho CRM never reading as the live lead destination, and has
+       nothing to say about a mailbox. Both halves are asserted so the two
+       can never be merged back into one confusing block. */
+    for (const v of ["ZOHO_SMTP_HOST", "ZOHO_SMTP_PORT", "ZOHO_SMTP_USER", "ZOHO_SMTP_PASSWORD"])
+      if (!new RegExp(`^${v}=`, "m").test(env))
+        fail(".env.example", `does not document the Zoho Mail variable ${v}`);
+    if (/^ZOHO_SMTP_PASSWORD=.+/m.test(env))
+      fail(".env.example", "ZOHO_SMTP_PASSWORD carries a value - it must be documented empty");
+
     const rollbackAt = env.search(/ROLLBACK ONLY/i);
-    const firstZohoAt = env.search(/^ZOHO_/m);
-    if (firstZohoAt !== -1) {
+    const smtpAt = env.search(/^ZOHO_SMTP_/m);
+    if (smtpAt !== -1 && rollbackAt !== -1 && smtpAt > rollbackAt)
+      fail(".env.example",
+        "the Zoho Mail SMTP variables sit below the ROLLBACK ONLY heading - they are the live acknowledgement path, not rollback");
+
+    /* Zoho CRM variables only: ZOHO_SMTP_* is excluded by the lookahead. */
+    const firstCrmZohoAt = env.search(/^ZOHO_(?!SMTP_)/m);
+    if (firstCrmZohoAt !== -1) {
       if (rollbackAt === -1)
-        fail(".env.example", "documents ZOHO_* variables with no ROLLBACK ONLY heading - reads as the live path");
-      else if (firstZohoAt < rollbackAt)
-        fail(".env.example", "a ZOHO_* variable appears above the ROLLBACK ONLY heading - reads as the live path");
+        fail(".env.example", "documents Zoho CRM variables with no ROLLBACK ONLY heading - reads as the live path");
+      else if (firstCrmZohoAt < rollbackAt)
+        fail(".env.example", "a Zoho CRM variable appears above the ROLLBACK ONLY heading - reads as the live path");
     }
   }
 
@@ -679,6 +701,85 @@ for (const file of pages) {
 
     if (!/(January|February|March|April|May|June|July|August|September|October|November|December)&nbsp;?\s*\d{1,2},&nbsp;?\s*\d{4}/.test(text))
       fail("privacy.html", "carries no exact effective/last-updated date");
+  }
+}
+
+/* ---------------------------------------------------------------------
+   THE ZOHO MAIL ACKNOWLEDGEMENT IS SECONDARY, AND MUST STAY THAT WAY
+   ---------------------------------------------------------------------
+   One short email is sent from Crystal's mailbox after a lead reaches
+   HubSpot. Three ways that quietly stops being harmless, none of which
+   breaks a test or a build on its own:
+
+     1. The send stops being awaited. On Vercel the container can be
+        frozen the instant the response is written, so a fire-and-forget
+        sendMail() is a coin flip that looks fine in every log.
+     2. The send moves above createLead, so a visitor is thanked for a
+        lead that was never stored.
+     3. A mail failure stops being swallowed, and an SMTP outage starts
+        telling people with saved leads to submit the form again.
+   --------------------------------------------------------------------- */
+{
+  const REPO = join(ROOT, "..");
+  const leadPath = join(REPO, "api/lead.js");
+  const mailPath = join(REPO, "api/_lib/mail.mjs");
+
+  if (!existsSync(mailPath)) fail("api/_lib/mail.mjs", "missing - the acknowledgement path is gone");
+  if (!existsSync(leadPath)) fail("api/lead.js", "missing");
+
+  /* Only executable code counts. These modules explain themselves at
+     length, and a comment saying "this is NOT api/_lib/zoho.mjs" or "use
+     log(), not logError()" must not trip the very rules it documents.
+     `//` is stripped only when it does not follow a colon, so the https://
+     URLs inside the signature template survive. */
+  const codeOnly = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+  if (existsSync(leadPath) && existsSync(mailPath)) {
+    const lead = codeOnly(readFileSync(leadPath, "utf8"));
+    const mail = codeOnly(readFileSync(mailPath, "utf8"));
+
+    if (!/await\s+sendAcknowledgement\(/.test(lead))
+      fail("api/lead.js", "sendAcknowledgement is not awaited - Vercel can freeze the container before SMTP finishes");
+
+    const createAt = lead.indexOf("await createLead(");
+    const ackAt = lead.indexOf("await sendAcknowledgement(");
+    if (createAt === -1) fail("api/lead.js", "no awaited createLead call - HubSpot is no longer the authoritative store");
+    else if (ackAt !== -1 && ackAt < createAt)
+      fail("api/lead.js", "the acknowledgement is sent before HubSpot confirms - a visitor would be thanked for a lead that was never stored");
+
+    /* The swallow. Without it an SMTP outage becomes a 502 on leads that
+       are already safely in the CRM. */
+    if (!/catch\s*\(\s*mailErr\s*\)/.test(lead))
+      fail("api/lead.js", "the acknowledgement is not wrapped in its own catch - a mail failure would fail the lead");
+
+    /* Zoho CRM rollback code must stay out of the live path. */
+    if (/from\s+["'`]\.\/_lib\/zoho\.mjs["'`]/.test(lead))
+      fail("api/lead.js", "imports the dormant Zoho CRM client - that is rollback code, not the live path");
+    if (/zoho\.mjs/.test(mail))
+      fail("api/_lib/mail.mjs", "references the Zoho CRM client - Zoho Mail and Zoho CRM share only a vendor name");
+
+    /* logError() emits err.message, and a Nodemailer message carries the
+       recipient address and the raw server response. */
+    if (/logError\(/.test(mail))
+      fail("api/_lib/mail.mjs", "uses logError - a Nodemailer error message carries the recipient address; classify instead");
+    if (/logError\([^)]*mailErr/.test(lead))
+      fail("api/lead.js", "passes the mail error to logError - log the classification only");
+
+    for (const fn of ["isMailConfigured", "classifyMailError", "setTransportFactory"])
+      if (!new RegExp(`export function ${fn}\\b`).test(mail))
+        fail("api/_lib/mail.mjs", `no exported ${fn} - the mail path is no longer configurable or testable in isolation`);
+  }
+
+  /* Awaiting SMTP inside a function that already makes sequential HubSpot
+     calls needs headroom. 15s was the pre-acknowledgement budget. */
+  const vercelPath = join(REPO, "vercel.json");
+  if (existsSync(vercelPath)) {
+    const cfg = JSON.parse(readFileSync(vercelPath, "utf8"));
+    const fn = cfg.functions && cfg.functions["api/lead.js"];
+    if (!fn) fail("vercel.json", "api/lead.js has no function configuration");
+    else if (!(fn.maxDuration >= 30))
+      fail("vercel.json", `api/lead.js maxDuration is ${fn.maxDuration} - awaiting SMTP after HubSpot needs at least 30s`);
   }
 }
 

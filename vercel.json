@@ -55,7 +55,7 @@
   ],
   "functions": {
     "api/lead.js": {
-      "maxDuration": 15,
+      "maxDuration": 30,
       "memory": 256
     }
   }
