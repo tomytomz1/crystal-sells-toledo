@@ -1,7 +1,8 @@
 <!-- meta {
   "title": "Contact Crystal Saylor | Greater Toledo REALTOR®",
-  "description": "Get in touch with Crystal Saylor, a greater Toledo REALTOR® with Key Realty. Call, text or message — every inquiry gets a personal reply, usually the same day.",
+  "description": "Contact Crystal Saylor of Key Realty LTD about buying, selling or a home valuation in Greater Toledo. Call, text, email or send a message.",
   "slug": "contact",
+  "updated": "2026-09-04",
   "nav": "contact",
   "priority": 0.7
 } -->
@@ -27,33 +28,46 @@
             <h4>Call or text</h4>
             <p style="margin-top:.35rem"><a class="textlink" style="font-size:1.05rem;letter-spacing:0;text-transform:none"
               href="tel:+14192454655">(419) 245-4655</a></p>
-            <p style="margin-top:.75rem">Texting is genuinely fine &mdash; often faster.</p>
+            <p style="margin-top:.75rem">You can text me at this number.</p>
           </div>
           <div class="card">
             <h4>Email</h4>
             <p style="margin-top:.35rem"><a class="textlink" style="font-size:1.05rem;letter-spacing:0;text-transform:none"
               href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a></p>
-            <p style="margin-top:.75rem">Replies usually within a few hours on weekdays.</p>
+            <p style="margin-top:.75rem">I reply personally.</p>
           </div>
           <div class="card">
             <h4>Brokerage</h4>
             <p style="margin-top:.35rem"><strong>Key Realty LTD</strong><br>
               <a href="https://maps.google.com/?q=6800+W+Central+Ave+Unit+B+Toledo+OH+43617"
                  rel="noopener">6800 W. Central Ave, Unit&nbsp;B<br>Toledo, OH 43617</a></p>
-            <p style="margin-top:.75rem">Serving Perrysburg, Maumee, Rossford, Waterville and greater Toledo.</p>
+            <p style="margin-top:.75rem">Serving Perrysburg, Maumee, Rossford, Waterville and Greater Toledo.</p>
           </div>
         </div>
 
         <hr class="rule">
         <h3 style="font-size:1.2rem">Hours</h3>
-        <p style="color:var(--muted)">Showings and calls most days, including evenings and weekends by
-          arrangement. If I do not pick up I am probably at a closing or a school pickup &mdash; leave a
-          message and you will hear back the same day.</p>
+        <p style="color:var(--muted)">Showings and calls are available by arrangement, including
+          evenings and weekends. If I miss your call I am probably at a closing or a school pickup
+          &mdash; please leave a message.</p>
       </div>
 
       <div class="form-card reveal">
         <h2 style="font-size:clamp(1.6rem,3vw,2rem)">Send a message</h2>
-<form class="form" data-form data-form-type="contact" data-subject="Website contact - Crystal Sells Toledo" novalidate style="margin-top:1.5rem">
+<div class="form-region" data-form-region>
+<noscript>
+  <!-- F05. Submission is entirely JavaScript: without it the browser fell
+       back to a GET of the current page, which sent no lead, showed no
+       confirmation, and put the name, email and property address into the
+       address bar. The form is hidden here rather than left submitting, and
+       method="post" below means no build of this page can leak fields into a
+       URL even if this block is ever removed. -->
+  <style>.form-region [data-form] { display: none; }</style>
+  <p class="form-noscript">This form needs JavaScript to send your request.
+    Please call <a href="tel:+14192454655">(419)&nbsp;245-4655</a> or email
+    <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>.</p>
+</noscript>
+<form class="form" data-form data-form-type="contact" data-subject="Website contact - Crystal Sells Toledo" method="post" novalidate style="margin-top:1.5rem">
           <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
 
           <div class="form__row">
@@ -73,13 +87,13 @@
               <input id="c-email" name="email" type="email" autocomplete="email" required maxlength="100">
             </div>
             <div class="field">
-              <label for="c-phone">Phone</label>
+              <label for="c-phone">Phone (optional)</label>
               <input id="c-phone" name="phone" type="tel" autocomplete="tel" maxlength="30">
             </div>
           </div>
 
           <div class="field">
-            <label for="c-topic">I&rsquo;m getting in touch about</label>
+            <label for="c-topic">I&rsquo;m getting in touch about (optional)</label>
             <select id="c-topic" name="topic">
               <option value="">Select&hellip;</option>
               <option>Selling my home</option>
@@ -92,18 +106,22 @@
 
           <div class="field">
             <label for="c-message">Message <span class="req" aria-hidden="true">*</span></label>
-            <textarea id="c-message" name="message" required
+            <textarea id="c-message" name="message" required maxlength="4000"
+              aria-describedby="c-message-help"
               placeholder="Tell me a little about what you're thinking&hellip;"></textarea>
+            <p class="field__help" id="c-message-help">Up to 4,000 characters.</p>
           </div>
 
           <div class="form-status" aria-live="polite"></div>
 
           <button class="btn btn--primary btn--block btn--lg" type="submit">Send Message</button>
 
-          <p class="form__note">Your details are used only to reply to you. They are never sold, and
-            are shared only with the service providers that run this site and Crystal&rsquo;s contact
-            records. See the <a href="/privacy">privacy note</a>.</p>
+          <p class="form__note">Crystal uses your details to reply to you and manage related
+            follow-up. The site also records how you found it. They are never sold, and are shared
+            only with the service providers that run this site and Crystal&rsquo;s contact records.
+            See <a href="/privacy">Privacy &amp; terms</a>.</p>
         </form>
+</div>
       </div>
 
     </div>

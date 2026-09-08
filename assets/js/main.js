@@ -205,15 +205,64 @@
   function initStickyCta() {
     var bar = document.querySelector(".sticky-cta");
     if (!bar) return;
+
+    /* A fixed bar asking for the form, sitting on top of the form, is a
+       tax on the visitor who already scrolled to it. Track whether any
+       lead form is on screen and stand down while one is. Native
+       IntersectionObserver only, and where it is missing the bar simply
+       keeps the old scroll-distance behaviour. */
+    var formOnScreen = false;
+    /* Also stand down around a visible inline CTA. A fixed bar offering the
+       same action as a button the visitor can already see is just noise. */
+    var regions = document.querySelectorAll(
+      "[data-form-region], .cuepoint, .cta-band [data-review-cta]");
+    if (regions.length && "IntersectionObserver" in window) {
+      var seen = new WeakSet();
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target);
+        });
+        formOnScreen = Array.prototype.some.call(regions, function (r) { return seen.has(r); });
+        check();
+      }, { rootMargin: "-15% 0px -15% 0px" });
+      Array.prototype.forEach.call(regions, function (r) { io.observe(r); });
+    }
+
     var ticking = false;
     function check() {
-      bar.classList.toggle("is-visible", window.scrollY > 520);
+      bar.classList.toggle("is-visible", window.scrollY > 520 && !formOnScreen);
       ticking = false;
     }
     window.addEventListener("scroll", function () {
       if (!ticking) { ticking = true; window.requestAnimationFrame(check); }
     }, { passive: true });
     check();
+  }
+
+  /* ------------------------------------------- in-page CTA to the form -
+     Several places on /43551-seller-review invite the visitor back to the
+     one form at the top. The href does the scrolling, so this works with
+     no JavaScript at all; all that is added here is moving focus to the
+     address field once the browser has arrived, with preventScroll so the
+     focus cannot fight the scroll that is still animating. */
+  function initFormCtas() {
+    document.addEventListener("click", function (e) {
+      var link = e.target.closest("a[data-review-cta]");
+      if (!link) return;
+      var href = link.getAttribute("href") || "";
+      if (href.charAt(0) !== "#") return;
+      var target = document.getElementById(href.slice(1));
+      if (!target) return;
+      /* The first input inside the form region is the honeypot, which is
+         hidden and tabindex="-1". Prefer the address field by name. */
+      var field = target.querySelector('input[name="property_address"]')
+        || target.querySelector('input:not(.hp):not([tabindex="-1"]), select, textarea');
+      if (!field) return;
+      var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.setTimeout(function () {
+        try { field.focus({ preventScroll: true }); } catch (err) { field.focus(); }
+      }, reduced ? 0 : 450);
+    });
   }
 
   /* --------------------------------------------------------- FAQ ------ */
@@ -325,6 +374,11 @@
             form_type: formType,
             submission_id: r.json.submission_id
           });
+          /* GA4's acquisition key event. Keep the internal success event
+             above for support; only generate_lead is a lead key event.
+             This shares the confirmed-server-success gate, never a click
+             or form-start trigger. No entered fields or invented value. */
+          analytics.track("generate_lead", { form_type: formType });
           /* Kept for support, never rendered. */
           form.dataset.submissionId = r.json.submission_id || "";
 
@@ -333,8 +387,8 @@
                Fall back to the inline confirmation, which is safe there
                because that form is a single step and nothing collapses. */
             setStatus(status, "ok",
-              "<strong>Thank you.</strong> Your request is in - Crystal personally replies to " +
-              "every inquiry, usually within a few hours.");
+              "<strong>Thank you.</strong> Your message has been received. " +
+              "Crystal will follow up with you.");
             form.reset();
             if (form.dataset.steps) resetSteps(form);
           }
@@ -348,7 +402,7 @@
           setStatus(status, "err",
             (err && err.userMessage
               ? err.userMessage
-              : "We could not submit that just now. Nothing you typed has been lost.") +
+              : "We could not confirm your submission. Your details are still in the form.") +
             " Please " + contactLine() + "." + extra);
           analytics.track("lead_submit_error", {
             form_type: formType,
@@ -509,10 +563,20 @@
       if (!link) return;
       var href = link.getAttribute("href") || "";
 
+      if (link.dataset.reviewCta) {
+        analytics.track("cta_review_click", {
+          position: link.dataset.reviewCta,
+          link_text: (link.textContent || "").trim().slice(0, 60)
+        });
+      }
+
       if (href.indexOf("tel:") === 0) {
         analytics.track("phone_click", { destination: href });
       } else if (href.indexOf("mailto:") === 0) {
-        analytics.track("email_click", { destination: href });
+        /* Address only. The fallback mailto carries every value the visitor
+           typed in its subject and body; forwarding the whole href would put
+           that into analytics, which the privacy notice says never happens. */
+        analytics.track("email_click", { destination: href.split("?")[0] });
       } else if (href === "/home-value" || href.indexOf("/home-value") === 0) {
         analytics.track("cta_home_value_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
       } else if (href === "/sell" || href.indexOf("/sell") === 0) {
@@ -652,6 +716,9 @@
       list.innerHTML = "";
       items = [];
       active = -1;
+      /* Leaving the old count announced would tell a screen reader there are
+         suggestions to arrow through after the list has gone. */
+      live.textContent = "";
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
     }
@@ -730,10 +797,19 @@
         li.addEventListener("pointerdown", function (e) { e.preventDefault(); choose(i); });
         list.appendChild(li);
       });
+      if (!values.length) {
+        /* A finished search with no matches: say so, rather than leaving the
+           visitor waiting on an announcement that never comes. */
+        close();
+        live.textContent = "No address suggestions found. You can enter the full address yourself.";
+        return;
+      }
       list.hidden = false;
       active = -1;
       input.setAttribute("aria-expanded", "true");
-      live.textContent = values.length + " address suggestions available.";
+      live.textContent = values.length === 1
+        ? "1 address suggestion available. Use the arrow keys to review it."
+        : values.length + " address suggestions available. Use the arrow keys to review them.";
     }
 
     function request(value, opts) {
@@ -939,6 +1015,7 @@
     initSteps();
     initForms();
     initCtaTracking();
+    initFormCtas();
     initAddressAutocomplete();
     initPhoneFormat();
     initYear();

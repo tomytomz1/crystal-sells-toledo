@@ -48,7 +48,105 @@ const SITE = "https://crystalsellstoledo.com";
    deployed; an automatic date would silently assert a review that never
    happened every time an unrelated CSS tweak shipped.
    --------------------------------------------------------------------- */
-const CONTENT_UPDATED = "September 2, 2026";
+const CONTENT_UPDATED = "September 4, 2026";
+
+/* ---------------------------------------------------------------------
+   FORM PRESENTATION COPY
+   ---------------------------------------------------------------------
+   src/partials/home-value-form.html is the single implementation of the
+   lead funnel and must stay that way. A page that needs different BUTTON
+   TEXT is not a reason to fork it.
+
+   These seven strings are the only parameterised parts of that partial:
+   labels, microcopy, the success wording and the email subject. Field
+   names, validation, step behaviour, the honeypot, data-form-type and the
+   /api/lead contract are deliberately absent from this object.
+
+   The defaults below reproduce the homepage and /home-value wording
+   character for character. A page overrides one by declaring `formCopy`
+   in its meta block; tools/check.mjs fails the build if index.html or
+   home-value.html ever stop rendering these exact defaults.
+   --------------------------------------------------------------------- */
+const FORM_COPY_DEFAULTS = {
+  formSubject: "Home valuation request",
+  formStep1Cta: "Get My Home Value",
+  formMicrocopy: "No obligation &middot; Human valuation &middot; Not an automated estimate",
+  formSubmitCta: "Send My Valuation Request",
+  formSuccessTitle: "Your request is in",
+  formSuccessLede:
+    "Crystal will review your property details and follow up about your valuation.",
+  /* R03. This line named a valuation on every page, including the one whose
+     offer is a Seller Strategy Review, and said "only" while the notice it
+     links to discloses attribution. It is parameterised for the offer name;
+     the disclosure itself is not a page's to soften. */
+  formPrivacy:
+    "Crystal uses your details to prepare and follow up about your home valuation. " +
+    "The site also records how you found it. They are never sold, and are shared only " +
+    "with the service providers that run this site and Crystal&rsquo;s contact records. " +
+    "See <a href=\"/privacy\">Privacy &amp; terms</a>. By submitting you agree that " +
+    "Crystal may contact you about this request.",
+};
+
+/** Merge a page's formCopy over the defaults, refusing anything unknown -
+ *  a typo would otherwise substitute silently to an empty string and ship
+ *  a button with no label. */
+function formCopyFor(meta, file) {
+  const over = meta.formCopy ?? {};
+  for (const k of Object.keys(over)) {
+    if (!(k in FORM_COPY_DEFAULTS))
+      throw new Error(`${file}: unknown formCopy key "${k}" - allowed: ${Object.keys(FORM_COPY_DEFAULTS).join(", ")}`);
+    if (typeof over[k] !== "string" || !over[k].trim())
+      throw new Error(`${file}: formCopy.${k} must be a non-empty string`);
+  }
+  return { ...FORM_COPY_DEFAULTS, ...over };
+}
+
+/* The two promotional CTAs in the shared chrome. Navigation, legal
+   identity, contact details and compliance marks are deliberately absent
+   from this object - only the gold "buy now" of the header and footer is
+   overridable, and only so a page running its own funnel does not ship a
+   fixed link into a competing one. */
+const CHROME_CTA_DEFAULTS = {
+  headerCtaHref: "/home-value",
+  headerCtaLabel: "What&rsquo;s My Home Worth?",
+  headerCtaData: "",
+  footerCtaHref: "/home-value",
+  footerCtaLabel: "Get My Home&rsquo;s Value",
+  footerCtaData: "",
+};
+
+/* The mobile sticky bar's second cell. Same rule as the form copy: one
+   implementation, defaults identical to what every page renders today. */
+const STICKY_CTA_DEFAULTS = {
+  stickyCtaHref: "/home-value",
+  stickyCtaLabel: "Free Home Value",
+  stickyCtaData: "",
+};
+
+/** Same contract for the header/footer CTAs. The *Data fields may be
+ *  empty, so they are checked for type only. */
+function chromeCtaFor(meta, file) {
+  const over = meta.chromeCta ?? {};
+  for (const k of Object.keys(over)) {
+    if (!(k in CHROME_CTA_DEFAULTS))
+      throw new Error(`${file}: unknown chromeCta key "${k}" - allowed: ${Object.keys(CHROME_CTA_DEFAULTS).join(", ")}`);
+    if (typeof over[k] !== "string")
+      throw new Error(`${file}: chromeCta.${k} must be a string`);
+  }
+  return { ...CHROME_CTA_DEFAULTS, ...over };
+}
+
+/** Same contract again for the sticky bar. */
+function stickyCtaFor(meta, file) {
+  const over = meta.stickyCta ?? {};
+  for (const k of Object.keys(over)) {
+    if (!(k in STICKY_CTA_DEFAULTS))
+      throw new Error(`${file}: unknown stickyCta key "${k}" - allowed: ${Object.keys(STICKY_CTA_DEFAULTS).join(", ")}`);
+    if (typeof over[k] !== "string")
+      throw new Error(`${file}: stickyCta.${k} must be a string`);
+  }
+  return { ...STICKY_CTA_DEFAULTS, ...over };
+}
 
 const partial = (name) => readFileSync(join(ROOT, "src/partials", name + ".html"), "utf8");
 const PARTIALS = Object.fromEntries(
@@ -239,6 +337,9 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     analytics: analyticsTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
+    ...formCopyFor(meta, file),
+    ...stickyCtaFor(meta, file),
+    ...chromeCtaFor(meta, file),
     nav_home: "", nav_sell: "", nav_buy: "", nav_hoods: "", nav_about: "", nav_contact: "",
     content: body.trim(),
   };
@@ -250,17 +351,25 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
   const outPath = join(OUT, slug + ".html");
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, html);
-  built.push({ slug, url, changefreq: meta.changefreq ?? "monthly", priority: meta.priority ?? 0.6, noindex: !!meta.noindex });
+  if (meta.updated && !/^\d{4}-\d{2}-\d{2}$/.test(meta.updated))
+    throw new Error(`${file}: meta.updated must be YYYY-MM-DD, got "${meta.updated}"`);
+  built.push({ slug, url, changefreq: meta.changefreq ?? "monthly", priority: meta.priority ?? 0.6,
+    noindex: !!meta.noindex, updated: meta.updated });
   console.log(`  ✓ ${slug}.html`);
 }
 
 /* ---- sitemap.xml ------------------------------------------------------ */
-const today = new Date().toISOString().slice(0, 10);
+/* M04. lastmod was `new Date()`, so every route claimed to have changed
+   whenever a build ran. It is now a per-page fact: `updated` in a page's meta
+   block, maintained by hand alongside CONTENT_UPDATED. A page without one is
+   omitted from lastmod rather than given a date that is not true. */
 const sitemap =
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
   built
     .filter((p) => !p.noindex)
-    .map((p) => `  <url>\n    <loc>${p.url}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
+    .map((p) => `  <url>\n    <loc>${p.url}</loc>\n` +
+      (p.updated ? `    <lastmod>${p.updated}</lastmod>\n` : "") +
+      `    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
     .join("\n") +
   `\n</urlset>\n`;
 writeFileSync(join(OUT, "sitemap.xml"), sitemap);

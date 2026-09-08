@@ -12,7 +12,31 @@ const RATE_MAX = 5;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const hits = new Map();
 
+/* Drop every key whose last hit has aged out.
+
+   This is LAZY cleanup: it runs from a request, never from a timer. There is
+   deliberately no setInterval here - on a serverless instance a live timer
+   keeps the process referenced and fires on instances that are handling no
+   traffic. The consequence is the honest one, and the privacy notice says it:
+   an expired address is cleared by a later request or when the instance ends,
+   NOT at a guaranteed moment. Do not restore any wording promising deletion on
+   a fixed schedule. */
+function sweep(now) {
+  for (const [k, times] of hits) {
+    const live = times.filter((t) => now - t < RATE_WINDOW_MS);
+    if (live.length) hits.set(k, live);
+    else hits.delete(k);
+  }
+}
+
 export function rateLimit(key, now = Date.now()) {
+  /* Every call, not on an interval. The earlier version only swept when a
+     window had elapsed since the last sweep, which left expired keys behind
+     for any staggered arrival pattern: A at t, B at t+599,999, C at t+600,000,
+     D at t+1,199,999 retained three keys when only two were live. The map is
+     capped at 5000 entries, so an unconditional pass is cheap. */
+  sweep(now);
+
   const win = (hits.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS);
   if (win.length >= RATE_MAX) {
     hits.set(key, win);
@@ -20,11 +44,14 @@ export function rateLimit(key, now = Date.now()) {
   }
   win.push(now);
   hits.set(key, win);
-  if (hits.size > 5000) hits.clear(); // crude ceiling on memory growth
+  if (hits.size > 5000) hits.clear(); // every entry here is already live
   return { allowed: true };
 }
 
 export function _resetRateLimit() { hits.clear(); }
+
+/* Test seam: how many addresses the limiter is currently holding. */
+export function _rateLimitSize() { return hits.size; }
 
 export function clientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
