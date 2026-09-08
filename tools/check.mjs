@@ -760,6 +760,47 @@ for (const file of pages) {
       fail(file, `home_value form fields changed\n      expected: ${EXPECTED_FIELDS}\n      found:    ${got}`);
   }
   if (!formPages) fail("site", "no page carries the home_value form - the funnel has gone missing");
+
+  /* Every visitor-facing field is mandatory. A lead reached HubSpot with no
+     phone number because `phone` carried no `required` attribute and the
+     server accepted a blank; a contact row with no way to call the person is
+     not a lead. The markup and the server must agree, so both are pinned:
+     losing either half is how the blank comes back. The honeypot is the one
+     field that must NOT be required - a bot filling it is the point. */
+  const MUST_BE_REQUIRED =
+    ["property_address", "first_name", "last_name", "email", "phone", "timeline",
+     "condition", "notes"];
+  for (const file of new Set([...pages, "contact.html"])) {
+    if (!existsSync(join(ROOT, file))) continue;
+    const html = readFileSync(join(ROOT, file), "utf8");
+    const isHomeValue = /data-form-type="home_value"/.test(html);
+    const isContact = /data-form-type="contact"/.test(html);
+    if (!isHomeValue && !isContact) continue;
+    const want = isHomeValue
+      ? MUST_BE_REQUIRED
+      : ["first_name", "last_name", "email", "phone", "topic", "message"];
+    for (const name of want) {
+      const tag = new RegExp(
+        '<(?:input|select|textarea)\\b[^>]*\\bname="' + name + '"[^>]*>').exec(html);
+      if (!tag) { fail(file, `the ${name} field is missing from the form`); continue; }
+      if (!/\brequired\b/.test(tag[0]))
+        fail(file, `${name} is not marked required - every form field is mandatory`);
+    }
+    const hp = /<input[^>]*\bname="_gotcha"[^>]*>/.exec(html);
+    if (hp && /\brequired\b/.test(hp[0]))
+      fail(file, "the honeypot is marked required - it must stay empty and invisible");
+  }
+
+  /* The server half of the same contract. `required` in markup is a
+     convenience the visitor can bypass; api/_lib/validate.mjs is the
+     guarantee, and CI must notice if a rejection is ever quietly dropped. */
+  const validateSrc = readFileSync(join(ROOT, "..", "api/_lib/validate.mjs"), "utf8");
+  for (const code of ["MISSING_PHONE", "INVALID_PHONE", "MISSING_TIMELINE",
+                      "MISSING_CONDITION", "MISSING_NOTES", "MISSING_TOPIC",
+                      "MISSING_ADDRESS", "MISSING_MESSAGE"]) {
+    if (!validateSrc.includes(code))
+      fail("api/_lib/validate.mjs", `${code} is gone - that field is no longer enforced server-side`);
+  }
 }
 
 /* --- report ---------------------------------------------------------- */

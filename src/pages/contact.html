@@ -2,7 +2,7 @@
   "title": "Contact Crystal Saylor | Greater Toledo REALTOR®",
   "description": "Contact Crystal Saylor of Key Realty LTD about buying, selling or a home valuation in Greater Toledo. Call, text, email or send a message.",
   "slug": "contact",
-  "updated": "2026-09-04",
+  "updated": "2026-09-08",
   "nav": "contact",
   "priority": 0.7
 } -->
@@ -87,14 +87,18 @@
               <input id="c-email" name="email" type="email" autocomplete="email" required maxlength="100">
             </div>
             <div class="field">
-              <label for="c-phone">Phone (optional)</label>
-              <input id="c-phone" name="phone" type="tel" autocomplete="tel" maxlength="30">
+              <label for="c-phone">Phone <span class="req" aria-hidden="true">*</span></label>
+              <input id="c-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000"
+                     maxlength="30" required pattern="\(\d{3}\) \d{3}-\d{4}"
+                     title="A ten-digit US phone number, for example (419) 245-4655"
+                     aria-describedby="c-phone-help">
+              <p class="field__help" id="c-phone-help">Ten digits, for calls or texts.</p>
             </div>
           </div>
 
           <div class="field">
-            <label for="c-topic">I&rsquo;m getting in touch about (optional)</label>
-            <select id="c-topic" name="topic">
+            <label for="c-topic">I&rsquo;m getting in touch about <span class="req" aria-hidden="true">*</span></label>
+            <select id="c-topic" name="topic" required>
               <option value="">Select&hellip;</option>
               <option>Selling my home</option>
               <option>Buying a home</option>

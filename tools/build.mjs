@@ -48,7 +48,7 @@ const SITE = "https://crystalsellstoledo.com";
    deployed; an automatic date would silently assert a review that never
    happened every time an unrelated CSS tweak shipped.
    --------------------------------------------------------------------- */
-const CONTENT_UPDATED = "September 4, 2026";
+const CONTENT_UPDATED = "September 8, 2026";
 
 /* ---------------------------------------------------------------------
    FORM PRESENTATION COPY

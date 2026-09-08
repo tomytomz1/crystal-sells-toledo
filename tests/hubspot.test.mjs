@@ -77,6 +77,21 @@ function payloadOf(raw, sid = "csv_test000000000000000000") {
   return p;
 }
 
+/* A blank field can no longer come OUT of validateLead - every visitor-facing
+   field is mandatory now (see tests/api.test.mjs). The mapper's own defence
+   still has to hold, and is what these tests are about: HubSpot reads an empty
+   string as "set this property to empty", so an update carrying phone:"" would
+   ERASE a number already on the record. Anything that reaches the mapper with
+   a blank - a payload from an older deploy still in flight, a future form type,
+   a hand-built call - must be dropped rather than sent. Blanking a valid
+   payload is now the only way to reach that state, so it is done here
+   deliberately rather than by feeding validateLead something it would reject. */
+function payloadWithBlank(raw, field) {
+  const p = payloadOf(raw);
+  p.lead[field] = "";
+  return p;
+}
+
 beforeEach(() => {
   process.env.HUBSPOT_ACCESS_TOKEN = TOKEN;
   process.env.HUBSPOT_PORTAL_ID = PORTAL;
@@ -159,7 +174,7 @@ describe("Standard contact field mapping", () => {
   });
 
   test("blank phone is omitted, never sent empty", () => {
-    assert.ok(!("phone" in toContactProperties(payloadOf({ ...validContact, phone: "" }))));
+    assert.ok(!("phone" in toContactProperties(payloadWithBlank(validContact, "phone"))));
   });
 
   test("a later address-less submission cannot erase a stored address", async () => {
@@ -172,7 +187,7 @@ describe("Standard contact field mapping", () => {
 
   test("a later phone-less submission cannot erase a stored phone", async () => {
     const calls = stubFetch({ [SEARCH]: hit("78"), [patchKey("78")]: { json: { id: "78" } } });
-    await createLead(payloadOf({ ...validContact, phone: "" }));
+    await createLead(payloadWithBlank(validContact, "phone"));
     assert.ok(!("phone" in calls.find((c) => c.method === "PATCH").body.properties));
   });
 
@@ -291,7 +306,7 @@ describe("The form submission is the timeline activity", () => {
 
   test("blank phone and address are omitted from the submission", async () => {
     const calls = stubFetch({ [SEARCH]: noHits, [CREATE]: { json: { id: "1" } } });
-    await createLead(payloadOf({ ...validContact, phone: "" }));   // contact form: no address
+    await createLead(payloadWithBlank(validContact, "phone"));   // contact form: no address
     const names = formCall(calls).body.fields.map((f) => f.name);
     assert.ok(!names.includes("phone"), "a blank phone was submitted and would erase the stored one");
     assert.ok(!names.includes("address"), "a blank address was submitted");

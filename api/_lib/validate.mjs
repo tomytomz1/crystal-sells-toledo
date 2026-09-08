@@ -32,6 +32,15 @@ const LIMITS = {
    a missing TLD. */
 const EMAIL = /^[^\s@.][^\s@]*@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 
+/* A phone number is now REQUIRED on every form. It is checked by digit count
+   rather than by shape: the client formatter (assets/js/main.js section 8)
+   only ever produces "(419) 245-4655", but this module is authoritative and
+   must also accept a number typed straight at the API. Ten is the length of a
+   US number without its country code, and no international number is shorter,
+   so this rejects "call me" and "1234" without rejecting a real lead. The
+   upper bound is the existing LIMITS.phone cap of 30, applied before this. */
+const MIN_PHONE_DIGITS = 10;
+
 /* Control characters, stripped from every field before storage. */
 const CTRL = new RegExp("[\\u0000-\\u001F\\u007F]", "g");
 
@@ -118,6 +127,11 @@ export function validateLead(raw) {
   if (!EMAIL.test(email)) throw new FieldError("INVALID_EMAIL", "Email address is not valid");
 
   const phone = cap("phone", normalizePhone(raw.phone));
+  if (!phone) throw new FieldError("MISSING_PHONE", "Phone number is required");
+  if (phone.replace(/\D/g, "").length < MIN_PHONE_DIGITS)
+    throw new FieldError("INVALID_PHONE",
+      "Please enter a full phone number, for example (419) 245-4655.");
+
   const property_address = cap("property_address", squash(raw.property_address));
   const topic = cap("topic", squash(raw.topic));
   const timeline = cap("timeline", squash(raw.timeline));
@@ -125,10 +139,29 @@ export function validateLead(raw) {
   const message = cap("message", squashMultiline(raw.message));
   const notes = cap("notes", squashMultiline(raw.notes));
 
-  if (form_type === "home_value" && !property_address)
-    throw new FieldError("MISSING_ADDRESS", "Property address is required");
-  if (form_type === "contact" && !message)
-    throw new FieldError("MISSING_MESSAGE", "Message is required");
+  /* The enquiry block is the whole lead. A contact row carrying a name and an
+     email but no address, timeline, condition or note looks like a lead in
+     HubSpot and is worthless to work: there is nothing to price, nothing to
+     schedule against and nothing to open a call with. Every visible field on
+     the form is therefore required here as well as in the markup - the
+     `required` attribute is a convenience for the visitor, never the
+     guarantee. */
+  if (form_type === "home_value") {
+    if (!property_address)
+      throw new FieldError("MISSING_ADDRESS", "Property address is required");
+    if (!timeline)
+      throw new FieldError("MISSING_TIMELINE", "Please choose when you might sell.");
+    if (!condition)
+      throw new FieldError("MISSING_CONDITION", "Please choose the home's overall condition.");
+    if (!notes)
+      throw new FieldError("MISSING_NOTES",
+        "Please tell Crystal a little about the house. One line is plenty.");
+  }
+  if (form_type === "contact") {
+    if (!topic)
+      throw new FieldError("MISSING_TOPIC", "Please choose what you are getting in touch about.");
+    if (!message) throw new FieldError("MISSING_MESSAGE", "Message is required");
+  }
 
   const src = raw.attribution && typeof raw.attribution === "object" ? raw.attribution : raw;
   const attribution = {};
