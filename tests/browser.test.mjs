@@ -66,11 +66,36 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     return p;
   }
 
+  /* Every visitor-facing field on both forms is required - see the
+     "every visitor-facing field is mandatory" regression in
+     tests/api.test.mjs. A test that filled only the name and email would now
+     be stopped by the browser's own constraint validation and would fail for
+     a reason that has nothing to do with what it is testing, so the helpers
+     fill the whole form and each test overrides only what it cares about. */
   async function fillContact(p) {
     await p.fill("#c-first", "Jane");
     await p.fill("#c-last", "Doe");
     await p.fill("#c-email", "jane@example.com");
+    await p.fill("#c-phone", "4195551234");
+    await p.selectOption("#c-topic", "Selling my home");
     await p.fill("#c-message", "Please call me about selling.");
+  }
+
+  /** Fill step 2 of the home_value form. Step 1 (the address) is separate. */
+  async function fillStep2(p, over = {}) {
+    const v = {
+      first: "Sam", last: "Rivera", email: "sam@example.com",
+      phone: "4195551234", timeline: "Within 3 months",
+      condition: "Well maintained, some updates", notes: "New roof in 2022.",
+      ...over,
+    };
+    await p.fill("#v-first", v.first);
+    await p.fill("#v-last", v.last);
+    await p.fill("#v-email", v.email);
+    await p.fill("#v-phone", v.phone);
+    await p.selectOption("#v-timing", v.timeline);
+    await p.selectOption("#v-condition", v.condition);
+    await p.fill("#v-notes", v.notes);
   }
 
   /* ---------------------------------------------------- attribution --- */
@@ -169,6 +194,125 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     assert.match(await p.getAttribute(".form-status", "class"), /form-status--err/);
     assert.equal(await p.inputValue("#c-first"), "Jane");
     await p.close();
+  });
+
+  /* ------------------------------------------- mandatory fields ------- */
+
+  /* Regression: a HubSpot contact was created from a real submission with an
+     empty phone number - a row that looks like a lead and cannot be called.
+     The server now refuses it (see tests/api.test.mjs). The markup has to
+     refuse it a step earlier so the visitor is told in place, at the field,
+     instead of losing the round trip and reading a 422 in the status box.
+     These assert the request is never even made. */
+
+  /** Take the funnel to a filled step 2 on /home-value. */
+  async function atStep2(p) {
+    await p.goto(`${base}/home-value`, { waitUntil: "load" });
+    await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
+    await p.click("[data-step-next]");
+    await p.waitForSelector('[data-step="2"]:not([hidden])');
+    await fillStep2(p);
+  }
+
+  test("no step-2 field can be left blank", async () => {
+    const blankable = [
+      ["#v-phone", "input"], ["#v-timing", "select"], ["#v-condition", "select"],
+      ["#v-notes", "input"], ["#v-first", "input"], ["#v-last", "input"],
+      ["#v-email", "input"],
+    ];
+    for (const [sel, kind] of blankable) {
+      const p = await page();
+      let sent = 0;
+      p.on("request", (r) => { if (r.url().includes("/api/lead")) sent++; });
+      await atStep2(p);
+      if (kind === "select") await p.selectOption(sel, ""); else await p.fill(sel, "");
+      await p.click('[data-step="2"] button[type=submit]');
+      await p.waitForTimeout(300);
+      assert.equal(sent, 0, `a blank ${sel} was submitted anyway`);
+      assert.equal(await p.locator("[data-form-success]").isVisible(), false,
+        `a blank ${sel} produced a success panel`);
+      await p.close();
+    }
+  });
+
+  test("a partial phone number is refused before any request is made", async () => {
+    for (const partial of ["419", "4195551"]) {
+      const p = await page();
+      let sent = 0;
+      p.on("request", (r) => { if (r.url().includes("/api/lead")) sent++; });
+      await atStep2(p);
+      await p.fill("#v-phone", partial);
+      await p.click('[data-step="2"] button[type=submit]');
+      await p.waitForTimeout(300);
+      assert.equal(sent, 0, `"${partial}" was submitted as a phone number`);
+      await p.close();
+    }
+  });
+
+  /* The guard has to be the blank, not the form. This is also the only test
+     that proves the `pattern` attribute and the JS phone formatter agree: if
+     the formatter produced anything the pattern rejects, a complete form
+     would be silently unsubmittable and no lead would ever arrive. */
+  test("a complete step 2 submits, and the formatted phone satisfies the pattern", async () => {
+    const p = await page();
+    let sent = null;
+    p.on("request", (r) => { if (r.url().includes("/api/lead")) sent = JSON.parse(r.postData() || "{}"); });
+    await atStep2(p);
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForTimeout(400);
+    assert.ok(sent, "a completely filled form did not submit");
+    assert.equal(sent.phone, "(419) 555-1234");
+    assert.equal(sent.timeline, "Within 3 months");
+    assert.equal(sent.condition, "Well maintained, some updates");
+    assert.equal(sent.notes, "New roof in 2022.");
+    assert.ok(sent.property_address.startsWith("123 Louisiana"));
+    await p.close();
+  });
+
+  test("the contact form will not submit without a phone or a topic", async () => {
+    for (const [sel, kind] of [["#c-phone", "input"], ["#c-topic", "select"]]) {
+      const p = await page();
+      let sent = 0;
+      p.on("request", (r) => { if (r.url().includes("/api/lead")) sent++; });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await fillContact(p);
+      if (kind === "select") await p.selectOption(sel, ""); else await p.fill(sel, "");
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(300);
+      assert.equal(sent, 0, `a blank ${sel} was submitted anyway`);
+      await p.close();
+    }
+  });
+
+  /* The asterisk is decorative (aria-hidden); `required` is what a screen
+     reader announces. Both have to be there, on every page carrying the
+     form, or the two halves of the promise disagree. */
+  test("every required field is announced as required on every form page", async () => {
+    for (const [path, ids] of [
+      ["/", ["v-address", "v-first", "v-last", "v-email", "v-phone", "v-timing",
+             "v-condition", "v-notes"]],
+      ["/home-value", ["v-address", "v-first", "v-last", "v-email", "v-phone",
+                       "v-timing", "v-condition", "v-notes"]],
+      ["/43551-seller-review", ["v-address", "v-first", "v-last", "v-email", "v-phone",
+                                "v-timing", "v-condition", "v-notes"]],
+      ["/contact", ["c-first", "c-last", "c-email", "c-phone", "c-topic", "c-message"]],
+    ]) {
+      const p = await page();
+      await p.goto(base + path, { waitUntil: "load" });
+      for (const id of ids) {
+        const req = await p.evaluate((i) => {
+          const el = document.getElementById(i);
+          return el ? el.required : null;
+        }, id);
+        assert.equal(req, true, `#${id} is not required on ${path}`);
+      }
+      const hp = await p.evaluate(() => {
+        const el = document.querySelector('input[name="_gotcha"]');
+        return el ? el.required : null;
+      });
+      assert.equal(hp, false, `the honeypot is required on ${path}`);
+      await p.close();
+    }
   });
 
   /* ------------------------------------------- progressive home-value -- */
@@ -302,8 +446,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     });
     await p.goto(`${base}/?utm_source=google&utm_medium=cpc&gclid=HOMEQA`, { waitUntil: "load" });
     await fillHomeStep1(p);
-    await p.fill("#v-first", "Sam"); await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     await p.locator('form[data-form] button[type=submit]').click();
     await p.waitForTimeout(600);
 
@@ -323,8 +466,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.goto(`${base}/`, { waitUntil: "load" });
     await p.evaluate(() => { window.__ok = []; window.addEventListener("lead_submit_success", (e) => window.__ok.push(e.detail)); });
     await fillHomeStep1(p);
-    await p.fill("#v-first", "Sam"); await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     await p.locator('form[data-form] button[type=submit]').click();
     await p.waitForTimeout(600);
     assert.equal((await p.evaluate(() => window.__ok))[0].submission_id, "csv_ok9");
@@ -339,8 +481,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     const p = await page({ apiStatus: 502, apiBody: { ok: false, code: "DELIVERY_FAILED", message: "Could not submit." } });
     await p.goto(`${base}/`, { waitUntil: "load" });
     await fillHomeStep1(p, "9 Elm St");
-    await p.fill("#v-first", "Ann"); await p.fill("#v-last", "Lee");
-    await p.fill("#v-email", "ann@example.com");
+    await fillStep2(p, { first: "Ann", last: "Lee", email: "ann@example.com" });
     await p.locator('form[data-form] button[type=submit]').click();
     await p.waitForTimeout(600);
     assert.match(await p.getAttribute(".form-status", "class"), /form-status--err/);
@@ -466,8 +607,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     assert.equal(await p.locator('[data-step="2"]').isVisible(), false);
     await fillHomeStep1(p, "1 Front St, Perrysburg, OH");
     assert.equal(await p.locator('[data-step="2"]').isVisible(), true);
-    await p.fill("#v-first", "Jo"); await p.fill("#v-last", "Kim");
-    await p.fill("#v-email", "jo@example.com");
+    await fillStep2(p, { first: "Jo", last: "Kim", email: "jo@example.com" });
     await p.locator('form[data-form] button[type=submit]').click();
     await p.waitForTimeout(600);
     assert.equal(sent.form_type, "home_value");
@@ -816,9 +956,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.click(".addr-suggest [role=option]:nth-child(2)");
     await p.click("[data-step-next]");
     await p.waitForSelector('[data-step="2"]:not([hidden])');
-    await p.fill("#v-first", "Sam");
-    await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     await p.click('[data-step="2"] button[type=submit]');
     await p.waitForFunction(() => document.querySelector(".form-status")?.textContent?.length > 0);
     assert.equal(sent.property_address, SUGGESTIONS[1]);
@@ -841,9 +979,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
     await p.click("[data-step-next]");
     await p.waitForSelector('[data-step="2"]:not([hidden])');
-    await p.fill("#v-first", "Sam");
-    await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     const before = await p.evaluate(() => ({
       scrollY: window.scrollY,
       docHeight: document.documentElement.scrollHeight,
@@ -978,9 +1114,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
     await p.click("[data-step-next]");
     await p.waitForSelector('[data-step="2"]:not([hidden])');
-    await p.fill("#v-first", "Sam");
-    await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     await p.click('[data-step="2"] button[type=submit]');
     await p.waitForFunction(() => /could not|call|email/i.test(
       document.querySelector(".form-status")?.textContent || ""));
@@ -999,9 +1133,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.fill("#v-address", "1 Test St");
     await p.click("[data-step-next]");
     await p.waitForSelector('[data-step="2"]:not([hidden])');
-    await p.fill("#v-first", "Sam");
-    await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     await p.click('[data-step="2"] button[type=submit]');
     await p.waitForFunction(() => (document.querySelector(".form-status")?.textContent || "").length > 0);
     assert.ok(await p.isHidden("[data-form-success]"));
@@ -1241,9 +1373,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.click(".addr-suggest [role=option]:nth-child(2)");
     await p.click("[data-step-next]");
     await p.waitForSelector('[data-step="2"]:not([hidden])');
-    await p.fill("#v-first", "Sam");
-    await p.fill("#v-last", "Rivera");
-    await p.fill("#v-email", "sam@example.com");
+    await fillStep2(p, { first: "Sam", last: "Rivera", email: "sam@example.com" });
     await p.click('[data-step="2"] button[type=submit]');
     await p.waitForSelector("[data-form-success]:not([hidden])");
     assert.equal(sent.property_address, SUGGESTIONS[1]);
@@ -1453,8 +1583,14 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.close();
   });
 
-  test("a formatted phone reaches /api/lead and a blank one stays blank", async () => {
-    for (const [typed, expected] of [["5863241248", "(586) 324-1248"], ["", ""]]) {
+  /* Was "...and a blank one stays blank". A blank phone can no longer reach
+     /api/lead at all - the field is required, and "no step-2 field can be
+     left blank" above proves the browser stops it. What still needs proving
+     is the formatter's contract: whatever punctuation the visitor types, the
+     endpoint receives the formatted number rather than the raw keystrokes. */
+  test("a typed phone reaches /api/lead formatted, not as typed", async () => {
+    for (const [typed, expected] of [["5863241248", "(586) 324-1248"],
+                                     ["586.324.1248", "(586) 324-1248"]]) {
       const p = await page();
       let sent = null;
       await p.route("**/api/lead", async (route) => {
@@ -1466,10 +1602,10 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
       await p.fill("#v-address", "123 Louisiana Ave, Perrysburg, OH 43551");
       await p.click("[data-step-next]");
       await p.waitForSelector('[data-step="2"]:not([hidden])');
-      await p.fill("#v-first", "Sam");
-      await p.fill("#v-last", "Rivera");
-      await p.fill("#v-email", "sam@example.com");
-      if (typed) { await p.click("#v-phone"); await p.keyboard.type(typed); }
+      await fillStep2(p);
+      await p.fill("#v-phone", "");
+      await p.click("#v-phone");
+      await p.keyboard.type(typed);
       await p.click('[data-step="2"] button[type=submit]');
       await p.waitForSelector("[data-form-success]:not([hidden])");
       assert.equal(sent.phone, expected,

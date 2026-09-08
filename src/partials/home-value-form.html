@@ -44,7 +44,10 @@
 
   <!-- Step 1 — address only.
        The one field a valuation cannot be produced without, and a far
-       smaller ask than a seven-field form. Steps toggle with the `hidden`
+       smaller ask than the whole form at once. Every field in step 2 is
+       required too - the split exists so the visitor commits to one easy
+       question before seeing the rest, not because the rest is optional.
+       Steps toggle with the `hidden`
        attribute rather than CSS, so an inactive step leaves the tab order
        and the accessibility tree instead of sitting invisible but
        focusable. With JS off, both steps render and submit in one pass. -->
@@ -83,15 +86,19 @@
         <input id="v-email" name="email" type="email" autocomplete="email" required maxlength="100">
       </div>
       <div class="field">
-        <label for="v-phone">Phone (optional)</label>
-        <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000" maxlength="30">
+        <label for="v-phone">Phone <span class="req" aria-hidden="true">*</span></label>
+        <input id="v-phone" name="phone" type="tel" autocomplete="tel" placeholder="(419) 000-0000"
+               maxlength="30" required pattern="\(\d{3}\) \d{3}-\d{4}"
+               title="A ten-digit US phone number, for example (419) 245-4655"
+               aria-describedby="v-phone-help">
+        <p class="field__help" id="v-phone-help">Ten digits, for calls or texts.</p>
       </div>
     </div>
 
     <div class="form__row">
       <div class="field">
-        <label for="v-timing">When might you sell? (optional)</label>
-        <select id="v-timing" name="timeline">
+        <label for="v-timing">When might you sell? <span class="req" aria-hidden="true">*</span></label>
+        <select id="v-timing" name="timeline" required>
           <option value="">Select&hellip;</option>
           <option>Just curious about the value</option>
           <option>Within 3 months</option>
@@ -101,8 +108,8 @@
         </select>
       </div>
       <div class="field">
-        <label for="v-condition">Overall condition (optional)</label>
-        <select id="v-condition" name="condition">
+        <label for="v-condition">Overall condition <span class="req" aria-hidden="true">*</span></label>
+        <select id="v-condition" name="condition" required>
           <option value="">Select&hellip;</option>
           <option>Recently updated throughout</option>
           <option>Well maintained, some updates</option>
@@ -113,10 +120,10 @@
     </div>
 
     <div class="field">
-      <label for="v-notes">Anything I should know?</label>
-      <textarea id="v-notes" name="notes" maxlength="4000" aria-describedby="v-notes-help"
+      <label for="v-notes">Anything I should know? <span class="req" aria-hidden="true">*</span></label>
+      <textarea id="v-notes" name="notes" maxlength="4000" required aria-describedby="v-notes-help"
         placeholder="For example: roof replaced four years ago, finished basement, backs up to the woods, or planning to buy another home after selling."></textarea>
-      <p class="field__help" id="v-notes-help">Optional. Up to 4,000 characters.</p>
+      <p class="field__help" id="v-notes-help">One line is plenty. Up to 4,000 characters.</p>
     </div>
 
     <div class="form-status" aria-live="polite"></div>

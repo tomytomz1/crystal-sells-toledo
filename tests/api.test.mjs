@@ -259,6 +259,90 @@ describe("POST /api/lead - validation", () => {
     assert.equal((await call({ body })).json().code, "MISSING_ADDRESS");
   });
 
+  /* Regression: a HubSpot contact was created from a real /home-value
+     submission with an empty phone number. `phone` carried no `required`
+     attribute and the server accepted the blank, so the row looked like a
+     lead and could not be called. Every visitor-facing field is mandatory
+     now, and each one is asserted individually - a single "the full payload
+     is accepted" test would stay green if any one check were dropped. */
+  describe("every visitor-facing field is mandatory", () => {
+    beforeEach(() => _resetRateLimit());
+
+    const homeValueRequired = [
+      ["phone", "MISSING_PHONE"],
+      ["property_address", "MISSING_ADDRESS"],
+      ["timeline", "MISSING_TIMELINE"],
+      ["condition", "MISSING_CONDITION"],
+      ["notes", "MISSING_NOTES"],
+      ["first_name", "MISSING_FIRST_NAME"],
+      ["last_name", "MISSING_LAST_NAME"],
+      ["email", "MISSING_EMAIL"],
+    ];
+
+    for (const [field, code] of homeValueRequired) {
+      for (const [label, value] of [["absent", undefined], ["blank", ""], ["whitespace", "   "]]) {
+        test(`home_value with ${label} ${field} is rejected`, async () => {
+          const body = { ...validHomeValue };
+          if (value === undefined) delete body[field]; else body[field] = value;
+          const res = await call({ body });
+          assert.equal(res.statusCode, 422, `${field} ${label} should be a 422`);
+          assert.equal(res.json().code, code);
+          assert.equal(res.json().ok, false);
+        });
+      }
+    }
+
+    for (const [field, code] of [["phone", "MISSING_PHONE"], ["topic", "MISSING_TOPIC"],
+                                 ["message", "MISSING_MESSAGE"]]) {
+      test(`contact with a blank ${field} is rejected`, async () => {
+        const res = await call({ body: { ...validContact, [field]: "" } });
+        assert.equal(res.statusCode, 422);
+        assert.equal(res.json().code, code);
+      });
+    }
+
+    /* The bug's exact shape: everything else present and correct, phone
+       empty. Anything other than a 422 means the row reaches the CRM. */
+    test("the reported failure - a complete lead with no phone - never reaches the CRM", async () => {
+      const res = await call({ body: { ...validHomeValue, phone: "" } });
+      assert.equal(res.statusCode, 422);
+      assert.equal(res.json().code, "MISSING_PHONE");
+      assert.match(res.json().message, /phone/i);
+      /* Not the 503 the endpoint returns once a payload is accepted and the
+         CRM is unconfigured - that would mean validation had let it past. */
+      assert.notEqual(res.statusCode, 503);
+    });
+
+    test("a partial phone number is rejected, not stored as typed", async () => {
+      for (const partial of ["419", "41955", "(419) 555-12", "call me"]) {
+        const res = await call({ body: { ...validHomeValue, phone: partial } });
+        assert.equal(res.json().code, "INVALID_PHONE", partial + " should be rejected");
+      }
+    });
+
+    test("a full number still passes, in every shape a visitor might type", async () => {
+      for (const good of ["4195551234", "(419) 555-1234", "419-555-1234", "1 419 555 1234",
+                          "+44 20 7946 0000"]) {
+        const out = validateLead({ ...validHomeValue, phone: good });
+        assert.ok(out.lead.phone.replace(/\D/g, "").length >= 10, good + " should be accepted");
+      }
+    });
+
+    /* The visitor has to be able to act on the rejection. A code alone in the
+       status box tells them nothing about which field to go back to. */
+    test("each rejection names the field in words the form uses", async () => {
+      const named = {
+        phone: /phone/i, timeline: /sell/i, condition: /condition/i,
+        notes: /house/i, property_address: /address/i,
+      };
+      for (const [field, pattern] of Object.entries(named)) {
+        const res = await call({ body: { ...validHomeValue, [field]: "" } });
+        assert.match(res.json().message, pattern, field + " message should name the field");
+        assert.doesNotMatch(res.json().message, /_/, field + " message leaks a field key");
+      }
+    });
+  });
+
   test("required fields serialize and normalise correctly", () => {
     const out = validateLead({
       ...validContact,

@@ -652,7 +652,14 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .form { display: grid; gap: 1.15rem; }
 .form__row { display: grid; gap: 1.15rem; grid-template-columns: 1fr 1fr; }
 @media (max-width: 620px) { .form__row { grid-template-columns: 1fr; } }
-.field { display: grid; gap: .45rem; }
+/* `align-content: start` matters as soon as one cell of a .form__row carries
+   help text and its partner does not: the row makes both cells the same
+   height, and a stretching grid grew the SHORTER cell's input to fill the
+   difference. Phone gained a help line and the email box beside it rendered
+   85px tall against phone's 60px, with the two inputs no longer even on the
+   same baseline. Packed to the top, both inputs keep their own height and the
+   help text simply hangs below its own field. */
+.field { display: grid; gap: .45rem; align-content: start; }
 .field > label {
   /* Was .69rem (about 11px). Uppercase, letterspaced text loses legibility
      far faster than sentence case as it shrinks, so the smallest labels on

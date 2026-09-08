@@ -87,12 +87,44 @@ POST /api/lead     JSON only · 16 KB cap · same-origin
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | non-JSON content type |
 | 400 | `INVALID_JSON` | unparseable body |
 | 400 | `REJECTED` | honeypot filled (server-side check) |
-| 422 | `MISSING_FIRST_NAME` `MISSING_LAST_NAME` `MISSING_EMAIL` `INVALID_EMAIL` `MISSING_FORM_TYPE` `UNKNOWN_FORM_TYPE` `MISSING_ADDRESS` `MISSING_MESSAGE` `FIELD_TOO_LONG` | validation |
+| 422 | `MISSING_FIRST_NAME` `MISSING_LAST_NAME` `MISSING_EMAIL` `INVALID_EMAIL` `MISSING_PHONE` `INVALID_PHONE` `MISSING_FORM_TYPE` `UNKNOWN_FORM_TYPE` `MISSING_ADDRESS` `MISSING_TIMELINE` `MISSING_CONDITION` `MISSING_NOTES` `MISSING_TOPIC` `MISSING_MESSAGE` `FIELD_TOO_LONG` | validation |
 | 429 | `RATE_LIMITED` | >5 per 10 min per IP |
 | 503 | `NOT_CONFIGURED` | `HUBSPOT_ACCESS_TOKEN` absent |
 | 502 | `DELIVERY_FAILED` | HubSpot call failed, or returned something unusable |
 
 Responses never contain exception text, stack traces or credential material.
+
+### Required fields (server-enforced)
+
+**Every visitor-facing field on both forms is mandatory.** There are no optional
+inputs left.
+
+| Form | Required |
+|---|---|
+| `home_value` | `property_address` `first_name` `last_name` `email` `phone` `timeline` `condition` `notes` |
+| `contact` | `first_name` `last_name` `email` `phone` `topic` `message` |
+
+`phone` additionally has to contain **at least 10 digits** after normalisation —
+`MISSING_PHONE` for a blank, `INVALID_PHONE` for something shorter. Ten is a US
+number without its country code and no international number is shorter, so this
+rejects `1234` and `call me` without rejecting a real lead. The upper bound is
+the existing 30-character cap, applied first.
+
+This replaced an earlier contract in which `phone`, `timeline`, `condition`,
+`notes` and `topic` were optional. A real HubSpot contact was created from a
+`/home-value` submission carrying no phone number: a row that looks like a lead
+in the CRM and cannot be called. Optionality, not a bug in the mapping, was the
+cause.
+
+Both halves are enforced and both are pinned by `tools/check.mjs`:
+
+- the `required` attribute on every input, select and textarea, on every page
+  that renders a form (the honeypot `_gotcha` must **not** be required);
+- the rejection in `api/_lib/validate.mjs`, which is the guarantee — markup can
+  be bypassed.
+
+Rejection messages name the field in the words the form uses ("Please choose
+when you might sell."), never a field key.
 
 ### Field limits (server-enforced)
 
@@ -462,17 +494,19 @@ run against the live Google API** — every test stubs Google.
 
 ## 5. Tests
 
-`npm test` → build + check + **229 tests, all passing**.
+`npm test` → build + check + **287 tests, all passing** (95 api + 102 browser
++ 90 hubspot, run as three suites; CI runs them together).
 
 - `tests/api.test.mjs` — endpoint contract, validation, limits, secret leakage,
   PII redaction, and the dormant Zoho mapping
-- `tests/hubspot.test.mjs` — **66 tests** covering the live delivery path: create,
+- `tests/hubspot.test.mjs` — **90 tests** covering the live delivery path: create,
   update, dedupe, 409 conflict resolution, 401/403/429/5xx, malformed responses,
   missing token, lookup/create/update failures, detail-history append and
   trimming, attribution preservation, and token non-leakage
 - `tests/browser.test.mjs` — real Chromium: hero layout across 7 viewports,
-  first-touch preservation, step behaviour, keyboard operation, analytics, and
-  **14 address-autocomplete tests against a stubbed Google**
+  first-touch preservation, step behaviour, keyboard operation, analytics,
+  **14 address-autocomplete tests against a stubbed Google**, and the
+  mandatory-field guard on both forms
 
 All HubSpot tests run against a **stubbed global fetch**. They prove the client
 behaves correctly against HubSpot's documented contract. They do **not** by
@@ -523,6 +557,11 @@ These were the result of a compliance review. Breaking them has legal consequenc
 11. **Asset cache busting.** `/assets/*` is served `immutable` for a year;
    `tools/build.mjs` content-hashes CSS and JS. Remove it and new code will never
    reach returning visitors.
+12. **Every form field is mandatory.** Both in the markup and in
+   `api/_lib/validate.mjs`. A lead reached HubSpot with no phone number because
+   `phone` was optional; a contact Crystal cannot call is not a lead. Making any
+   field optional again is a deliberate contract change, not a tidy-up — two
+   `tools/check.mjs` guards fail the build if either half is dropped.
 
 ---
 

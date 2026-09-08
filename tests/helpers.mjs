@@ -39,6 +39,7 @@ export const validContact = {
   last_name: "Doe",
   email: "jane@example.com",
   phone: "4195551234",
+  topic: "Selling my home",
   message: "I would like to talk about selling.",
   page: "/contact",
   attribution: {
