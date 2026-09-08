@@ -13,6 +13,7 @@
 import { randomBytes } from "node:crypto";
 import { validateLead, FieldError } from "./_lib/validate.mjs";
 import { createLead, isConfigured } from "./_lib/hubspot.mjs";
+import { sendAcknowledgement, classifyMailError } from "./_lib/mail.mjs";
 import { readBody, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
@@ -135,6 +136,36 @@ export default async function handler(req, res) {
       action: result.action,
       ms: Date.now() - started,
     });
+
+    /* --- acknowledgement ----------------------------------------------
+       Strictly after HubSpot has confirmed BOTH the contact and the
+       timeline activity - createLead throws otherwise, so reaching this
+       line IS the confirmation. The lead is already safe; everything
+       below is a courtesy to the visitor.
+
+       Awaited, never fire-and-forget: Vercel may freeze the container the
+       moment the response is written, which would kill an in-flight SMTP
+       conversation somewhere in the middle. Awaiting costs a second or
+       two of function time and is the only way the send actually happens.
+
+       Every failure is swallowed. A refused connection, a bad password, a
+       rejected recipient - none of them may turn a lead that IS in the
+       CRM into a submission the visitor is told to retry, because
+       retrying would produce a duplicate enquiry against a contact that
+       already has this one. The response contract below is unchanged and
+       carries no email status: whether Crystal's mail server answered is
+       not the browser's business. */
+    try {
+      const ack = await sendAcknowledgement(payload.lead, { submission_id: sid });
+      if (ack.sent) log("lead.ack.sent", { submission_id: sid, form_type: payload.lead.form_type });
+      else log("lead.ack.skipped", { submission_id: sid, reason: ack.reason });
+    } catch (mailErr) {
+      /* log(), not logError(): logError emits err.message, and a
+         Nodemailer error's message carries the recipient address and the
+         raw server response. Only the classification is safe. */
+      log("lead.ack.failed", { submission_id: sid, reason: classifyMailError(mailErr) });
+    }
+
     return send(res, 200, { ok: true, submission_id: sid });
   } catch (err) {
     logError("lead.delivery_failed", err, { submission_id: sid, ms: Date.now() - started });
