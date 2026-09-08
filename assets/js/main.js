@@ -374,6 +374,11 @@
             form_type: formType,
             submission_id: r.json.submission_id
           });
+          /* GA4's acquisition key event. Keep the internal success event
+             above for support; only generate_lead is a lead key event.
+             This shares the confirmed-server-success gate, never a click
+             or form-start trigger. No entered fields or invented value. */
+          analytics.track("generate_lead", { form_type: formType });
           /* Kept for support, never rendered. */
           form.dataset.submissionId = r.json.submission_id || "";
 

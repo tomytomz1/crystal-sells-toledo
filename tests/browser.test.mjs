@@ -1038,19 +1038,60 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.close();
   });
 
-  test("lead submission reports success to gtag", async () => {
+  for (const path of ["/", "/home-value", "/43551-seller-review", "/contact"]) {
+  test(`${path}: confirmed lead emits one internal and one GA4 success without entered fields`, async () => {
     const p = await page({ apiBody: { ok: true, submission_id: "csv_ga4" } });
     await p.addInitScript(() => {
       window.__gtag = [];
       window.gtag = function () { window.__gtag.push([].slice.call(arguments)); };
     });
-    await submitHomeValue(p, "/");
+    if (path === "/contact") {
+      await p.goto(base + path);
+      await fillContact(p);
+      await p.locator('form[data-form] button[type=submit]').click();
+      await p.waitForFunction(() => document.querySelector('.form-status').textContent.includes('has been received'));
+    } else {
+      await submitHomeValue(p, path);
+    }
     const calls = await p.evaluate(() => window.__gtag);
     const evt = calls.find((c) => c[1] === "lead_submit_success");
     assert.ok(evt, "lead_submit_success never reached gtag");
     assert.equal(evt[2].submission_id, "csv_ga4");
+    assert.equal(calls.filter((c) => c[1] === "lead_submit_success").length, 1);
+    const leads = calls.filter((c) => c[1] === "generate_lead");
+    assert.equal(leads.length, 1);
+    assert.equal(leads[0][2].form_type, path === "/contact" ? "contact" : "home_value");
+    assert.equal(leads[0][2].page, path);
+    assert.deepEqual(Object.keys(leads[0][2]).sort(),
+      ["form_type", "page", "utm_campaign", "utm_medium", "utm_source"]);
+    assert.doesNotMatch(JSON.stringify(calls), /sam@example|jane@example|Louisiana|Rivera|Please call me|Jane|Doe/);
     await p.close();
   });
+  }
+
+  for (const outcome of [
+    { apiStatus: 200, apiBody: { ok: false, code: "REJECTED" } },
+    { apiStatus: 400, apiBody: { ok: false, code: "REJECTED" } },
+    { apiStatus: 403, apiBody: { ok: false, code: "FORBIDDEN" } },
+    { apiStatus: 500, apiBody: { ok: true } },
+  ]) {
+    test(`unconfirmed response ${outcome.apiStatus}/${outcome.apiBody.ok} never counts a lead`, async () => {
+      const p = await page(outcome);
+      await p.addInitScript(() => {
+        window.__gtag = [];
+        window.gtag = function () { window.__gtag.push([].slice.call(arguments)); };
+      });
+      await p.goto(base + "/contact");
+      await fillContact(p);
+      assert.equal((await p.evaluate(() => window.__gtag)).filter((c) =>
+        ["generate_lead", "lead_submit_success"].includes(c[1])).length, 0);
+      await p.locator('form[data-form] button[type=submit]').click();
+      await p.waitForFunction(() => window.__gtag.some((c) => c[1] === 'lead_submit_error'));
+      const calls = await p.evaluate(() => window.__gtag);
+      assert.equal(calls.filter((c) => ["generate_lead", "lead_submit_success"].includes(c[1])).length, 0);
+      await p.close();
+    });
+  }
 
   test("the site works with no analytics vendor at all", async () => {
     /* gtag is absent in this build. Nothing may throw, and the funnel must
