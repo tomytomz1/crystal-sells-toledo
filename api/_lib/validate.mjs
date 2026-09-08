@@ -140,12 +140,16 @@ export function validateLead(raw) {
   const notes = cap("notes", squashMultiline(raw.notes));
 
   /* The enquiry block is the whole lead. A contact row carrying a name and an
-     email but no address, timeline, condition or note looks like a lead in
-     HubSpot and is worthless to work: there is nothing to price, nothing to
-     schedule against and nothing to open a call with. Every visible field on
-     the form is therefore required here as well as in the markup - the
-     `required` attribute is a convenience for the visitor, never the
-     guarantee. */
+     email but no address, timeline or condition looks like a lead in HubSpot
+     and is worthless to work: there is nothing to price, nothing to schedule
+     against and nothing to open a call with. Those are required here as well
+     as in the markup - the `required` attribute is a convenience for the
+     visitor, never the guarantee.
+
+     `notes` is the deliberate exception. It asks "Anything I should know?",
+     which has no answer for a homeowner who has nothing to add, so requiring
+     it bought a field full of "N/A", "none" and "." rather than better leads.
+     It is still normalised and capped when present. */
   if (form_type === "home_value") {
     if (!property_address)
       throw new FieldError("MISSING_ADDRESS", "Property address is required");
@@ -153,9 +157,6 @@ export function validateLead(raw) {
       throw new FieldError("MISSING_TIMELINE", "Please choose when you might sell.");
     if (!condition)
       throw new FieldError("MISSING_CONDITION", "Please choose the home's overall condition.");
-    if (!notes)
-      throw new FieldError("MISSING_NOTES",
-        "Please tell Crystal a little about the house. One line is plenty.");
   }
   if (form_type === "contact") {
     if (!topic)

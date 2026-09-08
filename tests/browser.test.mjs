@@ -214,11 +214,10 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await fillStep2(p);
   }
 
-  test("no step-2 field can be left blank", async () => {
+  test("no step-2 field except notes can be left blank", async () => {
     const blankable = [
       ["#v-phone", "input"], ["#v-timing", "select"], ["#v-condition", "select"],
-      ["#v-notes", "input"], ["#v-first", "input"], ["#v-last", "input"],
-      ["#v-email", "input"],
+      ["#v-first", "input"], ["#v-last", "input"], ["#v-email", "input"],
     ];
     for (const [sel, kind] of blankable) {
       const p = await page();
@@ -233,6 +232,25 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
         `a blank ${sel} produced a success panel`);
       await p.close();
     }
+  });
+
+  /* The opposite pin. "Anything I should know?" has no answer for a homeowner
+     with nothing to add, so requiring it produced "N/A" and "none" rather than
+     better leads. A blank notes field must submit, and the lead must still
+     carry every other value. */
+  test("notes can be left blank and the lead still submits", async () => {
+    const p = await page();
+    let sent = null;
+    p.on("request", (r) => { if (r.url().includes("/api/lead")) sent = JSON.parse(r.postData() || "{}"); });
+    await atStep2(p);
+    await p.fill("#v-notes", "");
+    await p.click('[data-step="2"] button[type=submit]');
+    await p.waitForTimeout(400);
+    assert.ok(sent, "a blank notes field blocked the submission");
+    assert.equal(sent.notes, "");
+    assert.equal(sent.phone, "(419) 555-1234");
+    assert.equal(sent.timeline, "Within 3 months");
+    await p.close();
   });
 
   test("a partial phone number is refused before any request is made", async () => {
@@ -288,14 +306,13 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
      reader announces. Both have to be there, on every page carrying the
      form, or the two halves of the promise disagree. */
   test("every required field is announced as required on every form page", async () => {
-    for (const [path, ids] of [
-      ["/", ["v-address", "v-first", "v-last", "v-email", "v-phone", "v-timing",
-             "v-condition", "v-notes"]],
-      ["/home-value", ["v-address", "v-first", "v-last", "v-email", "v-phone",
-                       "v-timing", "v-condition", "v-notes"]],
-      ["/43551-seller-review", ["v-address", "v-first", "v-last", "v-email", "v-phone",
-                                "v-timing", "v-condition", "v-notes"]],
-      ["/contact", ["c-first", "c-last", "c-email", "c-phone", "c-topic", "c-message"]],
+    const HOME_VALUE = ["v-address", "v-first", "v-last", "v-email", "v-phone",
+                        "v-timing", "v-condition"];
+    for (const [path, ids, optional] of [
+      ["/", HOME_VALUE, ["v-notes"]],
+      ["/home-value", HOME_VALUE, ["v-notes"]],
+      ["/43551-seller-review", HOME_VALUE, ["v-notes"]],
+      ["/contact", ["c-first", "c-last", "c-email", "c-phone", "c-topic", "c-message"], []],
     ]) {
       const p = await page();
       await p.goto(base + path, { waitUntil: "load" });
@@ -305,6 +322,16 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
           return el ? el.required : null;
         }, id);
         assert.equal(req, true, `#${id} is not required on ${path}`);
+      }
+      /* And the fields that must stay optional. A screen reader announces
+         `required`, not the decorative asterisk, so this is the assertion
+         that matters for "notes is optional again". */
+      for (const id of optional) {
+        const req = await p.evaluate((i) => {
+          const el = document.getElementById(i);
+          return el ? el.required : null;
+        }, id);
+        assert.equal(req, false, `#${id} is marked required on ${path}`);
       }
       const hp = await p.evaluate(() => {
         const el = document.querySelector('input[name="_gotcha"]');

@@ -2,9 +2,21 @@
 
 **Date:** 2026-09-08
 **Scope:** `/api/lead` validation contract, both website forms, one CSS fix
-**Status:** implemented, tested, not yet deployed at time of writing
+**Status:** shipped to production as `14f1b9e`.
+**Amended the same day — see below before relying on the contract here.**
 
 This document assumes no repo access and no memory of previous conversations.
+
+> **AMENDMENT (2026-09-08, later the same day).** The title of this document is
+> no longer true. `notes` was made **optional again** a few hours after this
+> release, and the `MISSING_NOTES` rejection was removed. Everything else here
+> still stands: `phone`, `timeline` and `condition` on `home_value`, and `topic`
+> on `contact`, remain required, and the ten-digit phone rule is unchanged. The
+> phone help text was also reworded from "Ten digits, for calls or texts." to
+> "Ten-digit phone number." so it makes no implicit claim about SMS consent.
+> See `docs/updates/2026-09-08-notes-optional-again.md`. This document is left
+> otherwise intact as the record of what the mandatory-fields release did and
+> why.
 
 ---
 
@@ -230,17 +242,19 @@ like a working guard).
    deployed at time of writing. Production still accepts blank phone numbers
    until it is.
 2. **Watch conversion on step 2.** This is the honest cost of the change: step 2
-   went from three effectively-required fields to seven. Some visitors who would
+   went from three effectively-required fields to seven — six after `notes` was
+   made optional again the same day. Some visitors who would
    have submitted a partial form will now abandon. That trade was made
    deliberately — a lead you cannot call is not a lead — but it is a real effect
    and only live data will size it.
-3. **Decide about `notes` specifically.** "Anything I should know?" is a
-   free-text field with no obvious answer for a homeowner who has nothing to
-   add; the likeliest outcome for some share of visitors is that they type
-   "n/a". If that shows up in HubSpot, making `notes` optional again is a
-   two-line change (remove `required` from the textarea, remove the
-   `MISSING_NOTES` throw, remove `notes` from the `check.mjs` list and from the
-   two test lists). Every other field is a much clearer keep.
+3. ~~**Decide about `notes` specifically.**~~ **DONE — see the amendment at the
+   top.** "Anything I should know?" is a free-text field with no obvious answer
+   for a homeowner who has nothing to add, and the likeliest outcome was that
+   some share of visitors would type "n/a". That call was made the same day:
+   `notes` is **optional again** and `MISSING_NOTES` no longer exists. Nothing
+   in this item is left to do. Every other field was a much clearer keep and
+   all of them stayed required. Full detail in
+   `docs/updates/2026-09-08-notes-optional-again.md`.
 4. **Send one real test submission after deploying** and confirm the HubSpot
    contact carries the phone number. Nothing here proves live HubSpot behaviour.
 
