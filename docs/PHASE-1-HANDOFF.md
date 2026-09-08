@@ -87,7 +87,7 @@ POST /api/lead     JSON only · 16 KB cap · same-origin
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | non-JSON content type |
 | 400 | `INVALID_JSON` | unparseable body |
 | 400 | `REJECTED` | honeypot filled (server-side check) |
-| 422 | `MISSING_FIRST_NAME` `MISSING_LAST_NAME` `MISSING_EMAIL` `INVALID_EMAIL` `MISSING_PHONE` `INVALID_PHONE` `MISSING_FORM_TYPE` `UNKNOWN_FORM_TYPE` `MISSING_ADDRESS` `MISSING_TIMELINE` `MISSING_CONDITION` `MISSING_NOTES` `MISSING_TOPIC` `MISSING_MESSAGE` `FIELD_TOO_LONG` | validation |
+| 422 | `MISSING_FIRST_NAME` `MISSING_LAST_NAME` `MISSING_EMAIL` `INVALID_EMAIL` `MISSING_PHONE` `INVALID_PHONE` `MISSING_FORM_TYPE` `UNKNOWN_FORM_TYPE` `MISSING_ADDRESS` `MISSING_TIMELINE` `MISSING_CONDITION` `MISSING_TOPIC` `MISSING_MESSAGE` `FIELD_TOO_LONG` | validation |
 | 429 | `RATE_LIMITED` | >5 per 10 min per IP |
 | 503 | `NOT_CONFIGURED` | `HUBSPOT_ACCESS_TOKEN` absent |
 | 502 | `DELIVERY_FAILED` | HubSpot call failed, or returned something unusable |
@@ -96,13 +96,18 @@ Responses never contain exception text, stack traces or credential material.
 
 ### Required fields (server-enforced)
 
-**Every visitor-facing field on both forms is mandatory.** There are no optional
-inputs left.
+**Every visitor-facing field on both forms is mandatory except `notes`.**
 
-| Form | Required |
-|---|---|
-| `home_value` | `property_address` `first_name` `last_name` `email` `phone` `timeline` `condition` `notes` |
-| `contact` | `first_name` `last_name` `email` `phone` `topic` `message` |
+| Form | Required | Optional |
+|---|---|---|
+| `home_value` | `property_address` `first_name` `last_name` `email` `phone` `timeline` `condition` | `notes` |
+| `contact` | `first_name` `last_name` `email` `phone` `topic` `message` | — |
+
+`notes` ("Anything I should know?") was briefly required and was made optional
+again the same day. The field has no answer for a homeowner with nothing to add,
+so requiring it bought a column of "N/A", "none" and "." rather than better
+leads. It is still normalised and capped at 4,000 characters when given, and
+still renders as a row in the enquiry block when blank.
 
 `phone` additionally has to contain **at least 10 digits** after normalisation —
 `MISSING_PHONE` for a blank, `INVALID_PHONE` for something shorter. Ten is a US
@@ -118,10 +123,11 @@ cause.
 
 Both halves are enforced and both are pinned by `tools/check.mjs`:
 
-- the `required` attribute on every input, select and textarea, on every page
-  that renders a form (the honeypot `_gotcha` must **not** be required);
+- the `required` attribute on every required input, select and textarea, on
+  every page that renders a form — and its **absence** on `notes` and on the
+  honeypot `_gotcha`, which are pinned optional in the other direction;
 - the rejection in `api/_lib/validate.mjs`, which is the guarantee — markup can
-  be bypassed.
+  be bypassed — and, for `notes`, the absence of one.
 
 Rejection messages name the field in the words the form uses ("Please choose
 when you might sell."), never a field key.
@@ -557,11 +563,13 @@ These were the result of a compliance review. Breaking them has legal consequenc
 11. **Asset cache busting.** `/assets/*` is served `immutable` for a year;
    `tools/build.mjs` content-hashes CSS and JS. Remove it and new code will never
    reach returning visitors.
-12. **Every form field is mandatory.** Both in the markup and in
+12. **Every form field is mandatory except `notes`.** Both in the markup and in
    `api/_lib/validate.mjs`. A lead reached HubSpot with no phone number because
    `phone` was optional; a contact Crystal cannot call is not a lead. Making any
-   field optional again is a deliberate contract change, not a tidy-up — two
-   `tools/check.mjs` guards fail the build if either half is dropped.
+   other field optional again is a deliberate contract change, not a tidy-up —
+   `tools/check.mjs` guards fail the build if either half is dropped. `notes`
+   is pinned the other way, and re-requiring it also fails the build: it asks
+   "Anything I should know?", and forcing an answer collects "N/A".
 
 ---
 

@@ -761,15 +761,22 @@ for (const file of pages) {
   }
   if (!formPages) fail("site", "no page carries the home_value form - the funnel has gone missing");
 
-  /* Every visitor-facing field is mandatory. A lead reached HubSpot with no
-     phone number because `phone` carried no `required` attribute and the
-     server accepted a blank; a contact row with no way to call the person is
-     not a lead. The markup and the server must agree, so both are pinned:
-     losing either half is how the blank comes back. The honeypot is the one
-     field that must NOT be required - a bot filling it is the point. */
+  /* Every visitor-facing field except `notes` is mandatory. A lead reached
+     HubSpot with no phone number because `phone` carried no `required`
+     attribute and the server accepted a blank; a contact row with no way to
+     call the person is not a lead. The markup and the server must agree, so
+     both are pinned: losing either half is how the blank comes back.
+
+     Two fields must NOT be required, and are pinned in that direction for the
+     same reason. `_gotcha` is the honeypot - a bot filling it is the point.
+     `notes` asks "Anything I should know?", which has no answer for a
+     homeowner with nothing to add; requiring it produced "N/A" and "none"
+     rather than better leads, so re-requiring it must be a deliberate change
+     and not a copy-paste. */
   const MUST_BE_REQUIRED =
     ["property_address", "first_name", "last_name", "email", "phone", "timeline",
-     "condition", "notes"];
+     "condition"];
+  const MUST_NOT_BE_REQUIRED = { home_value: ["notes"], contact: [] };
   for (const file of new Set([...pages, "contact.html"])) {
     if (!existsSync(join(ROOT, file))) continue;
     const html = readFileSync(join(ROOT, file), "utf8");
@@ -784,7 +791,13 @@ for (const file of pages) {
         '<(?:input|select|textarea)\\b[^>]*\\bname="' + name + '"[^>]*>').exec(html);
       if (!tag) { fail(file, `the ${name} field is missing from the form`); continue; }
       if (!/\brequired\b/.test(tag[0]))
-        fail(file, `${name} is not marked required - every form field is mandatory`);
+        fail(file, `${name} is not marked required - every form field except notes is`);
+    }
+    for (const name of MUST_NOT_BE_REQUIRED[isHomeValue ? "home_value" : "contact"]) {
+      const tag = new RegExp(
+        '<(?:input|select|textarea)\\b[^>]*\\bname="' + name + '"[^>]*>').exec(html);
+      if (tag && /\brequired\b/.test(tag[0]))
+        fail(file, `${name} is marked required - it is deliberately optional`);
     }
     const hp = /<input[^>]*\bname="_gotcha"[^>]*>/.exec(html);
     if (hp && /\brequired\b/.test(hp[0]))
@@ -796,11 +809,15 @@ for (const file of pages) {
      guarantee, and CI must notice if a rejection is ever quietly dropped. */
   const validateSrc = readFileSync(join(ROOT, "..", "api/_lib/validate.mjs"), "utf8");
   for (const code of ["MISSING_PHONE", "INVALID_PHONE", "MISSING_TIMELINE",
-                      "MISSING_CONDITION", "MISSING_NOTES", "MISSING_TOPIC",
+                      "MISSING_CONDITION", "MISSING_TOPIC",
                       "MISSING_ADDRESS", "MISSING_MESSAGE"]) {
     if (!validateSrc.includes(code))
       fail("api/_lib/validate.mjs", `${code} is gone - that field is no longer enforced server-side`);
   }
+  /* And the other direction: `notes` is optional by decision, so a rejection
+     for it reappearing is a regression, not a tightening. */
+  if (/MISSING_NOTES/.test(validateSrc))
+    fail("api/_lib/validate.mjs", "notes is rejected when blank - it is deliberately optional");
 }
 
 /* --- report ---------------------------------------------------------- */

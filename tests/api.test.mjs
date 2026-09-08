@@ -262,10 +262,11 @@ describe("POST /api/lead - validation", () => {
   /* Regression: a HubSpot contact was created from a real /home-value
      submission with an empty phone number. `phone` carried no `required`
      attribute and the server accepted the blank, so the row looked like a
-     lead and could not be called. Every visitor-facing field is mandatory
-     now, and each one is asserted individually - a single "the full payload
-     is accepted" test would stay green if any one check were dropped. */
-  describe("every visitor-facing field is mandatory", () => {
+     lead and could not be called. Every visitor-facing field except `notes`
+     is mandatory now, and each one is asserted individually - a single "the
+     full payload is accepted" test would stay green if any one check were
+     dropped. `notes` is asserted in the other direction, below. */
+  describe("every visitor-facing field except notes is mandatory", () => {
     beforeEach(() => _resetRateLimit());
 
     const homeValueRequired = [
@@ -273,7 +274,6 @@ describe("POST /api/lead - validation", () => {
       ["property_address", "MISSING_ADDRESS"],
       ["timeline", "MISSING_TIMELINE"],
       ["condition", "MISSING_CONDITION"],
-      ["notes", "MISSING_NOTES"],
       ["first_name", "MISSING_FIRST_NAME"],
       ["last_name", "MISSING_LAST_NAME"],
       ["email", "MISSING_EMAIL"],
@@ -291,6 +291,39 @@ describe("POST /api/lead - validation", () => {
         });
       }
     }
+
+    /* The opposite pin. "Anything I should know?" has no answer for a
+       homeowner with nothing to add, so requiring it bought a field full of
+       "N/A", "none" and "." rather than better leads. A blank must go
+       through, and must still arrive as a normalised empty string rather
+       than undefined - the enquiry block renders every row. */
+    for (const [label, value] of [["absent", undefined], ["blank", ""],
+                                  ["whitespace", "   "], ["a newline", "\n\n"]]) {
+      test(`home_value with ${label} notes is accepted`, async () => {
+        const body = { ...validHomeValue };
+        if (value === undefined) delete body.notes; else body.notes = value;
+        const out = validateLead(body);
+        assert.equal(out.lead.notes, "");
+        /* Through the endpoint too: a 503 here is the unconfigured-CRM
+           refusal, which only happens AFTER validation accepted the lead.
+           A 422 would mean notes had been rejected. */
+        const res = await call({ body });
+        assert.notEqual(res.statusCode, 422, `${label} notes was rejected`);
+      });
+    }
+
+    test("notes is still normalised and capped when it is given", async () => {
+      const out = validateLead({ ...validHomeValue, notes: "  roof   2022 \n\n\n\n  attic " });
+      /* Runs of spaces collapse to one and four newlines collapse to a single
+         paragraph break; the ends are trimmed. squashMultiline deliberately
+         does NOT trim each line, so the spaces either side of the break
+         survive - that is existing behaviour, pinned here so a later change
+         to it is a decision rather than a surprise. */
+      assert.equal(out.lead.notes, "roof 2022 \n\n attic");
+      const res = await call({ body: { ...validHomeValue, notes: "x".repeat(4001) } });
+      assert.equal(res.statusCode, 422);
+      assert.equal(res.json().code, "FIELD_TOO_LONG");
+    });
 
     for (const [field, code] of [["phone", "MISSING_PHONE"], ["topic", "MISSING_TOPIC"],
                                  ["message", "MISSING_MESSAGE"]]) {
@@ -333,7 +366,7 @@ describe("POST /api/lead - validation", () => {
     test("each rejection names the field in words the form uses", async () => {
       const named = {
         phone: /phone/i, timeline: /sell/i, condition: /condition/i,
-        notes: /house/i, property_address: /address/i,
+        property_address: /address/i,
       };
       for (const [field, pattern] of Object.entries(named)) {
         const res = await call({ body: { ...validHomeValue, [field]: "" } });
