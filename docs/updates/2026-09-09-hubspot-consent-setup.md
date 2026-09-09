@@ -13,7 +13,7 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 ## 1. Why this is needed
 
 The website will offer two optional tick boxes: one for text messages, one for
-automated/AI voice calls. Two different things then have to be stored, and only
+automated/AI voice calls. Two different things then have to be stored, and
 only one of them can be built on what HubSpot already offers this integration.
 
 Neither is running in production today: the feature is off, and nothing below is
