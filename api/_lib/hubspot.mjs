@@ -23,6 +23,11 @@
  */
 
 import { buildDescription, buildSummary } from "./description.mjs";
+import { applySubmissionConsent } from "./consent.mjs";
+import {
+  consentStateEnabled, consentPropertiesToRead, fromHubSpotConsentProperties,
+  toHubSpotConsentProperties, emptyConsentState,
+} from "./hubspot-consent-state.mjs";
 import { log, logError } from "./log.mjs";
 
 const API = () => process.env.HUBSPOT_API_BASE || "https://api.hubapi.com";
@@ -245,13 +250,26 @@ function contactUrl(ref, { byEmail = false, properties = [] } = {}) {
   return "/crm/v3/objects/contacts/" + encodeURIComponent(ref) + (q ? "?" + q : "");
 }
 
-/** Search by email. Returns { id, detail } or null. */
+/**
+ * Search by email. Returns { id, consent } or null.
+ *
+ * `properties` carries the 23 consent properties ONLY while the feature is
+ * enabled. With it off the request body is byte-identical to the one this
+ * endpoint has always sent, which is what keeps "feature off" genuinely
+ * equivalent to today's production rather than merely similar.
+ *
+ * The consent read is not an optimisation - it is the thing that stops a new
+ * submission being folded into an ASSUMED empty state. An existing contact
+ * may already carry a STOP, a DNC, a revocation, or consent bound to a number
+ * they no longer use, and a form submission must fold into that, not over it.
+ */
 export async function findContactByEmail(email) {
+  const consentProps = consentPropertiesToRead();
   const res = await hubspotFetch("/crm/v3/objects/contacts/search", {
     method: "POST",
     body: JSON.stringify({
       filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }],
-      properties: ["email"],
+      properties: ["email", ...consentProps],
       limit: 1,
     }),
   });
@@ -261,7 +279,24 @@ export async function findContactByEmail(email) {
   const hit = json.results[0];
   if (!hit) return null;
   if (!hit.id) throw new Error("HUBSPOT_SEARCH_MALFORMED_RESPONSE");
-  return { id: String(hit.id) };
+  return {
+    id: String(hit.id),
+    consent: consentProps.length ? fromHubSpotConsentProperties(hit.properties || {}) : null,
+  };
+}
+
+/**
+ * Read one contact's consent state by id or email. Used only on the 409
+ * path, where a contact appeared between the search and the create and its
+ * state has therefore never been read.
+ */
+async function readConsentState(ref, { byEmail = false } = {}) {
+  const properties = consentPropertiesToRead();
+  if (!properties.length) return null;
+  const res = await hubspotFetch(contactUrl(ref, { byEmail, properties }));
+  const json = await readJson(res);
+  if (!res.ok) throw hubspotError("READ", res.status, json);
+  return fromHubSpotConsentProperties(json?.properties || {});
 }
 
 async function createContact(props) {
@@ -381,21 +416,68 @@ export async function createLead(payload) {
   const sid = payload.meta.submission_id;
   const email = payload.lead.email;
 
+  /* Consent current state. Absent entirely while the feature is off, in
+     which case every expression below collapses to the properties this
+     endpoint has always sent.
+
+     `payload.consent` is the server-owned evidence built in api/lead.js.
+     The transition itself belongs to applySubmissionConsent() in
+     api/_lib/consent.mjs and is NOT re-derived here - this function decides
+     WHEN to fold, never HOW. */
+  const consentOn = consentStateEnabled() && Boolean(payload.consent);
+  const foldConsent = (existingState) =>
+    consentOn
+      ? toHubSpotConsentProperties(
+          applySubmissionConsent(existingState, payload.consent), payload.consent)
+      : {};
+
   try {
     const found = await findContactByEmail(email);
     let result;
 
     if (found) {
-      result = await updateContact(found.id, toContactProperties(payload));
+      /* One PATCH, carrying the ordinary lead properties and the minimal
+         consent changes together. A second write would be a second chance
+         to half-succeed for no benefit. */
+      result = await updateContact(found.id, {
+        ...toContactProperties(payload),
+        ...foldConsent(found.consent),
+      });
     } else {
       try {
-        result = await createContact(toContactProperties(payload));
+        /* A genuinely new contact: nothing to fold into, so the empty state
+           is correct here and ONLY here. */
+        result = await createContact({
+          ...toContactProperties(payload),
+          ...foldConsent(consentOn ? emptyConsentState() : null),
+        });
       } catch (err) {
         if (!err.conflict) throw err;
         const ref = err.conflictId || email;
         const byEmail = !err.conflictId;
-        log("hubspot.create_conflict_resolved", { submission_id: sid, by_email: byEmail });
-        result = await updateContact(ref, toContactProperties(payload), byEmail);
+
+        /* THE RACE, AND WHY IT IS COMPLIANCE-SENSITIVE.
+           A contact appeared between the search and the create. Its consent
+           state has never been read, and it may already carry a STOP, a DNC
+           or a global do-not-contact - set by a webhook, an import or a
+           human seconds ago.
+
+           So the transition is recomputed against the ACTUAL state of the
+           contact that now exists, not against the empty state assumed a
+           moment ago. Reusing that empty state would let a ticked box grant
+           straight through a suppression this process had simply not seen
+           yet, which is the one outcome the whole suppression model exists
+           to prevent. */
+        const raced = consentOn ? await readConsentState(ref, { byEmail }) : null;
+        log("hubspot.create_conflict_resolved", {
+          submission_id: sid,
+          by_email: byEmail,
+          consent_state_refetched: consentOn,
+        });
+        result = await updateContact(ref, {
+          ...toContactProperties(payload),
+          ...foldConsent(raced),
+        }, byEmail);
       }
     }
 

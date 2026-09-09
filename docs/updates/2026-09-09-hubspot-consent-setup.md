@@ -10,6 +10,40 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 
 ---
 
+> ## COMPLETION NOTICE — 9 September 2026
+>
+> **The property creation described below is DONE.** This document was written
+> as instructions; the sections after this notice are kept in their original
+> form as the specification that was followed, so read them as "what was
+> built", not "what to build".
+>
+> - **HubSpot Starter is active** on the Crystal Sells Toledo portal.
+> - The **Communications consent** property group exists.
+> - **All 23 properties were created on 9 September 2026** and their
+>   definitions were independently verified against §2.
+> - **All six timestamp properties are genuine `datetime`** properties, not
+>   date-only pickers — the outcome §2e required.
+> - The three enumerations carry exactly the values listed in §2.
+>
+> **Still not done, and still gating activation:**
+>
+> - **Non-midnight timestamp retention is NOT tested.** Nobody has yet written
+>   a value with a real time to one of the six `*_at` properties, reloaded the
+>   record, and confirmed the time survived. The §6 verification step covering
+>   this remains outstanding. Until it passes, "these are datetime properties"
+>   is a portal setting that has been read, not a behaviour that has been
+>   observed.
+> - **§6a live durability findings are still unwritten.**
+> - **`COMMUNICATIONS_CONSENT_ENABLED` remains ABSENT from Vercel Production.**
+>   The feature is OFF. Creating the properties did not turn anything on, and
+>   neither did wiring the code to them.
+>
+> **Application writes to these properties** are the subject of a separate
+> phase, implemented in `docs/updates/2026-09-09-hubspot-consent-current-state.md`.
+> Read that document for what the code actually does with this schema.
+
+---
+
 ## 1. Why this is needed
 
 The website will offer two optional tick boxes: one for text messages, one for
@@ -22,7 +56,7 @@ active until it is turned on.
 | | Where it lives | Status |
 |---|---|---|
 | **Evidence** — what this person agreed to, when, for which number, in which exact words | The native HubSpot **form-submission timeline activity**, inside the enquiry block already written to the `message` field | **Implemented using the existing HubSpot form-submission contract.** Requires no new HubSpot schema, no new scopes and no change to the form — but consent evidence is **not active until the feature is enabled**. Practical durability in this portal is **not yet live-verified** — see §1a. |
-| **Current state** — are we allowed to text/call them *right now* | Custom contact properties | **Not implemented, and not possible yet.** The properties do not exist; this document creates them. Writes come in a follow-up change. |
+| **Current state** — are we allowed to text/call them *right now* | Custom contact properties | **Schema created 9 Sep 2026** (see the completion notice above). Application reads and writes implemented in the Phase 2 document. Like everything else here, **inactive until the feature is enabled**. |
 
 Keep the two ideas apart when reading the rest of this document:
 **technically supported by the existing integration** is not the same as
@@ -248,9 +282,10 @@ construction, which is not the same as proven immutable.
 3. Verify (§6).
 4. Deploy the branch to production with `COMMUNICATIONS_CONSENT_ENABLED` still
    `false`. Confirm nothing about the live site changed.
-5. Wire the current-state writes (a follow-up code change — this branch does not
-   write these properties, because writing to properties that do not exist would
-   break lead submission).
+5. Wire the current-state writes. This was deliberately a *later* code change
+   than the property creation, because writing to properties that do not exist
+   would break lead submission. Steps 1–3 are done, so this step is done too:
+   see `docs/updates/2026-09-09-hubspot-consent-current-state.md`.
 6. Set `COMMUNICATIONS_CONSENT_ENABLED=true` in **Vercel → Project → Settings →
    Environment Variables → Production**, then redeploy.
 7. Verify again (§6).

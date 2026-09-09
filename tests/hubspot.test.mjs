@@ -812,6 +812,18 @@ describe("findContactByEmail in isolation", () => {
 
   test("returns the id when it matches", async () => {
     stubFetch({ [SEARCH]: hit("13") });
-    assert.deepEqual(await findContactByEmail("jane@example.com"), { id: "13" });
+    /* `consent` is null while the communications-consent feature is off -
+       this suite sets no flag - so the lookup carries no consent state and
+       the search request itself asks for no consent properties. The
+       feature-on shape is covered in tests/consent-state.test.mjs. */
+    assert.deepEqual(await findContactByEmail("jane@example.com"), { id: "13", consent: null });
+  });
+
+  test("asks HubSpot for no consent properties while the feature is off", async () => {
+    const calls = stubFetch({ [SEARCH]: hit("13") });
+    await findContactByEmail("jane@example.com");
+    const body = calls.find((c) => c.key === SEARCH).body;
+    assert.deepEqual(body.properties, ["email"],
+      "the search asked for extra properties with the feature off");
   });
 });

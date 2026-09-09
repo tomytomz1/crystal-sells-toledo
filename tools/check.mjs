@@ -811,6 +811,35 @@ for (const file of pages) {
     .replace(/\/\*[\s\S]*?\*\//g, " ");
   if (/\bip\b|remoteAddress|x-forwarded-for/i.test(consentSrc))
     fail("api/_lib/consent.mjs", "reads an IP address - consent evidence deliberately stores no IP");
+  /* The HubSpot consent adapter owns every cst_ name. Scattering them back
+     into hubspot.mjs is how a schema contract quietly drifts from the
+     portal it describes - and how a suppression property gets written by
+     something that had no business writing one. */
+  const adapterPath = join(ROOT, "..", "api/_lib/hubspot-consent-state.mjs");
+  if (!existsSync(adapterPath))
+    fail("api/_lib/hubspot-consent-state.mjs", "missing - the consent state adapter is gone");
+  else {
+    const adapter = readFileSync(adapterPath, "utf8");
+    const hubspotSrcAll = readFileSync(join(ROOT, "..", "api/_lib/hubspot.mjs"), "utf8");
+    const strayNames = (hubspotSrcAll.match(/\bcst_[a-z_]+/g) || []);
+    if (strayNames.length)
+      fail("api/_lib/hubspot.mjs",
+        `hard-codes HubSpot consent property names (${[...new Set(strayNames)].join(", ")}) - they belong to api/_lib/hubspot-consent-state.mjs`);
+
+    const declared = (adapter.match(/"(cst_[a-z_]+)"/g) || []).map((m) => m.slice(1, -1));
+    if (new Set(declared).size !== 23)
+      fail("api/_lib/hubspot-consent-state.mjs",
+        `declares ${new Set(declared).size} consent properties - the approved HubSpot schema has exactly 23`);
+
+    /* Phase 2 reads suppression and never writes it. The write function is
+       the only place that could, so it is the only place checked. */
+    const writeFn = /export function toHubSpotConsentProperties[\s\S]*?\n}/.exec(adapter)?.[0] || "";
+    for (const suppression of ["smsSuppressed", "doNotCall", "doNotContact"])
+      if (new RegExp(`SUPPRESSION_PROPERTIES\\.${suppression}\\b`).test(writeFn))
+        fail("api/_lib/hubspot-consent-state.mjs",
+          `the write path references SUPPRESSION_PROPERTIES.${suppression} - an ordinary form submission must never write a suppression`);
+  }
+
   const permissionSrc = readFileSync(join(ROOT, "..", "api/_lib/permission.mjs"), "utf8");
   for (const fn of ["canSendSms", "canPlaceAutomatedVoiceCall"])
     if (!new RegExp(`export function ${fn}\\b`).test(permissionSrc))
