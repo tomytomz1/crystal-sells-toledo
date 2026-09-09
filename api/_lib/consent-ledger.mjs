@@ -126,7 +126,9 @@ export const LEDGER_COLUMNS = Object.freeze([
    The tokens are stable and PII-free. A ledger error can carry a
    connection string (the driver puts the host in the message) or the value
    that failed conversion (a phone number), so neither the message nor the
-   cause is ever logged — only the classification, through ledgerLogShape().
+   cause object is ever logged — only the classification, plus the
+   whitelisted structural fields described at driverShape(), through
+   ledgerLogShape().
    --------------------------------------------------------------------- */
 export const LEDGER_NOT_CONFIGURED = "CONSENT_LEDGER_NOT_CONFIGURED";
 export const LEDGER_PHONE_NOT_E164 = "CONSENT_LEDGER_PHONE_NOT_E164";
@@ -135,14 +137,56 @@ export const LEDGER_TIMEOUT = "CONSENT_LEDGER_TIMEOUT";
 export const LEDGER_APPEND_FAILED = "CONSENT_LEDGER_APPEND_FAILED";
 
 export class ConsentLedgerError extends Error {
-  constructor(token, detail = "") {
+  constructor(token, detail = "", driver = null) {
     /* `detail` names a FIELD or a reason class, never a value. */
     super(detail ? `${token}: ${detail}` : token);
     this.name = "ConsentLedgerError";
     this.token = token;
     this.detail = detail;
+    /* Structural facts about the underlying driver error, already
+       sanitised by driverShape(). Never the message, cause or stack. */
+    this.driver = driver;
     this.ledgerFailed = true;
   }
+}
+
+/* ---------------------------------------------------------------------
+   DRIVER STRUCTURE, WITHOUT DRIVER TEXT
+   ---------------------------------------------------------------------
+   CONSENT_LEDGER_APPEND_FAILED on its own cannot tell an operator whether
+   the driver was missing from the bundle, the host did not resolve, or the
+   database refused the credential. Those need different fixes, and on
+   9 September 2026 a preview deployment failed this way in 62ms with no way
+   to choose between them.
+
+   So two structural fields are allowed out, and only if they survive a
+   whitelist: an error CLASS name (`NeonDbError`, `TypeError`) and a
+   symbolic CODE (`ERR_MODULE_NOT_FOUND`, `ENOTFOUND`, or a five-character
+   Postgres SQLSTATE such as `28P01`). Both are whitelisted rather than
+   filtered: a class name must be a letter-initial identifier, and a code
+   must be that or exactly five SQLSTATE characters. Neither pattern admits
+   a space, a dot, an `@`, a `:` or a `/`, so a connection string, a
+   hostname, a role name in a sentence and a parameter value all fail. Ten
+   digits — a phone number — fails the five-character branch by length. A
+   driver that puts free text in `code` therefore logs nothing at all,
+   which is the intended direction to fail.
+   --------------------------------------------------------------------- */
+const SAFE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const SAFE_CODE = /^(?:[A-Za-z][A-Za-z0-9_]{0,63}|[0-9A-Z]{5})$/;
+
+function matching(pattern, value) {
+  return typeof value === "string" && pattern.test(value) ? value : "";
+}
+
+/** Structural-only shape of an arbitrary thrown value. Never its text. */
+export function driverShape(err) {
+  if (!err || typeof err !== "object") return null;
+  const name = matching(SAFE_NAME, err.name);
+  /* Node wraps some failures, and the useful code is on the cause. One
+     level only — a cause chain is not walked. */
+  const code = matching(SAFE_CODE, err.code) || matching(SAFE_CODE, err.cause?.code);
+  if (!name && !code) return null;
+  return { ...(name ? { name } : {}), ...(code ? { code } : {}) };
 }
 
 /**
@@ -153,12 +197,23 @@ export class ConsentLedgerError extends Error {
  * Postgres driver error message routinely carries the host, the role and
  * sometimes the offending parameter values, and this is a table whose whole
  * purpose is that its contents are trustworthy.
+ *
+ * It may additionally carry `ledger_driver_error` (the error class name)
+ * and `ledger_driver_code` (a symbolic code or SQLSTATE), both whitelisted
+ * by driverShape() to identifier characters. Those name a failure CLASS —
+ * which of "not bundled", "host unreachable" and "credential refused" this
+ * was — and cannot express a message, a host or a value.
  */
 export function ledgerLogShape(err) {
   const token = err?.ledgerFailed ? err.token : LEDGER_APPEND_FAILED;
+  /* A ConsentLedgerError carries the shape captured where the driver error
+     was caught; anything else is shaped here. */
+  const driver = err?.ledgerFailed ? err.driver : driverShape(err);
   return {
     ledger_error: token,
     ...(err?.ledgerFailed && err.detail ? { ledger_detail: err.detail } : {}),
+    ...(driver?.name ? { ledger_driver_error: driver.name } : {}),
+    ...(driver?.code ? { ledger_driver_code: driver.code } : {}),
   };
 }
 
@@ -418,8 +473,9 @@ export async function appendConsentEvents(evidence, {
     ]);
   } catch (err) {
     if (err?.ledgerFailed) throw err;
-    /* Nothing of the driver's error survives — see ledgerLogShape(). */
-    throw new ConsentLedgerError(LEDGER_APPEND_FAILED);
+    /* Nothing of the driver's error TEXT survives — only the class name
+       and symbolic code, whitelisted by driverShape(). */
+    throw new ConsentLedgerError(LEDGER_APPEND_FAILED, "", driverShape(err));
   } finally {
     clearTimeout(timer);
   }
