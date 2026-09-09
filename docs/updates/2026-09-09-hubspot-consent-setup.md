@@ -23,6 +23,11 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 >   definitions were independently verified against §2.
 > - **All six timestamp properties are genuine `datetime`** properties, not
 >   date-only pickers — the outcome §2e required.
+> - **Non-midnight timestamp retention is VERIFIED in this portal.** A
+>   controlled UI round-trip on `cst_sms_consent_at`, 9 September 2026, wrote
+>   `09/09/2026 2:30 PM CDT`, reloaded the record and read back
+>   `09/09/2026 2:30 PM CDT`. The §6 check below is complete — see §6b, and
+>   `docs/updates/2026-09-09-hubspot-datetime-roundtrip-verification.md`.
 > - The six enumeration/dropdown properties — `cst_sms_permission_status`,
 >   `cst_ai_voice_permission_status`, `cst_sms_suppression_reason`,
 >   `cst_do_not_call_reason`, `cst_do_not_contact_reason` and
@@ -30,13 +35,11 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 >
 > **Still not done, and still gating activation:**
 >
-> - **Non-midnight timestamp retention is NOT tested.** Nobody has yet written
->   a value with a real time to one of the six `*_at` properties, reloaded the
->   record, and confirmed the time survived. The §6 verification step covering
->   this remains outstanding. Until it passes, "these are datetime properties"
->   is a portal setting that has been read, not a behaviour that has been
->   observed.
-> - **§6a live durability findings are still unwritten.**
+> - **§6a live durability findings are still unwritten.** Note that §6a is a
+>   different question from the datetime round trip above: it asks about the
+>   **timeline activities** that hold the per-submission evidence — whether the
+>   UI truncates them, how long they are retained, and whether they can be
+>   altered or deleted — not about these contact properties.
 > - **`COMMUNICATIONS_CONSENT_ENABLED` remains ABSENT from Vercel Production.**
 >   The feature is OFF. Creating the properties did not turn anything on, and
 >   neither did wiring the code to them.
@@ -337,6 +340,7 @@ permitted and messages that silently never arrive.
   property is a plain Date picker and must be recreated per §2e. Do this before
   any consent is captured — discovering it afterwards means the timestamps
   already collected are unrecoverable.
+  **DONE — 9 September 2026, PASS. Findings in §6b.**
 - Open any contact record. The properties exist and are empty.
 - Submit nothing. Nothing should have changed on the website.
 
@@ -399,6 +403,45 @@ evidence" and "we believe we have evidence".
 If the answers are unsatisfactory, the fallback is an external append-only
 store of consent events. That is a larger change and should not be undertaken
 speculatively — check first.
+
+### 6b. Datetime round-trip verification — DONE, 9 September 2026
+
+A controlled UI round-trip test of the **production** portal. Full write-up:
+`docs/updates/2026-09-09-hubspot-datetime-roundtrip-verification.md`.
+
+| | |
+|---|---|
+| Test date | 9 September 2026 |
+| Property | `cst_sms_consent_at` ("SMS consent captured at") |
+| Configured type | Date and time picker |
+| Original state | blank |
+| Test value entered | `09/09/2026 2:30 PM CDT` |
+| Value after full page reload | `09/09/2026 2:30 PM CDT` |
+| Restoration | cleared back to blank, reload confirmed blank / `--` |
+| **Result** | **PASS** |
+
+The non-midnight time survived: it did not collapse to midnight, did not become
+date-only, and did not lose the time component. `2:30 PM CDT` corresponds to
+`19:30 UTC`; under HubSpot's documented UTC semantics for datetime properties
+that is also a non-midnight instant. What the test directly observed is the CDT
+UI value before and after reload — it did not inspect the raw API
+representation. No other property was intentionally modified.
+
+**Two independent supports, kept apart.** HubSpot's official CRM Properties
+documentation establishes that a `datetime` property stores date *and* time,
+that API values are UTC, and that ISO-8601 or epoch milliseconds are both
+accepted — the midnight constraint belonging to *date-only* values supplied as
+epoch timestamps. That is a fact about HubSpot. This round trip is a fact about
+*this portal*. Neither substitutes for the other; both now hold.
+
+**Scope.** This proves the behaviour for `cst_sms_consent_at`. The other five
+timestamp properties use the same verified HubSpot datetime property type and
+had their type checked at creation, but **were not individually written during
+this test**. Do not read this as "every datetime property was live-tested".
+
+Performed manually in the HubSpot UI. It was not an API write and not a website
+form submission; no lead was created and no application code ran. The feature
+flag was, and remains, off.
 
 ---
 
