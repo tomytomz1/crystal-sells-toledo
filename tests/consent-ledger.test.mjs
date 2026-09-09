@@ -25,7 +25,7 @@ import {
   LEDGER_NOT_CONFIGURED, LEDGER_PHONE_NOT_E164, LEDGER_EVIDENCE_INCOMPLETE,
   LEDGER_TIMEOUT, LEDGER_APPEND_FAILED,
   consentLedgerConfigured, toE164, dedupeKey, buildLedgerEvents, buildInsert,
-  appendConsentEvents, ledgerLogShape, _setExecutor, _resetExecutor,
+  appendConsentEvents, ledgerLogShape, driverShape, _setExecutor, _resetExecutor,
 } from "../api/_lib/consent-ledger.mjs";
 import { buildConsentEvidence, SMS_CONSENT, AI_VOICE_CONSENT } from "../api/_lib/consent.mjs";
 import { validateLead } from "../api/_lib/validate.mjs";
@@ -89,10 +89,68 @@ describe("configuration", () => {
       assert.ok(!shape.includes("secret"), "a credential leaked into the log shape");
       assert.ok(!shape.includes("ledger.example"), "a host leaked into the log shape");
     }
-    /* An unclassified driver error is still classified, never passed through. */
+    /* An unclassified driver error is still classified, never passed through.
+       The class name is allowed out; the message is not. */
     assert.deepEqual(ledgerLogShape(new Error("relation does not exist")),
-      { ledger_error: LEDGER_APPEND_FAILED });
+      { ledger_error: LEDGER_APPEND_FAILED, ledger_driver_error: "Error" });
     assert.deepEqual(ledgerLogShape(undefined), { ledger_error: LEDGER_APPEND_FAILED });
+  });
+
+  /* The two structural fields exist to tell "the driver is not in the
+     bundle" apart from "the database refused the credential". They are the
+     only things allowed out of a driver error, and they are whitelisted to
+     identifier characters so that no message, host or value can occupy
+     them. */
+  test("the driver's class and symbolic code identify the failure", () => {
+    const missing = Object.assign(new Error("Cannot find package '@neondatabase/serverless'"),
+      { code: "ERR_MODULE_NOT_FOUND" });
+    assert.deepEqual(ledgerLogShape(missing), {
+      ledger_error: LEDGER_APPEND_FAILED,
+      ledger_driver_error: "Error",
+      ledger_driver_code: "ERR_MODULE_NOT_FOUND",
+    });
+
+    const refused = Object.assign(new Error("password authentication failed"),
+      { name: "NeonDbError", code: "28P01" });
+    assert.deepEqual(ledgerLogShape(refused), {
+      ledger_error: LEDGER_APPEND_FAILED,
+      ledger_driver_error: "NeonDbError",
+      ledger_driver_code: "28P01",
+    });
+
+    /* Node wraps some failures; the useful code sits on the cause. */
+    const wrapped = Object.assign(new Error("fetch failed"),
+      { name: "TypeError", cause: Object.assign(new Error("getaddrinfo"), { code: "ENOTFOUND" }) });
+    assert.equal(ledgerLogShape(wrapped).ledger_driver_code, "ENOTFOUND");
+  });
+
+  /* Failing towards silence: anything that is not an identifier is dropped
+     entirely rather than logged. A driver that puts free text, a host or a
+     connection string in `code` therefore contributes nothing. */
+  test("only identifier-shaped structure escapes a driver error", () => {
+    for (const value of [
+      "connect ECONNREFUSED " + URL_VALUE,
+      "ledger.example.neon.tech",
+      "postgresql://app:secret@host/db",
+      "role \"consent_ledger_app\" was refused",
+      "(419) 555-0000",
+      "_leading",
+      "4195550000",
+      "",
+      42,
+      { toString: () => "ERR_OBJECT" },
+    ]) {
+      const shape = ledgerLogShape(Object.assign(new Error("x"), { name: "Error", code: value }));
+      assert.equal(shape.ledger_driver_code, undefined,
+        "a non-identifier code reached the log: " + String(value));
+    }
+    assert.equal(driverShape(null), null);
+    assert.equal(driverShape("a string"), null);
+    assert.equal(driverShape({}), null);
+    /* Neither the message nor the cause object is ever a field of its own. */
+    const shape = ledgerLogShape(Object.assign(new Error("FATAL: " + URL_VALUE),
+      { cause: new Error(URL_VALUE) }));
+    assert.deepEqual(Object.keys(shape).sort(), ["ledger_driver_error", "ledger_error"]);
   });
 });
 
@@ -517,7 +575,10 @@ describe("failure semantics", () => {
     } catch (err) {
       assert.ok(!err.message.includes("password"), "the driver message leaked");
       assert.ok(!err.message.includes(URL_VALUE), "the connection string leaked");
-      assert.deepEqual(ledgerLogShape(err), { ledger_error: LEDGER_APPEND_FAILED });
+      assert.deepEqual(ledgerLogShape(err),
+        { ledger_error: LEDGER_APPEND_FAILED, ledger_driver_error: "Error" });
+      assert.ok(!JSON.stringify(ledgerLogShape(err)).includes("password"),
+        "the driver message reached the log shape");
     }
   });
 

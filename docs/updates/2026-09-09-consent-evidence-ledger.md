@@ -84,7 +84,12 @@ database.
   hanging evidence write must not become a hanging lead.
 - Failures are classified into stable PII-free tokens by `ledgerLogShape()`.
   **No driver error text ever survives**: a Postgres error message routinely
-  carries the host, the role and sometimes the offending parameter values.
+  carries the host, the role and sometimes the offending parameter values. Two
+  structural fields are allowed out alongside the token — `ledger_driver_error`
+  (the error class name) and `ledger_driver_code` (a symbolic code or a
+  SQLSTATE) — each whitelisted by `driverShape()` to a letter-initial
+  identifier or a five-character SQLSTATE. See "Why the driver's shape is
+  logged" below.
 
 #### What the single statement actually guarantees
 
@@ -224,6 +229,31 @@ both pin the ordering.
 A failure is logged with `log()`, not `logError()`: `logError()` emits
 `err.message`, and a driver error can carry the connection string. The same
 treatment the Nodemailer failure a few lines below already gets.
+
+#### Why the driver's shape is logged
+
+`CONSENT_LEDGER_APPEND_FAILED` alone is not diagnosable. On 9 September 2026 a
+preview deployment returned it on every submission, 62 ms after the consent was
+captured — far inside the 3 s timeout — and the log could not distinguish
+"`@neondatabase/serverless` is not in the function bundle" from "the host does
+not resolve" from "the database refused the credential". Those have different
+fixes, and the operator had no way to choose.
+
+So `driverShape()` extracts exactly two things from a driver error and nothing
+else: `err.name`, and `err.code` (falling back to `err.cause?.code`, one level,
+because Node wraps some failures). Both must match a whitelist — a
+letter-initial identifier for the name, that or five SQLSTATE characters for
+the code. The message, the cause object and the stack are never read.
+
+The whitelist is the control, not a filter. A connection string, a hostname, a
+role name in a sentence and a parameter value each contain a character the
+pattern does not admit, and ten digits fail the five-character branch by
+length. A driver that puts free text in `code` therefore logs **nothing** for
+that field. The direction of failure is silence, never disclosure.
+
+What this buys, concretely: `ERR_MODULE_NOT_FOUND` means the dependency did not
+ship; `ENOTFOUND` or `ECONNREFUSED` means the host; `28P01` means the password;
+`42501` means the grant; `42P01` means the table is missing from that database.
 
 ### The migration — `db/001_communication_consent_events.sql`
 
