@@ -35,11 +35,11 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 >
 > **Still not done, and still gating activation:**
 >
-> - **§6a live durability findings are still unwritten.** Note that §6a is a
->   different question from the datetime round trip above: it asks about the
->   **timeline activities** that hold the per-submission evidence — whether the
->   UI truncates them, how long they are retained, and whether they can be
->   altered or deleted — not about these contact properties.
+> - **§6a is answered, and the answer added a gate rather than removing one.**
+>   The HubSpot timeline can be permanently deleted, so it is not sufficient as
+>   the sole durable consent ledger. An external append-only ledger is the
+>   approved direction and **is not built**. See
+>   `docs/updates/2026-09-09-consent-evidence-ledger-decision.md`.
 > - **`COMMUNICATIONS_CONSENT_ENABLED` remains ABSENT from Vercel Production.**
 >   The feature is OFF. Creating the properties did not turn anything on, and
 >   neither did wiring the code to them.
@@ -103,14 +103,17 @@ portal:**
   serve as audit evidence years later.
 - Whether a portal administrator, a data-management tool, or a HubSpot retention
   or clean-up setting can remove or alter past form-submission activities.
-  **Assume they can until shown otherwise** — a timeline activity is not
-  editable through the public API, which is not the same thing as immutable.
+  **Answered, 9 September 2026: they can be permanently deleted**, individually
+  and in bulk, irreversibly, which removes them from the contact's timeline. No
+  supported direct edit path was found — but not editable through the public API
+  was never the same thing as immutable, and deletion settles it.
 
 The honest summary: **this is the best evidence the integration can produce with
-its current scopes, and it is per-submission and additive by construction.**
-Whether it is durable enough for a given audit purpose is a question for §6a,
-and a question for whoever owns that risk. Do not describe it as an immutable
-audit trail in any other document, in any HubSpot note, or to any reviewer.
+its current scopes, and it is per-submission and additive by construction.** It
+is **not** durable enough to be the sole historical record — §6a establishes
+that, and the approved answer is an external append-only ledger alongside it,
+which is not built. Do not describe the timeline as an immutable audit trail in
+any other document, in any HubSpot note, or to any reviewer.
 
 ### Scopes
 
@@ -378,7 +381,35 @@ permitted and messages that silently never arrive.
   timeline activity is unchanged and the new one records NOT GRANTED for both.
   A later submission must never rewrite an earlier record.
 
-### 6a. Live durability check — do this, and write down the answer
+### 6a. Live durability check — ANSWERED, 9 September 2026
+
+> **Outcome: the HubSpot form-submission timeline is NOT sufficient as the sole
+> durable consent ledger.** HubSpot allows an authorized user to permanently and
+> irreversibly delete an individual form submission, and to delete submissions in
+> bulk; deletion removes the activity from the contact's timeline. No supported
+> direct *edit* path was found, but the deletion capability alone disqualifies it.
+>
+> The timeline evidence keeps its value, and the existing design and code will
+> continue writing the operator-visible timeline copy when the feature is
+> eventually enabled — nothing is written today, because the feature is off. Its
+> **role** changes, from system of record to operator-visible copy. The approved
+> architecture is three records with three jobs: `cst_*` properties as mutable
+> current state, the timeline as an operator-visible evidence copy, and an
+> **external append-only ledger** as the durable historical evidence.
+>
+> Findings, sources, the decision and the updated activation gates:
+> `docs/updates/2026-09-09-consent-evidence-ledger-decision.md`.
+> **The ledger is not implemented.** Activation remains gated.
+>
+> One part of question 1 below stays open as a **manual operator-usability
+> check**: whether the HubSpot UI renders the whole enquiry block or truncates
+> it. No guarantee is documented either way, and durability no longer depends on
+> the answer. **Full rendering of the actual consent evidence remains
+> unverified** until that check is done — question 1's parenthetical below ("the
+> API still returns it") is an assumption from when it was written, not a
+> finding, and it has not been confirmed for a real full-length block.
+
+The original questions are kept below as written.
 
 §1a lists what the tests cannot establish. These questions can only be answered
 inside the production portal, and they are the difference between "we have
@@ -403,6 +434,14 @@ evidence" and "we believe we have evidence".
 If the answers are unsatisfactory, the fallback is an external append-only
 store of consent events. That is a larger change and should not be undertaken
 speculatively — check first.
+
+**The durability research is complete, and it was sufficient to reject the
+HubSpot timeline activity as the sole durable ledger.** The append-only store is
+therefore the approved direction, no longer a speculative fallback — see the
+decision document named above. It is not built.
+
+**The manual rendering/usability check remains open** — it was not performed, and
+the research did not substitute for it.
 
 ### 6b. Datetime round-trip verification — DONE, 9 September 2026
 
