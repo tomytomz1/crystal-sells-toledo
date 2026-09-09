@@ -95,7 +95,13 @@ and the resolved gaps:
   `true`. A failed append costs the **permission** and nothing else — the lead is
   stored and the timeline evidence rows are written as usual.
 - The enquiry block has **eleven** consent rows, not ten. `CONSENT LEDGER:
-  RECORDED` / `NOT RECORDED` is the first, and it qualifies every row below it.
+  RECORDED` / `NOT CONFIRMED` is the first, and it qualifies every row below it.
+- **`NOT CONFIRMED` means "no acknowledgement", not "nothing was written."** A
+  timed-out append may have committed before its acknowledgement was lost, so the
+  row never claims the ledger is empty for a submission. Safety is unchanged:
+  only a confirmed append sets `durable`, and unproven withholds the grant exactly
+  as unwritten does. Reconcile by querying `submission_id`, not by reading the
+  row as absence.
 - `db/001_communication_consent_events.sql` is **checked in and not applied.**
   Append-only is the role grant in that file, not a convention in the code — if
   the grant step is skipped the ledger is an ordinary mutable table.

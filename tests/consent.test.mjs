@@ -861,18 +861,18 @@ describe("consent copy cannot drift", () => {
     };
 
     test("a confirmed append renders RECORDED", () => {
-      /* Whole lines, not substrings: "NOT RECORDED" contains "RECORDED". */
+      /* Whole lines, not substrings: "NOT CONFIRMED" contains "RECORDED". */
       assert.ok(blockFor(true).includes("CONSENT LEDGER: RECORDED"));
-      assert.ok(!blockFor(true).includes("CONSENT LEDGER: NOT RECORDED"));
+      assert.ok(!blockFor(true).includes("CONSENT LEDGER: NOT CONFIRMED"));
     });
 
     /* Deny by default: a missing marker, an undefined, or anything that is
-       merely truthy all read NOT RECORDED. An evidence object built by some
+       merely truthy all read NOT CONFIRMED. An evidence object built by some
        future path that never heard of the ledger must not claim durability
        it does not have. */
-    test("everything that is not exactly true renders NOT RECORDED", () => {
+    test("everything that is not exactly true renders NOT CONFIRMED", () => {
       for (const marker of [false, undefined, "absent", null, "true", 1, {}])
-        assert.ok(blockFor(marker).includes("CONSENT LEDGER: NOT RECORDED"),
+        assert.ok(blockFor(marker).includes("CONSENT LEDGER: NOT CONFIRMED"),
           `durable=${JSON.stringify(marker)} claimed durable evidence`);
     });
 
@@ -906,7 +906,7 @@ describe("consent copy cannot drift", () => {
 
     /* ORDERING IS LOAD-BEARING FOR RENDERING, not just for the grant.
        api/lead.js appends to the ledger BEFORE createLead() builds the
-       block. An append moved after the CRM write would print NOT RECORDED
+       block. An append moved after the CRM write would print NOT CONFIRMED
        on every successful submission and grant nothing, and every other
        test in this repository would still pass. This one would not. */
     test("a successful append is already recorded when the block is built", async () => {

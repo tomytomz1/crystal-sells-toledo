@@ -444,8 +444,14 @@ export async function createLead(payload) {
      exactly the state the ledger exists to prevent: a permission this
      business could not later prove it was given. The lead is still stored
      and the timeline still carries the evidence rows; only the grant is
-     withheld, and the enquiry block says CONSENT LEDGER: NOT RECORDED so
+     withheld, and the enquiry block says CONSENT LEDGER: NOT CONFIRMED so
      an operator meets an explanation rather than a discrepancy.
+
+     The marker means "confirmed persisted", not "persisted": an append can
+     time out after the database committed. This gate does not care about
+     the difference - unproven and unwritten both withhold the grant - but
+     the operator-visible wording does, which is why it says NOT CONFIRMED
+     rather than making a claim about the ledger's contents.
      `=== true` keeps it deny-by-default. */
   const consentOn = consentStateEnabled() && payload.consent?.durable === true;
   const foldConsent = (existingState) =>

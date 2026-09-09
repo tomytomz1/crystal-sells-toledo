@@ -142,7 +142,7 @@ export default async function handler(req, res) {
        over. It is what lets createLead() be told whether a grant may
        happen at all, and it is what makes the CONSENT LEDGER row in the
        enquiry block accurate - the block is built inside createLead(),
-       so an append moved after it would print NOT RECORDED on every
+       so an append moved after it would print NOT CONFIRMED on every
        successful submission.
 
        The evidence goes to the ledger first and the permission second,
@@ -164,8 +164,19 @@ export default async function handler(req, res) {
          system should do when its evidence sink is unavailable. What does
          NOT happen is a `cst_*` grant: a permission with no durable
          evidence behind it is the one outcome the ledger exists to
-         prevent. The enquiry block says CONSENT LEDGER: NOT RECORDED, so
+         prevent. The enquiry block says CONSENT LEDGER: NOT CONFIRMED, so
          the discrepancy explains itself to an operator.
+
+         NOT CONFIRMED, deliberately, and not NOT RECORDED. Reaching this
+         branch means no acknowledgement arrived - which is NOT the same as
+         nothing being written. A timed-out or dropped request may have
+         committed in PostgreSQL before its acknowledgement was lost, so
+         this process cannot honestly say the ledger holds no event for
+         this submission. It can only say it did not get told that it does.
+         Claiming otherwise in a record an auditor reads would be a
+         positive statement about a database this code did not hear back
+         from. The safety semantics are unchanged: `durable` stays false,
+         no `cst_*` grant is written, and the failure is closed either way.
 
          log(), not logError(): logError emits err.message, and a database
          driver error can carry the connection string. Only the

@@ -117,7 +117,7 @@ grant. A refactor that forgets the marker fails closed.
 
 ### The eleventh consent row
 
-`consentRows()` gained `["CONSENT LEDGER", "RECORDED" | "NOT RECORDED"]` as its
+`consentRows()` gained `["CONSENT LEDGER", "RECORDED" | "NOT CONFIRMED"]` as its
 **first** row, and `CONSENT_LABELS` in `api/_lib/description.mjs` matches. The
 enquiry block is now 23 base rows plus 11 consent rows.
 
@@ -132,10 +132,49 @@ cold that looks like the integration dropped a consent. The row says outright
 that it did not.
 
 The row is **binary on purpose**. A missing `CONSENT_LEDGER_URL`, a timeout, a
-refused E.164 conversion and a rejected INSERT all read `NOT RECORDED`; *which*
+refused E.164 conversion and a rejected INSERT all read `NOT CONFIRMED`; *which*
 one is in the `lead.consent.ledger_failed` log line, where someone diagnosing an
 outage is already looking. An operator reading a contact needs to know whether
-the evidence is durable, not why it is not.
+the evidence is proven, not why it is not.
+
+#### `NOT CONFIRMED`, not `NOT RECORDED` — the wording is epistemic on purpose
+
+`durable` answers exactly one question: **did this process receive an
+acknowledgement that the events were persisted?** A confirmed append is a fact. A
+failed one is *not* the fact that nothing was written — it is the absence of a
+fact.
+
+Concretely: the append can time out, or the connection can drop, **after
+PostgreSQL has already committed the INSERT** and before its acknowledgement
+reaches the function. The row is then in the ledger and this process has no way
+to know it. `NOT RECORDED` would be a positive claim about the database's
+contents that this code is not entitled to make, and someone reconciling an audit
+later would read it as "no event exists for this submission" and be wrong. `NOT
+CONFIRMED` says only what is true: no acknowledgement arrived.
+
+That asymmetry is also why the failure is safe to leave as it is. Deterministic
+dedupe keys mean a retry of the same submission either finds its own earlier row
+(`ON CONFLICT DO NOTHING`) or writes it, so an unacknowledged commit is a
+duplicate that cannot happen rather than a record someone has to reconcile by
+hand.
+
+**None of this softens the semantics, and none of it changed with the wording:**
+
+- only a **confirmed** append sets `durable === true`;
+- `NOT CONFIRMED` still writes **no** new `cst_*` grant;
+- the lead and the HubSpot timeline evidence rows still survive;
+- timeouts and every other failure still fail closed.
+
+The permission is withheld because the evidence is **unproven**, which is the
+same answer as *unwritten* for every purpose except what an operator should
+believe about the ledger's contents. A useful side effect: `NOT CONFIRMED` is not
+a superstring of `RECORDED`, so the two states are no longer confusable by a
+careless substring match — though the assertions still compare whole lines.
+
+The implementation plan
+(`docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md`) still
+says `NOT RECORDED` throughout. It is a dated planning record and is not being
+rewritten; **this document is the wording that shipped.**
 
 `buildSummary()` is unaffected — the contact's `message` sidebar property has
 never carried consent and still does not.
@@ -146,7 +185,7 @@ Inside the existing `if (consentFeatureEnabled())` block in `api/lead.js`,
 **between the evidence and `createLead()`**. That position is load-bearing twice:
 it is what lets `createLead()` be told whether a grant may happen, and it is what
 makes the `CONSENT LEDGER` row accurate — the block is built *inside*
-`createLead()`, so an append moved after the CRM write would print `NOT RECORDED`
+`createLead()`, so an append moved after the CRM write would print `NOT CONFIRMED`
 on every successful submission and grant nothing. `tools/check.mjs` and a test
 both pin the ordering.
 
@@ -195,7 +234,7 @@ sample block, which the plan counted as one file with the procedure.
 | `api/lead.js` | The append, between evidence and `createLead()` |
 | `api/_lib/hubspot.mjs` | The `consentOn` gate; stale 10/33 comment → 11/34 |
 | `api/_lib/description.mjs` | `CONSENT_LABELS` gains `CONSENT LEDGER`, first |
-| `tools/check.mjs` | Six static guards (§4) |
+| `tools/check.mjs` | Six static guards (§4) — guard 6 matches call sites, not the import |
 | `db/001_communication_consent_events.sql` | **New** |
 | `.env.example` | Documented, empty `CONSENT_LEDGER_URL` |
 | `package.json`, `package-lock.json` | `@neondatabase/serverless`, pinned `1.1.0` |
@@ -221,15 +260,23 @@ procedure gets corrected; a historical write-up does not get rewritten.
 |---|---|---|---|---|---|
 | Feature OFF (production today) | written | none | **no consent rows at all** | none | **never called; the driver is not even loaded** |
 | Feature ON, append succeeds | written | written | `RECORDED` | written | 2 rows |
-| Feature ON, append fails or times out | **written** | written | `NOT RECORDED` | **none** | nothing |
-| Feature ON, `CONSENT_LEDGER_URL` absent | written | written | `NOT RECORDED` | **none** | nothing |
-| Feature ON, phone not convertible to E.164 | written | written | `NOT RECORDED` | **none** | nothing |
+| Feature ON, append fails or times out | **written** | written | `NOT CONFIRMED` | **none** | **unknown** — see below |
+| Feature ON, `CONSENT_LEDGER_URL` absent | written | written | `NOT CONFIRMED` | **none** | nothing |
+| Feature ON, phone not convertible to E.164 | written | written | `NOT CONFIRMED` | **none** | nothing |
 | Append succeeds, HubSpot then fails | 502 to visitor | none | none | none | 2 rows |
 
 Read the third and fourth columns together: **wherever the grant column says
-`none` while consent was ticked, the block itself says `NOT RECORDED`.** That
+`none` while consent was ticked, the block itself says `NOT CONFIRMED`.** That
 pairing is asserted on a single captured request, so the block and the properties
 can never disagree about the same submission.
+
+The "unknown" in row three is the honest entry. A refused E.164 conversion and an
+absent URL never reach the database, so `nothing` is a fact about them. A timeout
+or a dropped connection is different: the INSERT may have committed before the
+acknowledgement was lost. That is exactly why the row says `NOT CONFIRMED` — see
+"the wording is epistemic on purpose" above. A rejected INSERT reports nothing
+written and the classification records that, but the operator-visible row does
+not distinguish it.
 
 A missing `CONSENT_LEDGER_URL` while the feature is on is deliberately **not** a
 503. The lead is not the casualty of an evidence outage; the permission is.
@@ -293,6 +340,35 @@ important:
 5. `api/_lib/hubspot.mjs` must still require `payload.consent?.durable === true`.
 6. `api/lead.js` must still append, and must append **before** `createLead()`.
 
+### Guard 6 was broken, and now it is tested
+
+The first version of guard 6 compared `leadSrc.indexOf("appendConsentEvents")`
+against the CRM write. That identifier matches the **import statement** at the
+top of `api/lead.js`, and an import precedes everything, so:
+
+- the ordering comparison could never be true and **the guard could never fail**;
+- the companion presence check would have kept passing after the actual call was
+  deleted, because the import still named it.
+
+Both halves now match the awaited **call sites** — `await appendConsentEvents(`
+and `await createLead(` — and each is required to exist before their positions
+are compared. `indexOf` takes the *first* CRM write, which is the conservative
+comparison: the append must precede the earliest one.
+
+**A guard nobody has ever seen fail is a guard nobody knows works**, so
+`tests/consent-ledger.test.mjs` now runs the real `tools/check.mjs` against a
+**throwaway copy of the tree** and confirms it refuses three deliberate
+regressions: the append moved below the CRM write with the import left in place
+(the exact case the old guard missed), the append call deleted with the import
+left in place, and the `durable === true` requirement removed from the write
+gate. It also asserts the unmodified tree passes, pins the two call-site strings
+so renaming one in `check.mjs` fails a test rather than silently disarming the
+guard, and asserts `check.mjs` no longer compares on the bare identifier.
+
+The working tree is never mutated — the same throwaway-copy technique
+`tests/consent.test.mjs` already uses to build the site twice, and the one the
+workflow permits for a Tier 4 invariant.
+
 ---
 
 ## 5. Test results
@@ -303,7 +379,7 @@ injected and every HubSpot request is a stubbed `fetch`.
 
 | Suite | Result |
 |---|---|
-| `tests/consent-ledger.test.mjs` (new, 25 tests) | **25 pass, 0 fail** |
+| `tests/consent-ledger.test.mjs` (new, 30 tests) | **30 pass, 0 fail** |
 | `tests/consent-state.test.mjs` (72 tests) | **72 pass, 0 fail** |
 | `tests/consent.test.mjs` (65 tests) | **65 pass, 0 fail** |
 | `tests/api.test.mjs`, `tests/hubspot.test.mjs`, `tests/mail.test.mjs` | **224 pass, 0 fail** |
@@ -330,7 +406,11 @@ What the new assertions actually pin, beyond the obvious:
   the HubSpot request bodies are the pre-consent ones;
 - the pairing invariant, on one captured request;
 - the **ordering** pin — with the append stubbed to succeed, the block built
-  inside `createLead()` says `RECORDED`.
+  inside `createLead()` says `RECORDED`;
+- **the static guards catch what they claim to** — the real `tools/check.mjs`,
+  run in a throwaway copy of the tree, refuses an append moved below the CRM
+  write, a deleted append call, and a write gate that no longer requires
+  `durable === true` (§4).
 
 ---
 
@@ -384,7 +464,7 @@ Code alone does not close gate 3.
 8. Gate 5 (the HubSpot timeline display check) is now executed against an
    **eleven**-row block with `CONSENT LEDGER` first, using the corrected
    procedure in `docs/updates/2026-09-09-hubspot-consent-setup.md` §6a. Produce
-   **both** states while there — the `NOT RECORDED` block is the one an operator
+   **both** states while there — the `NOT CONFIRMED` block is the one an operator
    will have to interpret under pressure, and nobody has ever looked at it.
 
 Gates 4–10 remain outstanding. This phase closes gate 3's code half only.

@@ -380,26 +380,37 @@ permitted and messages that silently never arrive.
   means nothing without what they were saying no to.
 
   **`CONSENT LEDGER` is first, and it qualifies every row beneath it.** It says
-  whether this submission's consent reached the durable append-only ledger
-  (`docs/updates/2026-09-09-consent-evidence-ledger.md`). Two values, and only
-  two:
+  whether this submission's consent was **confirmed** into the durable
+  append-only ledger (`docs/updates/2026-09-09-consent-evidence-ledger.md`). Two
+  values, and only two:
 
   | Row | What it means |
   |---|---|
-  | `CONSENT LEDGER: RECORDED` | The evidence is in the ledger. A `cst_*` permission was written for whatever was ticked. |
-  | `CONSENT LEDGER: NOT RECORDED` | The append failed — the ledger is unreachable, unconfigured, or refused the number. The lead and these evidence rows were still written; **no `cst_*` permission was.** |
+  | `CONSENT LEDGER: RECORDED` | The ledger acknowledged the write. The evidence is durable, and a `cst_*` permission was written for whatever was ticked. |
+  | `CONSENT LEDGER: NOT CONFIRMED` | **No acknowledgement arrived.** The lead and these evidence rows were still written; **no `cst_*` permission was.** |
 
-  **A block reading `CONSENT LEDGER: NOT RECORDED` beside `SMS CONSENT: GRANTED`
-  is not a bug.** It is the system refusing to create a permission it could not
-  prove was given. The contact's `cst_sms_permission_status` correctly reads
-  `never_granted`, and the two records agree. *Why* the append failed is in the
+  **Read `NOT CONFIRMED` as written: no acknowledgement, NOT "nothing was
+  written".** The wording is deliberate. A request that times out or loses its
+  connection may have committed in PostgreSQL before the acknowledgement came
+  back, so the row cannot honestly claim the ledger holds no event for this
+  submission — only that the site was not told that it does. If you are
+  reconciling an audit, **query the ledger by `submission_id`** rather than
+  trusting this row to mean absence. (Duplicates are not a worry: the dedupe key
+  is deterministic, so a retry of the same submission collides with its own
+  earlier row instead of writing a second one.)
+
+  **A block reading `CONSENT LEDGER: NOT CONFIRMED` beside `SMS CONSENT: GRANTED`
+  is not a bug.** It is the system refusing to create a permission whose evidence
+  it could not prove. The contact's `cst_sms_permission_status` correctly reads
+  `never_granted`, and the two records agree. *Why* the append was not confirmed —
+  unreachable, unconfigured, timed out, or a refused phone number — is in the
   function log, as `lead.consent.ledger_failed`; the row is deliberately binary,
   because an operator reading a contact needs to know whether the evidence is
-  durable, not which fault produced the outage.
+  proven, not which fault produced the outage.
 
   **Produce both states while you are in here.** Submit one enquiry with the
   ledger configured and reachable, then one with `CONSENT_LEDGER_URL` unset in
-  the preview environment. The `NOT RECORDED` block is the one an operator will
+  the preview environment. The `NOT CONFIRMED` block is the one an operator will
   have to interpret under pressure, and it is the one nobody has ever looked at.
 - Submit a second enquiry with **neither** box ticked. Confirm the earlier
   timeline activity is unchanged and the new one records NOT GRANTED for both.

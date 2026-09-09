@@ -11,10 +11,12 @@
  * the database's to mint, not this process's.
  */
 
-import { test, describe, afterEach } from "node:test";
+import { test, describe, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -351,7 +353,132 @@ describe("the INSERT statement", () => {
 });
 
 /* =====================================================================
-   7  ATOMICITY, IDEMPOTENCY AND TIMEOUT
+   7  THE STATIC GUARD ACTUALLY CATCHES ITS REGRESSION
+   ---------------------------------------------------------------------
+   tools/check.mjs refuses an api/lead.js whose ledger append does not
+   precede the CRM write. A guard nobody has ever seen fail is a guard
+   nobody knows works — and this one did not: it searched for the bare
+   identifier `appendConsentEvents`, which matches the IMPORT at the top of
+   the file. An import precedes everything, so the comparison could never
+   fail and the presence check would have survived deleting the call.
+
+   Proven by running the real tools/check.mjs against a THROWAWAY COPY of
+   the tree with a deliberately broken api/lead.js. The working tree is
+   never mutated: the same technique tests/consent.test.mjs already uses to
+   build the site twice, and the one the workflow permits for a Tier 4
+   invariant.
+   ===================================================================== */
+describe("the append-order guard in tools/check.mjs", () => {
+  /* The strings tools/check.mjs matches on. Pinned here so renaming one
+     there without updating this file fails a test rather than quietly
+     disarming the guard. */
+  const LEDGER_APPEND_CALL = "await appendConsentEvents(";
+  const CRM_WRITE_CALL = "await createLead(";
+
+  let dir, root;
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "cst-ledger-guard-"));
+    root = join(dir, "tree");
+    /* Everything tools/build.mjs and tools/check.mjs read. `.env.example`
+       is one of check.mjs's own subjects, so its absence would fail the
+       run for a reason that has nothing to do with this guard. */
+    for (const item of ["src", "assets", "tools", "api", "package.json",
+                        "robots.txt", "site.webmanifest", ".env.example"])
+      cpSync(join(REPO, item), join(root, item), { recursive: true });
+    /* check.mjs reads public/, so the copy needs one. Built once; every
+       mutation below touches only api/lead.js, which check.mjs re-reads
+       from disk on each run. */
+    execFileSync(process.execPath, ["tools/build.mjs"], { cwd: root, stdio: "pipe" });
+  });
+  after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  const LEAD = () => join(root, "api", "lead.js");
+  const pristine = () => readFileSync(join(REPO, "api/lead.js"), "utf8");
+
+  /** Run the real check.mjs in the copy. Returns { ok, output }. */
+  function runCheck() {
+    try {
+      execFileSync(process.execPath, ["tools/check.mjs"], { cwd: root, stdio: "pipe" });
+      return { ok: true, output: "" };
+    } catch (err) {
+      return { ok: false, output: String(err.stdout || "") + String(err.stderr || "") };
+    }
+  }
+
+  test("check.mjs matches the call sites this test pins", () => {
+    const checkSrc = readFileSync(join(REPO, "tools/check.mjs"), "utf8");
+    for (const call of [LEDGER_APPEND_CALL, CRM_WRITE_CALL])
+      assert.ok(checkSrc.includes(JSON.stringify(call)),
+        `tools/check.mjs no longer matches on ${JSON.stringify(call)}`);
+    /* And the bug itself: the guard must not compare on the bare
+       identifier, which the import line satisfies. */
+    assert.ok(!/indexOf\("appendConsentEvents"\)/.test(checkSrc),
+      "the ordering guard compares on the identifier, which matches the import and can never fail");
+  });
+
+  test("the unmodified tree passes", () => {
+    writeFileSync(LEAD(), pristine());
+    const { ok, output } = runCheck();
+    assert.ok(ok, "check.mjs rejected the real api/lead.js:\n" + output);
+  });
+
+  /* THE REGRESSION THE OLD GUARD MISSED. The append is moved after the CRM
+     write; the import stays exactly where it was. The old comparison saw
+     the import and passed. */
+  test("an append moved after the CRM write is refused", () => {
+    const src = pristine();
+    const APPEND_STMT = "await appendConsentEvents(payload.consent);";
+    const CREATE_STMT = "const result = await createLead(payload);";
+    assert.ok(src.includes(APPEND_STMT), "the append statement changed shape");
+    assert.ok(src.includes(CREATE_STMT), "the CRM write statement changed shape");
+
+    const moved = src
+      .replace(APPEND_STMT, "/* append moved below the CRM write */")
+      .replace(CREATE_STMT, CREATE_STMT + "\n    " + APPEND_STMT);
+    /* The import is untouched — that is the whole point. */
+    assert.ok(moved.includes('from "./_lib/consent-ledger.mjs"'));
+    assert.ok(moved.indexOf(LEDGER_APPEND_CALL) > moved.indexOf(CRM_WRITE_CALL));
+
+    writeFileSync(LEAD(), moved);
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted an append that happens after the CRM write");
+    assert.match(output, /appends to the consent ledger after the CRM write/);
+  });
+
+  /* The other half the identifier match would have survived: deleting the
+     call while leaving the import behind. */
+  test("deleting the append call while keeping the import is refused", () => {
+    const src = pristine();
+    const removed = src.replace("await appendConsentEvents(payload.consent);", "/* removed */");
+    assert.ok(removed.includes("appendConsentEvents"), "the import should still be present");
+    assert.ok(!removed.includes(LEDGER_APPEND_CALL), "the call should be gone");
+
+    writeFileSync(LEAD(), removed);
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted an api/lead.js that never appends to the ledger");
+    assert.match(output, /nothing appends to the consent ledger/);
+  });
+
+  test("removing the durability requirement from the write gate is refused", () => {
+    /* Restore lead.js first — this mutation is about hubspot.mjs. */
+    writeFileSync(LEAD(), pristine());
+    const hubspotPath = join(root, "api", "_lib", "hubspot.mjs");
+    const src = readFileSync(join(REPO, "api/_lib/hubspot.mjs"), "utf8");
+    const GATE = "const consentOn = consentStateEnabled() && payload.consent?.durable === true;";
+    assert.ok(src.includes(GATE), "the consent write gate changed shape");
+    writeFileSync(hubspotPath,
+      src.replace(GATE, "const consentOn = consentStateEnabled() && Boolean(payload.consent);"));
+
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted a grant that no longer requires durable evidence");
+    assert.match(output, /no longer requires payload\.consent\.durable === true/);
+    writeFileSync(hubspotPath, src);
+  });
+});
+
+/* =====================================================================
+   8  ATOMICITY, IDEMPOTENCY AND TIMEOUT
    ===================================================================== */
 describe("failure semantics", () => {
   /* One statement, so both rows land or neither does. A half-recorded

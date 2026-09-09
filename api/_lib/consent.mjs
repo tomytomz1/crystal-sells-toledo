@@ -243,11 +243,18 @@ export function buildConsentEvidence(payload) {
     phone,
     /* DENY BY DEFAULT.
        Set true by api/lead.js, and only after the append-only consent
-       ledger has confirmed this submission's events. api/_lib/hubspot.mjs
+       ledger has ACKNOWLEDGED this submission's events. api/_lib/hubspot.mjs
        writes a `cst_*` grant only when it is true, so a future refactor
        that forgets to set it withholds a permission rather than granting
        one with no durable evidence behind it - which is the single outcome
        the ledger exists to prevent.
+
+       Read it as "confirmed persisted", never as "persisted". FALSE MEANS
+       UNPROVEN, NOT UNWRITTEN: a request that times out may have committed
+       before its acknowledgement was lost. That is why the operator-visible
+       row says NOT CONFIRMED rather than NOT RECORDED - see consentRows()
+       below. It changes nothing about safety; unproven and unwritten get
+       the same answer, which is no grant.
        See docs/updates/2026-09-09-consent-evidence-ledger.md. */
     durable: false,
   };
@@ -292,19 +299,49 @@ export function consentRows(evidence) {
        `never_granted`. Read cold that looks like the integration dropped a
        consent. This row explains it without anyone reading a log.
 
+       "NOT CONFIRMED", NOT "NOT RECORDED", AND THE DIFFERENCE IS THE WHOLE
+       POINT OF THE WORDING.
+       -----------------------------------------------------------------
+       `durable` answers exactly one question: did this process RECEIVE an
+       acknowledgement that the events were persisted? A confirmed append
+       is a fact. A failed one is NOT the fact that nothing was written -
+       it is the absence of a fact.
+
+       Concretely: the append can time out, or the connection can drop,
+       AFTER PostgreSQL has already committed the INSERT and before its
+       acknowledgement reaches us. The row is then in the ledger and this
+       process has no way to know it. "NOT RECORDED" would be a positive
+       claim about the database's contents that this code is not entitled
+       to make, and someone reconciling an audit later would read it as
+       "no event exists" and be wrong. "NOT CONFIRMED" says only what is
+       true: we did not get an acknowledgement.
+
+       That asymmetry is also why the failure is safe. Deterministic dedupe
+       keys mean a retry of the same submission either finds its own
+       earlier row (ON CONFLICT DO NOTHING) or writes it; an unacknowledged
+       commit is a duplicate that cannot happen, not a record that has to
+       be reconciled by hand.
+
+       None of this softens the semantics. Only a confirmed append sets
+       `durable`, NOT CONFIRMED still writes no new `cst_*` grant, and a
+       timeout still fails closed. The permission is withheld because the
+       evidence is UNPROVEN, which is the same answer as unwritten for
+       every purpose except what an operator should believe about the
+       ledger's contents.
+
        Binary on purpose. A missing CONSENT_LEDGER_URL, a timeout, a
        refused E.164 conversion and a rejected INSERT all read NOT
-       RECORDED; WHICH one is in the `lead.consent.ledger_failed` log line,
-       where someone diagnosing an outage is already looking. An operator
-       reading a contact needs to know whether the evidence is durable, not
-       why it is not.
+       CONFIRMED; WHICH one is in the `lead.consent.ledger_failed` log
+       line, where someone diagnosing an outage is already looking. An
+       operator reading a contact needs to know whether the evidence is
+       proven, not why it is not.
 
        `=== true`, not a truthy test: a missing marker, an undefined, or an
        evidence object built by some future path that never heard of the
-       ledger all render NOT RECORDED. Both values are non-empty strings,
+       ledger all render NOT CONFIRMED. Both values are non-empty strings,
        so buildDescription()'s blank substitution can never turn this row
        into "CONSENT LEDGER: -", which would be worse than either. */
-    ["CONSENT LEDGER", evidence.durable === true ? "RECORDED" : "NOT RECORDED"],
+    ["CONSENT LEDGER", evidence.durable === true ? "RECORDED" : "NOT CONFIRMED"],
     ["SMS CONSENT", state(evidence.sms)],
     ["SMS CONSENT VERSION", evidence.sms.version],
     /* The disclosure itself, not just its identifier.

@@ -953,7 +953,7 @@ describe("a grant requires durable evidence", () => {
 
   /* THE PAIRING INVARIANT, asserted on ONE captured request so the block
      and the properties can never disagree about the same submission: the
-     enquiry block says NOT RECORDED in exactly the cases where no grant
+     enquiry block says NOT CONFIRMED in exactly the cases where no grant
      was written, and RECORDED in exactly the cases where one was. */
   test("the block and the properties agree about the same submission", async () => {
     for (const durable of [true, false]) {
@@ -961,10 +961,10 @@ describe("a grant requires durable evidence", () => {
       const message = formMessage(calls);
       const granted = cstKeys(contactWrite(calls)).length > 0;
       assert.equal(granted, durable, `durable=${durable} produced the wrong grant`);
-      /* Whole lines, not substrings: "NOT RECORDED" contains "RECORDED". */
+      /* Whole lines, not substrings: "NOT CONFIRMED" contains "RECORDED". */
       assert.match(message, durable
-        ? /^CONSENT LEDGER: RECORDED$/m : /^CONSENT LEDGER: NOT RECORDED$/m);
-      assert.equal(/^CONSENT LEDGER: NOT RECORDED$/m.test(message), !granted,
+        ? /^CONSENT LEDGER: RECORDED$/m : /^CONSENT LEDGER: NOT CONFIRMED$/m);
+      assert.equal(/^CONSENT LEDGER: NOT CONFIRMED$/m.test(message), !granted,
         "the block claims durable evidence for a submission that was refused a grant");
     }
   });
@@ -1044,7 +1044,7 @@ describe("the ledger through the lead endpoint", () => {
     assert.deepEqual(cstKeys(contactWrite(calls)), []);
     const message = calls.find((c) => c.key === FORM).body.fields
       .find((f) => f.name === "message").value;
-    assert.match(message, /^CONSENT LEDGER: NOT RECORDED$/m);
+    assert.match(message, /^CONSENT LEDGER: NOT CONFIRMED$/m);
     assert.match(message, /^SMS CONSENT: GRANTED$/m);
   });
 });

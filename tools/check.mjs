@@ -888,21 +888,48 @@ for (const file of pages) {
   /* The invariant a refactor is most likely to delete, because deleting it
      breaks nothing visible: a `cst_*` grant requires durable evidence.
      Without it a permission can be written that this business could not
-     later prove it was given. */
+     later prove it was given.
+
+     tests/consent-ledger.test.mjs builds the exact regressions this guard
+     exists to catch, in a throwaway copy of the tree, and confirms this
+     script still refuses them - a guard nobody has ever seen fail is a
+     guard nobody knows works. It pins the two call-site strings below, so
+     renaming one here without updating the test fails the test rather than
+     silently disarming the guard. */
   {
+    /* The awaited CALL SITES, matched literally. */
+    const LEDGER_APPEND_CALL = "await appendConsentEvents(";
+    const CRM_WRITE_CALL = "await createLead(";
     const hubspotSrc = readFileSync(join(ROOT, "..", "api/_lib/hubspot.mjs"), "utf8");
     if (!/const consentOn\s*=\s*consentStateEnabled\(\)\s*&&\s*payload\.consent\?\.durable\s*===\s*true/
       .test(hubspotSrc))
       fail("api/_lib/hubspot.mjs",
         "the consent write gate no longer requires payload.consent.durable === true - a cst_ grant " +
         "could be written with no durable ledger evidence behind it");
+    /* THE CALL SITES, NOT THE IMPORT.
+       An earlier version of this guard searched for the bare identifier
+       `appendConsentEvents`, which matches the import statement at the top
+       of the file. An import is always before everything else, so the
+       ordering comparison was between the import and the CRM write and
+       could never fail - it proved nothing at all, and the presence check
+       would have kept passing after the call itself was deleted.
+       Both halves now look for the awaited call. */
     const leadSrc = readFileSync(join(ROOT, "..", "api/lead.js"), "utf8");
-    if (!/appendConsentEvents/.test(leadSrc))
-      fail("api/lead.js", "no longer appends to the consent ledger - no submission could ever grant a permission");
-    /* Order is load-bearing: the append must resolve before createLead()
-       builds the enquiry block, or every good submission prints
-       CONSENT LEDGER: NOT RECORDED and no grant is ever written. */
-    if (leadSrc.indexOf("appendConsentEvents") > leadSrc.indexOf("await createLead("))
+    const appendAt = leadSrc.indexOf(LEDGER_APPEND_CALL);
+    const createAt = leadSrc.indexOf(CRM_WRITE_CALL);
+    if (appendAt === -1)
+      fail("api/lead.js",
+        `does not call \`${LEDGER_APPEND_CALL}…\` - nothing appends to the consent ledger, so no ` +
+        "submission could ever be granted a permission");
+    if (createAt === -1)
+      fail("api/lead.js", `does not call \`${CRM_WRITE_CALL}…\` - the CRM write is gone`);
+    /* Order is load-bearing twice: the append must resolve before
+       createLead() decides whether a grant may happen AND before it builds
+       the enquiry block, or every good submission prints
+       CONSENT LEDGER: NOT CONFIRMED and no grant is ever written.
+       `indexOf` takes the FIRST CRM write, which is the conservative
+       comparison - the append must precede the earliest one. */
+    else if (appendAt !== -1 && appendAt > createAt)
       fail("api/lead.js", "appends to the consent ledger after the CRM write - the grant and the block would both be wrong");
   }
 
