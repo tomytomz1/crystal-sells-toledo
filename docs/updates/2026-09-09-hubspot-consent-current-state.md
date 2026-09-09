@@ -159,13 +159,23 @@ a real one once it has been written to a contact.
 | A permission status holds a nonblank value outside the four | normalised to `never_granted` | `HUBSPOT_CONSENT_STATE_MALFORMED_VALUE` |
 
 **Malformed response.** `requireConsentProperties(properties, stage)` requires
-a non-null, non-array object. `findContactByEmail()` applies it to the search
-hit (stage `SEARCH`) and `readConsentState()` to the 409 refetch (stage
-`READ`). "HubSpot said nothing" and "HubSpot said this contact has never
-granted anything" are different facts and no longer share a representation.
+a non-null, non-array object. It is enforced **inside
+`fromHubSpotConsentProperties()` itself**, not merely at the two call sites:
+the parser is exported, and a future caller must not be able to bypass
+fail-closed behaviour by forgetting a guard. There is one implementation of
+the check, and reaching the parser runs it. `findContactByEmail()` passes
+stage `SEARCH` and `readConsentState()` passes `READ`, so a failure still says
+which read produced it; a caller that supplies no stage gets `PARSE`, so no
+failure is ever stageless.
+
+`{}` is valid — a properties object whose consent fields are simply unset.
+`null`, `undefined`, arrays and primitives all throw. "HubSpot said nothing"
+and "HubSpot said this contact has never granted anything" are different facts
+and no longer share a representation.
 
 A **genuinely new** contact — one the search did not find — still uses
-`emptyConsentState()`. That is not a guess: no record exists.
+`emptyConsentState()`, which is `fromHubSpotConsentProperties({})`. That is
+not a guess: no record exists.
 
 **Malformed value.** `"banana"`, `"yes"`, `"1"`, `"0"`, `{}` and `[]` are not
 ways of saying "not suppressed". Note `[]` specifically: `String([])` is `""`,
@@ -175,11 +185,32 @@ permission enum, normalising an unknown value to `never_granted` was the
 dangerous direction: a fresh grant would then overwrite whatever it actually
 meant. Surrounding whitespace is still tolerated — `" granted "` is `granted`.
 
-**The errors carry the property name, never the value.** A mis-mapped CRM
-field can hold anything, up to and including another person's details, so no
-malformed value reaches an error message or a log line. `api/_lib/hubspot.mjs`
-logs `hubspot.consent_state_invalid` with the token, the property name and the
-operator action required; the submission fails and the visitor is told so.
+### 4b. What the operator is told
+
+These failures are only actionable if the log says the right thing, and a
+stage is not a property. `ConsentStateError` therefore keeps `stage` and
+`property` as separate fields and populates only the applicable one, and
+`err.diagnostics()` — owned by the adapter, because the adapter owns the
+taxonomy — supplies the log shape. `api/_lib/hubspot.mjs` logs
+`hubspot.consent_state_invalid` with `submission_id` and those fields spread
+in; the submission fails and the visitor is told so.
+
+| Token | Fields | What the operator is told |
+|---|---|---|
+| `…MALFORMED_RESPONSE` | `consent_error`, `stage` (**no** `property`) | The HubSpot contact response did not contain a usable properties object — inspect the API response and the integration for that stage. |
+| `…MALFORMED_VALUE` | `consent_error`, `property` (**no** `stage`) | The named HubSpot contact property holds a value this integration cannot interpret — correct the stored value in the portal. |
+| `…DATETIME_INVALID` | `consent_error`, `property` | A consent timestamp this server generates was not a valid instant; no grant was written. A fault in the submission pipeline, **not** in HubSpot. |
+| `…ENUM_REJECTED` | `consent_error`, `property` | A value outside the dropdown's vocabulary was refused locally. Also a pipeline fault, not a HubSpot one. |
+
+An earlier revision logged `property: "SEARCH"` beside "inspect the named
+HubSpot contact property", which would send somebody looking for a field that
+does not exist.
+
+**No error or log line carries the value.** A mis-mapped CRM field can hold
+anything, up to and including another person's details, so no malformed value
+reaches an error message or a log line, and neither does any part of the
+HubSpot response body. Tests assert the structured log shape, not just the
+thrown token.
 
 ### Suppression precedence
 
@@ -375,7 +406,7 @@ Run locally on this branch:
 
 | Suite | Result |
 |---|---|
-| `npm run test:consent-state` (new) | **54 passed, 0 failed** |
+| `npm run test:consent-state` (new) | **63 passed, 0 failed** |
 | `npm run test:consent` | **59 passed, 0 failed** |
 | `npm run test:hubspot` | **91 passed, 0 failed** |
 | `npm run test:unit` | **97 passed, 0 failed** |
@@ -384,7 +415,7 @@ Run locally on this branch:
 | `npm run check`, flag off | 10 pages, 0 errors |
 | `npm run check`, flag on | 11 pages, 0 errors |
 
-The 54 new tests cover: feature-off equivalence (no consent properties
+The 63 new tests cover: feature-off equivalence (no consent properties
 requested, none written); the read adapter (blank → `never_granted`, `"false"`
 must not parse as true, suppression flags overriding a stale `granted`, global
 DNC suppressing both channels); grants (channel isolation, ISO timestamp,
@@ -404,6 +435,15 @@ that an invalid or blank timestamp throws; that a granted status cannot be
 written without a valid timestamp; that `assertConsentEnum` rejects
 out-of-vocabulary values; and that no caller can override the status a grant
 writes.
+
+A final cleanup pass added tests for: the parser refusing `null`, `undefined`,
+arrays and primitives directly (not only through the HTTP callers); `{}`
+parsing as a valid all-unset state; the caller's stage reaching the failure;
+and the structured log line — a malformed response logging a `stage` and no
+`property`, a malformed value logging the `property` and no `stage`, no
+malformed value or lead PII anywhere in the line, and the two pipeline faults
+diagnosed as pipeline faults rather than as something to go and edit in
+HubSpot.
 
 All HubSpot requests in the tests are stubbed. **No production contact was
 read or modified, and no production form was submitted.**

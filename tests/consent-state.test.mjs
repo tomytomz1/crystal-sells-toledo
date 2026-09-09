@@ -618,7 +618,9 @@ describe("a malformed HubSpot response fails rather than inventing a state", () 
   test("a search hit with no properties at all", async () => {
     await assert.rejects(
       () => submit({ sms_consent: true }, { searchHit: { id: "77" } }),
-      (err) => malformed(err) && err.property === "SEARCH");
+      /* A stage, not a property - there is no property to blame when the
+         response carried no properties at all. */
+      (err) => malformed(err) && err.stage === "SEARCH" && err.property === "");
   });
 
   test("a search hit whose properties is null", async () => {
@@ -647,7 +649,7 @@ describe("a malformed HubSpot response fails rather than inventing a state", () 
   test("a 409 refetch with no properties", async () => {
     await assert.rejects(
       () => submit({ sms_consent: true }, { raced: {}, refetchBody: { id: "88" } }),
-      (err) => malformed(err) && err.property === "READ");
+      (err) => malformed(err) && err.stage === "READ" && err.property === "");
   });
 
   test("a 409 refetch with a malformed properties value", async () => {
@@ -667,6 +669,39 @@ describe("a malformed HubSpot response fails rather than inventing a state", () 
     assert.deepEqual(emptyConsentState().suppression, {});
   });
 
+  /* The parser is exported. A future caller that forgets the guard must not
+     be able to reach an invented empty state through it - so the guard is AT
+     the parser, not only in front of it. */
+  test("the parser itself refuses input it cannot read as properties", () => {
+    for (const bad of [null, undefined, [], [1, 2], "granted", 0, 7, true, false]) {
+      assert.throws(
+        () => fromHubSpotConsentProperties(bad),
+        (err) => err.token === MALFORMED_RESPONSE && err.consentStateInvalid === true,
+        `${JSON.stringify(bad)} was parsed into a consent state`);
+    }
+  });
+
+  test("an empty object is valid and means every consent field is unset", () => {
+    const st = fromHubSpotConsentProperties({});
+    assert.equal(st.sms.status, NEVER_GRANTED);
+    assert.equal(st.ai_voice.status, NEVER_GRANTED);
+    assert.deepEqual(st.suppression, {});
+    assert.deepEqual(st, emptyConsentState());
+    /* And a populated object still parses normally. */
+    assert.equal(fromHubSpotConsentProperties(grantedSmsProps).sms.status, GRANTED);
+  });
+
+  test("the parser carries the caller's stage into the failure", () => {
+    for (const stage of ["SEARCH", "READ"])
+      assert.throws(
+        () => fromHubSpotConsentProperties(null, stage),
+        (err) => err.stage === stage);
+    /* And has a stage of its own when a caller supplies none, so a failure is
+       never stageless. */
+    assert.throws(() => fromHubSpotConsentProperties(null),
+      (err) => err.stage === "PARSE" && err.property === "");
+  });
+
   test("requireConsentProperties accepts an object and only an object", () => {
     assert.deepEqual(requireConsentProperties({}, "SEARCH"), {});
     const ok = { [SMS.status]: GRANTED };
@@ -681,6 +716,96 @@ describe("a malformed HubSpot response fails rather than inventing a state", () 
     const calls = await submit({ sms_consent: true }, { searchHit: { id: "77" } });
     assert.ok(calls.some((c) => c.method === "PATCH"), "the submission did not proceed");
     assert.deepEqual(cstKeys(contactWrite(calls)), []);
+  });
+});
+
+/* =====================================================================
+   WHAT THE OPERATOR IS TOLD
+   =====================================================================
+   These failures are only actionable if the log says the right thing. A
+   read STAGE reported as a `property`, with "go and inspect that contact
+   property" beside it, sends somebody looking for a HubSpot field that does
+   not exist.
+   ===================================================================== */
+describe("the malformed-state log line", () => {
+  /* Run one submission and return the parsed hubspot.consent_state_invalid
+     line, having asserted the submission failed. */
+  async function failingLine(stub) {
+    const lines = [];
+    const realLog = console.log;
+    console.log = (l) => lines.push(String(l));
+    try {
+      await assert.rejects(() => submit({ sms_consent: true }, stub));
+    } finally { console.log = realLog; }
+    const line = lines.map((l) => JSON.parse(l))
+      .find((l) => l.event === "hubspot.consent_state_invalid");
+    assert.ok(line, "no hubspot.consent_state_invalid line was logged");
+    return line;
+  }
+
+  test("a malformed response logs a stage and no property", async () => {
+    const line = await failingLine({ searchHit: { id: "77", properties: null } });
+    assert.equal(line.consent_error, MALFORMED_RESPONSE);
+    assert.equal(line.stage, "SEARCH");
+    assert.ok(!("property" in line), "a stage was reported as a HubSpot property");
+    assert.match(line.action_required, /did not contain a usable properties object/);
+    assert.doesNotMatch(line.action_required, /named HubSpot contact property/,
+      "the operator was sent to inspect a property that does not exist");
+  });
+
+  test("the 409 refetch reports its own stage", async () => {
+    const line = await failingLine({ raced: {}, refetchBody: { id: "88" } });
+    assert.equal(line.stage, "READ");
+    assert.ok(!("property" in line));
+  });
+
+  test("a malformed value logs the property and never the value", async () => {
+    const line = await failingLine({
+      existing: { ...grantedSmsProps, [S.smsSuppressed]: "banana(419) 555-0000" },
+    });
+    assert.equal(line.consent_error, MALFORMED_VALUE);
+    assert.equal(line.property, S.smsSuppressed);
+    assert.ok(!("stage" in line), "a property failure claimed a read stage");
+    assert.match(line.action_required, /named HubSpot contact property/);
+    assert.match(line.action_required, /Correct the stored value/);
+    const whole = JSON.stringify(line);
+    assert.ok(!whole.includes("banana"), "the malformed value reached the log");
+    assert.ok(!whole.includes("419"), "the malformed value reached the log");
+  });
+
+  test("an unrecognised permission status names the status property", async () => {
+    const line = await failingLine({ existing: { [SMS.status]: "definitely_yes" } });
+    assert.equal(line.consent_error, MALFORMED_VALUE);
+    assert.equal(line.property, SMS.status);
+    assert.ok(!JSON.stringify(line).includes("definitely_yes"));
+  });
+
+  /* Nothing about the lead itself, and nothing from the response body. */
+  test("no lead PII reaches the malformed-state line", async () => {
+    const line = await failingLine({ searchHit: { id: "77", properties: null } });
+    const whole = JSON.stringify(line);
+    for (const secret of [validHomeValue.email, validHomeValue.first_name,
+      validHomeValue.last_name, validHomeValue.property_address])
+      assert.ok(secret && !whole.includes(secret), `${secret} reached the log`);
+    assert.equal(line.submission_id, "csv_test000000000000000000");
+  });
+
+  /* The two pipeline faults are OUR bugs, not a bad CRM value, and must not
+     tell an operator to go and edit a HubSpot field. */
+  test("pipeline faults are diagnosed as pipeline faults", () => {
+    const dt = (() => { try { toHubSpotDateTime("", SMS.at); } catch (e) { return e; } })();
+    assert.equal(dt.diagnostics().consent_error, DATETIME_INVALID);
+    assert.equal(dt.diagnostics().property, SMS.at);
+    assert.match(dt.diagnostics().action_required, /not in HubSpot/);
+
+    const en = (() => {
+      try { assertConsentEnum(SMS.status, "nope", PERMISSION_STATUS_VALUES); }
+      catch (e) { return e; }
+    })();
+    assert.equal(en.diagnostics().consent_error, ENUM_REJECTED);
+    assert.equal(en.diagnostics().property, SMS.status);
+    assert.match(en.diagnostics().action_required, /refused locally/);
+    assert.ok(!JSON.stringify(en.diagnostics()).includes("nope"));
   });
 });
 

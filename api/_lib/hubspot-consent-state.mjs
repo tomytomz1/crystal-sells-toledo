@@ -120,21 +120,88 @@ export const HUBSPOT_SUPPRESSION_VOCABULARY = Object.freeze({
    log or an error message.
    --------------------------------------------------------------------- */
 
-export class ConsentStateError extends Error {
-  constructor(token, property) {
-    super(property ? `${token}: ${property}` : token);
-    this.name = "ConsentStateError";
-    this.token = token;
-    this.property = property || "";
-    /* Never retried, never degraded to a warning: the caller has to fail. */
-    this.consentStateInvalid = true;
-  }
-}
-
 export const MALFORMED_RESPONSE = "HUBSPOT_CONSENT_STATE_MALFORMED_RESPONSE";
 export const MALFORMED_VALUE = "HUBSPOT_CONSENT_STATE_MALFORMED_VALUE";
 export const DATETIME_INVALID = "HUBSPOT_CONSENT_DATETIME_INVALID";
 export const ENUM_REJECTED = "HUBSPOT_CONSENT_ENUM_REJECTED";
+
+/* What an operator is told, per failure. Kept here rather than in the HTTP
+   layer because this module owns the taxonomy: whoever adds a token adds its
+   remedy in the same place, and nothing else has to know which tokens name a
+   property and which name a stage. */
+const DIAGNOSIS = {
+  [MALFORMED_RESPONSE]: {
+    subject: "stage",
+    action_required:
+      "the HubSpot contact response did not contain a usable properties object - " +
+      "inspect the API response and the integration for the named stage; the lead " +
+      "was NOT saved and the visitor was told so",
+  },
+  [MALFORMED_VALUE]: {
+    subject: "property",
+    action_required:
+      "the named HubSpot contact property holds a value this integration cannot " +
+      "interpret - a permission status outside never_granted/granted/revoked/" +
+      "suppressed, or a suppression flag that is neither true nor false nor empty. " +
+      "Correct the stored value in the portal; the lead was NOT saved and the " +
+      "visitor was told so",
+  },
+  [DATETIME_INVALID]: {
+    subject: "property",
+    action_required:
+      "a consent timestamp this server generates was not a valid instant, so no " +
+      "grant was written - a grant with a blank timestamp is never sent. This is a " +
+      "fault in the submission pipeline, not in HubSpot; report it",
+  },
+  [ENUM_REJECTED]: {
+    subject: "property",
+    action_required:
+      "a value outside the HubSpot dropdown's vocabulary was about to be written " +
+      "and was refused locally. This is a fault in the submission pipeline, not in " +
+      "HubSpot; report it",
+  },
+};
+
+/**
+ * A stage is not a property.
+ *
+ * MALFORMED_RESPONSE happens at a named READ STAGE - the contact search, or
+ * the 409 refetch - and there is no property to blame, because the response
+ * carried no properties at all. Every other token names an actual `cst_*`
+ * property. Reporting "property: SEARCH" and then telling an operator to go
+ * and inspect that contact property sends them looking for a field that does
+ * not exist, so the two are separate fields and only the applicable one is
+ * ever populated.
+ */
+export class ConsentStateError extends Error {
+  constructor(token, subject = "") {
+    super(subject ? `${token}: ${subject}` : token);
+    this.name = "ConsentStateError";
+    this.token = token;
+    const names = DIAGNOSIS[token]?.subject === "stage";
+    this.stage = names ? subject : "";
+    this.property = names ? "" : subject;
+    /* Never retried, never degraded to a warning: the caller has to fail. */
+    this.consentStateInvalid = true;
+  }
+
+  /**
+   * PII-free structured fields for the operator log. The malformed VALUE is
+   * never among them - a mis-mapped CRM field can hold anything, up to and
+   * including another person's details - and neither is any part of the
+   * HubSpot response body.
+   */
+  diagnostics() {
+    const d = DIAGNOSIS[this.token];
+    return {
+      consent_error: this.token,
+      ...(this.stage ? { stage: this.stage } : {}),
+      ...(this.property ? { property: this.property } : {}),
+      action_required: d ? d.action_required
+        : "consent state could not be interpreted; the lead was NOT saved",
+    };
+  }
+}
 
 /**
  * A HubSpot response is only usable as consent state if it actually carried
@@ -149,7 +216,7 @@ export const ENUM_REJECTED = "HUBSPOT_CONSENT_ENUM_REJECTED";
  * `stage` distinguishes the search hit from the 409 refetch, so a failure
  * says which read went wrong without carrying any of its content.
  */
-export function requireConsentProperties(properties, stage) {
+export function requireConsentProperties(properties, stage = "PARSE") {
   if (properties === null || typeof properties !== "object" || Array.isArray(properties))
     throw new ConsentStateError(MALFORMED_RESPONSE, stage);
   return properties;
@@ -272,8 +339,18 @@ const str = (v) => (v == null ? "" : String(v));
  *
  * A global do-not-contact suppresses both channels.
  */
-export function fromHubSpotConsentProperties(properties) {
-  const p = properties || {};
+export function fromHubSpotConsentProperties(properties, stage = "PARSE") {
+  /* `properties || {}` used to live here, and it was the same invented-state
+     bug one layer down: null, undefined, an array or a primitive all became
+     an empty consent state - a positive claim that some real contact has
+     never granted anything and is not suppressed.
+     
+     The HTTP callers pass their own stage, so a failure still says whether
+     the search or the 409 refetch produced it. Validating at the boundary
+     rather than only at the call sites means a future caller cannot bypass
+     fail-closed behaviour by forgetting the guard: there is one
+     implementation of it, and reaching the parser runs it. */
+  const p = requireConsentProperties(properties, stage);
   const S = SUPPRESSION_PROPERTIES;
 
   const globalDnc = parseHubSpotBoolean(p[S.doNotContact], S.doNotContact);
@@ -327,6 +404,9 @@ export function fromHubSpotConsentProperties(properties) {
  *  nothing suppressed - and reached ONLY when there is genuinely no contact,
  *  never as a stand-in for "we did not look". */
 export function emptyConsentState() {
+  /* `{}` is a VALID properties object whose consent fields are simply unset -
+     which is the truth about a contact that does not exist. It is the one
+     input to the parser that legitimately yields this state. */
   return fromHubSpotConsentProperties({});
 }
 

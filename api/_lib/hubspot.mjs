@@ -26,7 +26,7 @@ import { buildDescription, buildSummary } from "./description.mjs";
 import { applySubmissionConsent } from "./consent.mjs";
 import {
   consentStateEnabled, consentPropertiesToRead, fromHubSpotConsentProperties,
-  toHubSpotConsentProperties, emptyConsentState, requireConsentProperties,
+  toHubSpotConsentProperties, emptyConsentState,
 } from "./hubspot-consent-state.mjs";
 import { log, logError } from "./log.mjs";
 
@@ -284,10 +284,11 @@ export async function findContactByEmail(email) {
     /* `hit.properties || {}` would be a lie here. A contact WAS found, so an
        empty consent state is a claim about that contact - that it has never
        granted and is not suppressed - and a malformed response is no basis
-       for making it. requireConsentProperties throws instead, and the lead
-       fails loudly rather than folding a grant into an invented blank. */
+       for making it. The parser refuses instead, and the lead fails loudly
+       rather than folding a grant into an invented blank. The stage says
+       which read produced the bad response. */
     consent: consentProps.length
-      ? fromHubSpotConsentProperties(requireConsentProperties(hit.properties, "SEARCH"))
+      ? fromHubSpotConsentProperties(hit.properties, "SEARCH")
       : null,
   };
 }
@@ -306,7 +307,7 @@ async function readConsentState(ref, { byEmail = false } = {}) {
   /* Same rule as the search, and it matters more here: this contact exists
      precisely because it collided with our create, and it is the one most
      likely to be carrying a suppression written seconds ago. */
-  return fromHubSpotConsentProperties(requireConsentProperties(json?.properties, "READ"));
+  return fromHubSpotConsentProperties(json?.properties, "READ");
 }
 
 async function createContact(props) {
@@ -523,19 +524,17 @@ export async function createLead(payload) {
     if (err.consentStateInvalid) {
       /* Not a transient fault. HubSpot answered, and what it said about this
          contact's consent could not be understood - so the submission was
-         failed rather than folded into a guess. Someone has to look at the
-         named property. The bad VALUE is deliberately absent: a mis-mapped
-         CRM field can hold anything, up to and including another person's
-         details. */
+         failed rather than folded into a guess.
+
+         The fields come from the error itself. Which of `stage` and
+         `property` appears, and what an operator is told to do, belongs to
+         the module that owns the taxonomy: a malformed RESPONSE has a read
+         stage and no property to blame, while a malformed VALUE names the
+         property whose stored value has to be corrected. Neither ever
+         carries the value or the response body. */
       logError("hubspot.consent_state_invalid", err, {
         submission_id: sid,
-        consent_error: err.token,
-        property: err.property,
-        action_required:
-          "inspect the named HubSpot contact property - a permission status outside " +
-          "never_granted/granted/revoked/suppressed, or a suppression flag that is " +
-          "neither true nor false nor empty, must be corrected in the portal; the lead " +
-          "was NOT saved and the visitor was told so",
+        ...err.diagnostics(),
       });
     }
     if (err.formDefinitionProblem) {
