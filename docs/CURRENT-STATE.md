@@ -45,19 +45,40 @@ Schema in the production HubSpot portal:
   the published privacy policy carries no messaging section.
 - **No consumer SMS or AI voice traffic is active.** No Twilio SMS is sent and no
   Retell call is placed.
-- **§6a — timeline-evidence durability and rendering verification — remains
-  outstanding.** It asks whether the HubSpot UI truncates the enquiry block, what
-  the activity-retention policy is, and whether an activity can be altered or
-  deleted.
-- **Activation remains gated** on §6a. The datetime round trip closed one gate,
-  not all of them.
+- **§6a research is complete (9 September 2026).** The HubSpot form-submission
+  timeline evidence is **useful operationally but is not sufficient as the sole
+  durable consent ledger**, because a submission can be permanently and
+  irreversibly deleted — individually or in bulk — which removes it from the
+  contact's timeline. One part of §6a stays open as a manual **operator
+  usability** check: whether the HubSpot UI renders the whole enquiry block or
+  truncates it. Durability no longer depends on that answer.
+- **Activation remains gated** — §6a's answer added a gate rather than removing
+  one. Eight gates outstanding, listed in the decision document below.
 - **A2P/TCR readiness is a separate activation dependency.** This repository makes
   no claim about its status.
 
+## Consent evidence architecture — approved direction
+
+Three records, three jobs. Conflating any two is how this goes wrong.
+
+| Record | Role | Mutability |
+|---|---|---|
+| HubSpot `cst_*` Contact properties | Current permission state | Mutable — overwritten as it changes, not history |
+| HubSpot form timeline activity | Operator-visible evidence copy | Platform-deletable |
+| **External append-only ledger** | Durable historical evidence — the system of record | Append-only to the application |
+
+**The ledger is not built.** Automated messaging must never depend on the HubSpot
+timeline being immutable. The existing consent model is unchanged — the ledger
+is an additional evidence sink, not a replacement for any of it.
+
+Decision, findings, sources and the full gate list:
+`docs/updates/2026-09-09-consent-evidence-ledger-decision.md`.
+
 ### Not built, and not active
 
-Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
-webhooks, and send-time enforcement are **later phases**. The permission resolver
+The append-only consent ledger, suppression writing, STOP processing, DNC
+processing, re-opt-in / unsuppression, webhooks, and send-time enforcement are
+**later phases**. The permission resolver
 (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and is tested, but nothing
 sends or calls, so nothing calls it in production.
 
@@ -72,5 +93,6 @@ Open one of these only when the task actually needs it.
 | Consent model, disclosures, evidence, feature gate | `docs/updates/2026-09-09-communications-consent-foundation.md` |
 | Consent read/write semantics, suppression precedence, 409 race, fail-closed parsing, datetime format | `docs/updates/2026-09-09-hubspot-consent-current-state.md` |
 | The datetime round-trip test and its scope | `docs/updates/2026-09-09-hubspot-datetime-roundtrip-verification.md` |
+| §6a findings, evidence architecture decision, activation gates | `docs/updates/2026-09-09-consent-evidence-ledger-decision.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
