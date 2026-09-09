@@ -402,7 +402,10 @@ permitted and messages that silently never arrive.
 > One part of question 1 below stays open as a **manual operator-usability
 > check**: whether the HubSpot UI renders the whole enquiry block or truncates
 > it. No guarantee is documented either way, and durability no longer depends on
-> the answer. The API returns the full value regardless.
+> the answer. **Full rendering of the actual consent evidence remains
+> unverified** until that check is done — question 1's parenthetical below ("the
+> API still returns it") is an assumption from when it was written, not a
+> finding, and it has not been confirmed for a real full-length block.
 
 The original questions are kept below as written.
 

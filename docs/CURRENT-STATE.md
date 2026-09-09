@@ -47,11 +47,12 @@ Schema in the production HubSpot portal:
   Retell call is placed.
 - **§6a research is complete (9 September 2026).** The HubSpot form-submission
   timeline evidence is **useful operationally but is not sufficient as the sole
-  durable consent ledger**, because a submission can be permanently and
-  irreversibly deleted — individually or in bulk — which removes it from the
-  contact's timeline. One part of §6a stays open as a manual **operator
-  usability** check: whether the HubSpot UI renders the whole enquiry block or
-  truncates it. Durability no longer depends on that answer.
+  durable consent ledger** — a submission can be permanently and irreversibly
+  deleted, individually or in bulk, which removes it from the contact's timeline.
+  One part of §6a stays open as a manual **operator usability** check: whether
+  the HubSpot UI renders the whole enquiry block or truncates it. **Full
+  rendering of the actual consent evidence is unverified** until that check is
+  done.
 - **Activation remains gated** — §6a's answer added a gate rather than removing
   one. Eight gates outstanding, listed in the decision document below.
 - **A2P/TCR readiness is a separate activation dependency.** This repository makes
@@ -68,11 +69,13 @@ Three records, three jobs. Conflating any two is how this goes wrong.
 | **External append-only ledger** | Durable historical evidence — the system of record | Append-only to the application |
 
 **The ledger is not built.** Automated messaging must never depend on the HubSpot
-timeline being immutable. The existing consent model is unchanged — the ledger
-is an additional evidence sink, not a replacement for any of it.
+timeline being immutable. The existing consent model is unchanged; the ledger is
+an additional evidence sink.
 
 Decision, findings, sources and the full gate list:
-`docs/updates/2026-09-09-consent-evidence-ledger-decision.md`.
+`docs/updates/2026-09-09-consent-evidence-ledger-decision.md`. Implementation
+design for when the ledger is built:
+`docs/updates/2026-09-09-consent-evidence-ledger-proposal.md`.
 
 ### Not built, and not active
 
@@ -94,5 +97,6 @@ Open one of these only when the task actually needs it.
 | Consent read/write semantics, suppression precedence, 409 race, fail-closed parsing, datetime format | `docs/updates/2026-09-09-hubspot-consent-current-state.md` |
 | The datetime round-trip test and its scope | `docs/updates/2026-09-09-hubspot-datetime-roundtrip-verification.md` |
 | §6a findings, evidence architecture decision, activation gates | `docs/updates/2026-09-09-consent-evidence-ledger-decision.md` |
+| Ledger implementation design — schema, event types, idempotency, DB roles, failure semantics | `docs/updates/2026-09-09-consent-evidence-ledger-proposal.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |

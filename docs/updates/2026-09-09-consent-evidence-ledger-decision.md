@@ -56,8 +56,15 @@ is an operational copy, not the system of record.
 truncates it behind a "show more" — is **not answered by documentation**, and no
 guarantee exists to cite. It is now an *operator usability* question rather than
 an evidence-durability one, because durability no longer depends on the timeline.
-A manual look is still worth doing before activation, and it stays on the gate
-list below. The API returns the full value regardless.
+It stays on the gate list below.
+
+**Full rendering of the actual consent evidence remains UNVERIFIED** until that
+manual operator check is done. Nothing in the reviewed documentation guarantees
+it, and no one has yet opened a real submission carrying a full ten-row block —
+including both long CONSENT TEXT rows — and confirmed what is displayed. An
+earlier draft of this document said the API returns the full value regardless;
+that was an assumption, not a finding, and it is withdrawn. Whether the UI, the
+API, or both return the complete evidence is exactly what the check is for.
 
 ### Sources reviewed, 9 September 2026
 
@@ -121,8 +128,11 @@ mean privacy-deletion obligations can be ignored. A separate privileged path
 covers migrations and legally required deletion.
 
 **None of this is implemented.** The full proposal — schema, event types, website
-and STOP/DNC behaviour, role grants — is the source document this decision was
-taken from and should be re-read when the ledger is actually built.
+and STOP/DNC behaviour, idempotency keys, role grants, PII minimisation — is
+preserved in this repository as
+`docs/updates/2026-09-09-consent-evidence-ledger-proposal.md`, and is the
+authoritative implementation-design source. Read it when the ledger is actually
+built; a future session needs no conversation history to find it.
 
 ---
 
