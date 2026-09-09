@@ -184,6 +184,30 @@ p:last-child { margin-bottom: 0; }
   margin: .4rem 0 0; font-size: .8rem; line-height: 1.5;
   color: var(--muted);
 }
+/* Communications consent.
+   Two optional permissions, sitting between the last field and Submit.
+   The layout is a two-column grid per item so a wrapped disclosure hangs
+   under itself rather than under the box, and the box keeps a hit target
+   comfortably above the 24px minimum on a phone. `align-items: start`
+   keeps the box on the first line of a three-line label. */
+.consent {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; margin: 0 0 1.25rem;
+}
+.consent__legend {
+  padding: 0 .4rem; font-size: .75rem; font-weight: 600; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--muted);
+}
+.consent__optional { font-weight: 500; letter-spacing: .06em; opacity: .8; }
+.consent__item {
+  display: grid; grid-template-columns: auto 1fr; gap: .7rem;
+  align-items: start; margin-bottom: .85rem;
+}
+.consent__box { width: 1.15rem; height: 1.15rem; margin: .15rem 0 0; flex: none; cursor: pointer; }
+.consent__label { font-size: .82rem; line-height: 1.55; cursor: pointer; }
+.consent__label a { color: inherit; text-decoration: underline; }
+.consent__note { margin: 0; font-size: .78rem; line-height: 1.5; color: var(--muted); }
+
 .hv-form__privacy { margin-top: .5rem; font-size: .78rem; }
 .hv-form__privacy a { color: inherit; text-decoration: underline; opacity: .85; }
 

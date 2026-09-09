@@ -1,0 +1,47 @@
+<!-- =====================================================================
+     SHARED communications consent block.
+     =====================================================================
+     Included by BOTH form implementations - the shared home-value funnel
+     partial and /contact - so the two disclosures cannot drift apart. It
+     renders only when COMMUNICATIONS_CONSENT_ENABLED is "true" at build
+     time; with the flag off the consentBlock build variable is an
+     empty string and no page carries a checkbox.
+
+     NB: never write this partial's own template token inside this comment.
+     tools/build.mjs re-runs substitution for six passes, so a partial that
+     names the variable it is injected into inserts itself again on every
+     pass - which is exactly how this file first shipped five copies of the
+     consent fieldset onto every form page.
+
+     The two labels are NOT written here. They are injected from
+     api/_lib/consent.mjs, the same module the server records the exact
+     wording from, so what the visitor reads and what gets stored as the
+     thing they agreed to are one string with one derivation. Editing the
+     disclosure text in this file is impossible on purpose.
+
+     Rules these controls must keep, enforced by tools/check.mjs:
+
+       * NEVER `checked` - a pre-ticked consent box is not consent
+       * NEVER `required` - consent is not a condition of service, and the
+         disclosure says so in as many words
+       * two separate boxes - SMS and automated voice are separate
+         permissions and one may never imply the other
+       * both links present and opening in a new tab, so a visitor can read
+         the policy without losing a part-filled form
+     ===================================================================== -->
+<fieldset class="consent">
+  <legend class="consent__legend">How may Crystal follow up? <span class="consent__optional">Optional</span></legend>
+
+  <div class="consent__item">
+    <input class="consent__box" id="consent-sms" name="sms_consent" type="checkbox" value="true">
+    <label class="consent__label" for="consent-sms">{{consentSmsHtml}}</label>
+  </div>
+
+  <div class="consent__item">
+    <input class="consent__box" id="consent-voice" name="ai_voice_consent" type="checkbox" value="true">
+    <label class="consent__label" for="consent-voice">{{consentVoiceHtml}}</label>
+  </div>
+
+  <p class="consent__note">Leaving these unticked will not affect your request &mdash; Crystal
+    will still reply by email or phone about what you asked for.</p>
+</fieldset>

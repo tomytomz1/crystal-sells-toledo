@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { validateLead, FieldError } from "./_lib/validate.mjs";
 import { createLead, isConfigured } from "./_lib/hubspot.mjs";
 import { sendAcknowledgement, classifyMailError } from "./_lib/mail.mjs";
+import { buildConsentEvidence, consentFeatureEnabled, consentLogShape } from "./_lib/consent.mjs";
 import { readBody, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
@@ -110,6 +111,31 @@ export default async function handler(req, res) {
 
   payload.meta.submission_id = submissionId();
   const sid = payload.meta.submission_id;
+
+  /* --- consent evidence ------------------------------------------------
+     Built server-side from the validated payload, AFTER the submission id
+     exists so the evidence can name the event it belongs to. The browser
+     supplied two booleans and nothing else; the timestamp, the version and
+     the exact disclosure wording are attached here, which is what stops a
+     forged request claiming a stronger consent than the page displayed.
+
+     Attached to the payload, so it rides into the enquiry block and lands
+     on HubSpot's native form-submission timeline activity as part of the
+     SAME write that stores the lead. That is deliberate: consent evidence
+     is CRITICAL, not a courtesy, and it cannot half-succeed. If HubSpot
+     rejects the write, the lead fails loudly exactly as it does today -
+     there is no path where the contact is stored and the consent is lost.
+
+     Absent entirely while the feature is off, so the block written to
+     production is unchanged. */
+  if (consentFeatureEnabled()) {
+    payload.consent = buildConsentEvidence(payload);
+    log("lead.consent.captured", {
+      submission_id: sid,
+      form_type: payload.lead.form_type,
+      ...consentLogShape(payload.consent),
+    });
+  }
 
   log("lead.accepted", {
     submission_id: sid,

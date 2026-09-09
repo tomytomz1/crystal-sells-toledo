@@ -14,6 +14,7 @@
     "test:browser": "node --test tests/browser.test.mjs",
     "test:hubspot": "node --test tests/hubspot.test.mjs",
     "test:mail": "node --test tests/mail.test.mjs",
+    "test:consent": "node --test tests/consent.test.mjs",
     "zoho:verify": "node tools/zoho-verify.mjs"
   },
   "engines": {
