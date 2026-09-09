@@ -233,6 +233,23 @@ export function buildConsentEvidence(payload) {
     source_page: meta.page || "",
     submission_id: meta.submission_id || "",
     captured_at: capturedAt,
+    /* The number the consent DECISION was made about, present whether or
+       not a box was ticked - unlike the per-channel `phone`, which is
+       blank when nothing was granted because it records what a grant binds
+       to. The ledger needs the number on a "not selected" event too: an
+       event that does not say which line it concerns proves nothing about
+       that line. Nothing else reads this; the timeline rows and the `cst_*`
+       properties still take the per-channel value. */
+    phone,
+    /* DENY BY DEFAULT.
+       Set true by api/lead.js, and only after the append-only consent
+       ledger has confirmed this submission's events. api/_lib/hubspot.mjs
+       writes a `cst_*` grant only when it is true, so a future refactor
+       that forgets to set it withholds a permission rather than granting
+       one with no durable evidence behind it - which is the single outcome
+       the ledger exists to prevent.
+       See docs/updates/2026-09-09-consent-evidence-ledger.md. */
+    durable: false,
   };
 }
 
@@ -261,6 +278,33 @@ export function buildConsentEvidence(payload) {
 export function consentRows(evidence) {
   const state = (c) => (c.granted ? "GRANTED" : "NOT GRANTED");
   return [
+    /* FIRST, not last, and deliberately so.
+       This row qualifies every claim below it. An operator who reads
+       "SMS CONSENT: GRANTED" before reaching the caveat has already formed
+       the belief the caveat exists to prevent, so the caveat goes above
+       the claim.
+
+       Why the row exists at all: when the ledger append fails, this block
+       is still written (losing the record that someone ticked a box is the
+       opposite of what an evidence system should do when its evidence sink
+       is down) but NO `cst_*` grant is - so the activity can say
+       "SMS CONSENT: GRANTED" while the contact correctly reads
+       `never_granted`. Read cold that looks like the integration dropped a
+       consent. This row explains it without anyone reading a log.
+
+       Binary on purpose. A missing CONSENT_LEDGER_URL, a timeout, a
+       refused E.164 conversion and a rejected INSERT all read NOT
+       RECORDED; WHICH one is in the `lead.consent.ledger_failed` log line,
+       where someone diagnosing an outage is already looking. An operator
+       reading a contact needs to know whether the evidence is durable, not
+       why it is not.
+
+       `=== true`, not a truthy test: a missing marker, an undefined, or an
+       evidence object built by some future path that never heard of the
+       ledger all render NOT RECORDED. Both values are non-empty strings,
+       so buildDescription()'s blank substitution can never turn this row
+       into "CONSENT LEDGER: -", which would be worse than either. */
+    ["CONSENT LEDGER", evidence.durable === true ? "RECORDED" : "NOT RECORDED"],
     ["SMS CONSENT", state(evidence.sms)],
     ["SMS CONSENT VERSION", evidence.sms.version],
     /* The disclosure itself, not just its identifier.

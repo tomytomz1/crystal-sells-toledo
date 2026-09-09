@@ -7,6 +7,12 @@
  * a DNC or a global do-not-contact; an unticked box never blanks a prior
  * consent; and the 409 race cannot grant through a suppression that
  * appeared while this request was in flight.
+ *
+ * Phase 3 added the grant-withholding invariants at the bottom of this
+ * file, where the grant invariants already lived: a `cst_*` permission is
+ * written only when the submission's evidence reached the durable
+ * append-only ledger. The ledger's executor is injected, so no database is
+ * involved here either.
  */
 
 import { test, describe, beforeEach, afterEach } from "node:test";
@@ -24,12 +30,14 @@ import {
   MALFORMED_RESPONSE, MALFORMED_VALUE, DATETIME_INVALID, ENUM_REJECTED,
 } from "../api/_lib/hubspot-consent-state.mjs";
 import {
-  PERMISSION_STATE, FEATURE_FLAG, buildConsentEvidence, applySubmissionConsent,
+  PERMISSION_STATE, FEATURE_FLAG, SMS_CONSENT, buildConsentEvidence, applySubmissionConsent,
 } from "../api/_lib/consent.mjs";
+import { LEDGER_URL_VAR, _setExecutor, _resetExecutor } from "../api/_lib/consent-ledger.mjs";
+import handler from "../api/lead.js";
 import { canSendSms, canPlaceAutomatedVoiceCall, REASON } from "../api/_lib/permission.mjs";
 import { validateLead } from "../api/_lib/validate.mjs";
 import { _resetRateLimit } from "../api/_lib/security.mjs";
-import { validHomeValue } from "./helpers.mjs";
+import { mockReq, mockRes, validHomeValue } from "./helpers.mjs";
 
 const { NEVER_GRANTED, GRANTED, REVOKED, SUPPRESSED } = PERMISSION_STATE;
 const S = SUPPRESSION_PROPERTIES;
@@ -109,12 +117,23 @@ function stubHubspot({ existing = null, raced = null, formStatus = 200,
   return calls;
 }
 
-/** Run one submission through createLead and return the calls made. */
-async function submit(over = {}, stub = {}) {
+/**
+ * Run one submission through createLead and return the calls made.
+ *
+ * `durable` models what api/lead.js did with the consent ledger BEFORE
+ * calling createLead: true is a confirmed append, false is a failed one.
+ * The default is true because that is the ordinary path — every grant
+ * assertion in this file is about a submission whose evidence reached the
+ * ledger. The false case has its own section below.
+ */
+async function submit(over = {}, stub = {}, { durable = true } = {}) {
   const calls = stubHubspot(stub);
   const payload = validateLead({ ...validHomeValue, ...over });
   payload.meta.submission_id = "csv_test000000000000000000";
-  if (process.env[FEATURE_FLAG] === "true") payload.consent = buildConsentEvidence(payload);
+  if (process.env[FEATURE_FLAG] === "true") {
+    payload.consent = buildConsentEvidence(payload);
+    payload.consent.durable = durable;
+  }
   await createLead(payload);
   return calls;
 }
@@ -817,6 +836,10 @@ describe("HubSpot remains critical", () => {
     const p = validateLead({ ...validHomeValue, sms_consent: true });
     p.meta.submission_id = "csv_test000000000000000000";
     p.consent = buildConsentEvidence(p);
+    /* A confirmed ledger append, as api/lead.js marks it. Without this the
+       grant is withheld by design and these tests would be asserting the
+       ledger-outage path rather than the HubSpot failure path. */
+    p.consent.durable = true;
     return p;
   };
 
@@ -842,6 +865,187 @@ describe("HubSpot remains critical", () => {
     assert.ok(create, "the contact write did not happen");
     assert.equal(create.body.properties[SMS.status], GRANTED,
       "precondition: the consent state was written before the form failed");
+  });
+});
+
+/* =====================================================================
+   THE DURABLE LEDGER GATES THE GRANT
+   ---------------------------------------------------------------------
+   A `cst_*` property IS the permission — the thing api/_lib/permission.mjs
+   reads at send time. Writing one with no durable evidence behind it
+   creates a permission this business could not later prove it was given,
+   which is the single outcome the append-only ledger exists to prevent.
+
+   So a failed append withholds the grant, and does NOTHING else: the lead
+   is still stored, the timeline still carries the evidence rows, and the
+   enquiry block says so out loud.
+   ===================================================================== */
+describe("a grant requires durable evidence", () => {
+  const formMessage = (calls) =>
+    calls.find((c) => c.key === FORM)?.body?.fields
+      ?.find((f) => f.name === "message")?.value || "";
+
+  test("a failed append writes no cst_ property at all", async () => {
+    const calls = await submit(
+      { sms_consent: true, ai_voice_consent: true }, {}, { durable: false });
+    assert.deepEqual(cstKeys(contactWrite(calls)), [],
+      "a permission was written with no durable evidence behind it");
+  });
+
+  /* The lead is not the casualty of an evidence outage; the permission is. */
+  test("a failed append still stores the lead and its timeline evidence", async () => {
+    const calls = await submit({ sms_consent: true }, {}, { durable: false });
+    assert.ok(calls.find((c) => c.key === CREATE), "the contact write did not happen");
+    assert.ok(calls.find((c) => c.key === FORM), "the timeline activity was not submitted");
+    /* And the evidence rows are intact — dropping them would destroy the
+       record that the visitor ticked the box at all. */
+    const message = formMessage(calls);
+    assert.match(message, /^SMS CONSENT: GRANTED$/m);
+    assert.ok(message.includes(SMS_CONSENT.text),
+      "the exact disclosure was dropped when the ledger failed");
+  });
+
+  /* Withholding a new grant must not disturb what the contact already
+     had. A ledger outage is not a reason to touch existing state. */
+  test("a failed append does not blank a prior grant or clear a suppression", async () => {
+    const priorGranted = await submit(
+      { sms_consent: true }, { existing: grantedSmsProps }, { durable: false });
+    assert.deepEqual(cstKeys(contactWrite(priorGranted)), []);
+
+    const suppressed = await submit({ sms_consent: true }, {
+      existing: { ...grantedSmsProps, [S.smsSuppressed]: "true",
+                  [SMS.status]: SUPPRESSED, [S.smsSuppressedAt]: "2026-09-01T00:00:00.000Z" },
+    }, { durable: false });
+    const props = contactWrite(suppressed);
+    assert.deepEqual(cstKeys(props), [],
+      "a ledger outage touched a suppressed contact's consent properties");
+    for (const name of Object.values(S))
+      assert.equal(name in props, false, `${name} was written`);
+  });
+
+  /* Deny by default. An evidence object that never heard of the ledger —
+     a future path, a refactor, a hand-built payload — grants nothing. */
+  test("a missing or non-true marker withholds the grant", async () => {
+    for (const marker of [undefined, null, false, "true", 1, {}]) {
+      const calls = stubHubspot({});
+      const payload = validateLead({ ...validHomeValue, sms_consent: true });
+      payload.meta.submission_id = "csv_test000000000000000000";
+      payload.consent = buildConsentEvidence(payload);
+      if (marker === undefined) delete payload.consent.durable;
+      else payload.consent.durable = marker;
+      await createLead(payload);
+      assert.deepEqual(cstKeys(contactWrite(calls)), [],
+        `durable=${JSON.stringify(marker)} was treated as a confirmed append`);
+    }
+  });
+
+  /* The ordinary path is unchanged: a confirmed append folds exactly as it
+     did before the ledger existed. */
+  test("a confirmed append writes the same grant it always did", async () => {
+    const calls = await submit({ sms_consent: true });
+    const props = contactWrite(calls);
+    assert.deepEqual(cstKeys(props), [
+      SMS.at, SMS.version, SMS.page, SMS.phone, SMS.status, SMS.source,
+    ].sort());
+    assert.equal(props[SMS.status], GRANTED);
+    assert.equal(props[SMS.phone], PHONE);
+  });
+
+  /* THE PAIRING INVARIANT, asserted on ONE captured request so the block
+     and the properties can never disagree about the same submission: the
+     enquiry block says NOT RECORDED in exactly the cases where no grant
+     was written, and RECORDED in exactly the cases where one was. */
+  test("the block and the properties agree about the same submission", async () => {
+    for (const durable of [true, false]) {
+      const calls = await submit({ sms_consent: true }, {}, { durable });
+      const message = formMessage(calls);
+      const granted = cstKeys(contactWrite(calls)).length > 0;
+      assert.equal(granted, durable, `durable=${durable} produced the wrong grant`);
+      /* Whole lines, not substrings: "NOT RECORDED" contains "RECORDED". */
+      assert.match(message, durable
+        ? /^CONSENT LEDGER: RECORDED$/m : /^CONSENT LEDGER: NOT RECORDED$/m);
+      assert.equal(/^CONSENT LEDGER: NOT RECORDED$/m.test(message), !granted,
+        "the block claims durable evidence for a submission that was refused a grant");
+    }
+  });
+});
+
+/* =====================================================================
+   THE LEDGER, END TO END THROUGH THE ENDPOINT
+   ---------------------------------------------------------------------
+   Exercised through the real handler, because api/lead.js is the only
+   thing that calls the ledger. With the feature off there is no evidence,
+   so there is no append and no database is contacted — which is what
+   keeps "feature off" genuinely equivalent to production today rather
+   than merely similar. With it on, the append is what unlocks the grant,
+   and its failure costs the permission and nothing else.
+   ===================================================================== */
+describe("the ledger through the lead endpoint", () => {
+  const savedUrl = {};
+  beforeEach(() => {
+    savedUrl.v = process.env[LEDGER_URL_VAR];
+    process.env[LEDGER_URL_VAR] = "postgres://app:secret@ledger.invalid/db";
+  });
+  afterEach(() => {
+    if (savedUrl.v === undefined) delete process.env[LEDGER_URL_VAR];
+    else process.env[LEDGER_URL_VAR] = savedUrl.v;
+    _resetExecutor();
+  });
+
+  const post = async (body) => {
+    _resetRateLimit();
+    const res = mockRes();
+    await handler(mockReq({ body }), res);
+    return res;
+  };
+
+  test("the executor is never invoked, even with a URL configured", async () => {
+    delete process.env[FEATURE_FLAG];
+    const calls = stubHubspot({});
+    let executed = 0;
+    _setExecutor(async () => { executed += 1; return []; });
+
+    const res = await post({ ...validHomeValue, sms_consent: true, ai_voice_consent: true });
+    assert.equal(res.statusCode, 200);
+    assert.equal(executed, 0, "the ledger was written while the feature was off");
+    /* And the HubSpot request bodies are the pre-consent ones. */
+    assert.deepEqual(calls.find((c) => c.key === SEARCH).body.properties, ["email"]);
+    assert.deepEqual(cstKeys(contactWrite(calls)), []);
+    const message = calls.find((c) => c.key === FORM).body.fields
+      .find((f) => f.name === "message").value;
+    assert.ok(!message.includes("CONSENT LEDGER"), "a consent row rendered with the feature off");
+    assert.ok(!message.includes("SMS CONSENT"), "a consent row rendered with the feature off");
+  });
+
+  test("with the feature on, a confirmed append is what unlocks the grant", async () => {
+    const calls = stubHubspot({});
+    let executed = 0;
+    _setExecutor(async () => { executed += 1; return []; });
+
+    const res = await post({ ...validHomeValue, sms_consent: true });
+    assert.equal(res.statusCode, 200);
+    assert.equal(executed, 1, "the ledger was not written exactly once");
+    assert.equal(contactWrite(calls)[SMS.status], GRANTED);
+    const message = calls.find((c) => c.key === FORM).body.fields
+      .find((f) => f.name === "message").value;
+    assert.match(message, /^CONSENT LEDGER: RECORDED$/m);
+  });
+
+  /* The whole failure path, end to end through the endpoint: the visitor
+     still gets a 200, the lead is stored, and no permission is created. */
+  test("a ledger outage costs the permission and nothing else", async () => {
+    const calls = stubHubspot({});
+    _setExecutor(async () => { throw new Error("could not connect"); });
+
+    const res = await post({ ...validHomeValue, sms_consent: true });
+    assert.equal(res.statusCode, 200, "an evidence outage failed the lead");
+    assert.equal(res.json().ok, true);
+    assert.ok(calls.find((c) => c.key === CREATE), "the lead was not stored");
+    assert.deepEqual(cstKeys(contactWrite(calls)), []);
+    const message = calls.find((c) => c.key === FORM).body.fields
+      .find((f) => f.name === "message").value;
+    assert.match(message, /^CONSENT LEDGER: NOT RECORDED$/m);
+    assert.match(message, /^SMS CONSENT: GRANTED$/m);
   });
 });
 

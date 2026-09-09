@@ -360,6 +360,7 @@ permitted and messages that silently never arrive.
 - In HubSpot, open that contact → Activity → the form submission. The enquiry
   block contains:
   ```
+  CONSENT LEDGER: RECORDED
   SMS CONSENT: GRANTED
   SMS CONSENT VERSION: CST_SMS_CONSENT_2026_09_V1
   SMS CONSENT TEXT: I agree to receive text messages from Crystal Sells Toledo about my real estate inquiry, appointments, requested information, and related services. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of service. See the Privacy Policy and Communications Terms.
@@ -372,11 +373,34 @@ permitted and messages that silently never arrive.
   AI VOICE CONSENT PHONE: -
   ```
 
-  **Ten consent rows, and the two TEXT rows must be present and complete.**
+  **Eleven consent rows, and the two TEXT rows must be present and complete.**
   They are what lets this record answer "what exact words did this person agree
   to" without anyone digging out the revision of the source code that was
   deployed that day. A declined disclosure keeps its text too — "they said no"
   means nothing without what they were saying no to.
+
+  **`CONSENT LEDGER` is first, and it qualifies every row beneath it.** It says
+  whether this submission's consent reached the durable append-only ledger
+  (`docs/updates/2026-09-09-consent-evidence-ledger.md`). Two values, and only
+  two:
+
+  | Row | What it means |
+  |---|---|
+  | `CONSENT LEDGER: RECORDED` | The evidence is in the ledger. A `cst_*` permission was written for whatever was ticked. |
+  | `CONSENT LEDGER: NOT RECORDED` | The append failed — the ledger is unreachable, unconfigured, or refused the number. The lead and these evidence rows were still written; **no `cst_*` permission was.** |
+
+  **A block reading `CONSENT LEDGER: NOT RECORDED` beside `SMS CONSENT: GRANTED`
+  is not a bug.** It is the system refusing to create a permission it could not
+  prove was given. The contact's `cst_sms_permission_status` correctly reads
+  `never_granted`, and the two records agree. *Why* the append failed is in the
+  function log, as `lead.consent.ledger_failed`; the row is deliberately binary,
+  because an operator reading a contact needs to know whether the evidence is
+  durable, not which fault produced the outage.
+
+  **Produce both states while you are in here.** Submit one enquiry with the
+  ledger configured and reachable, then one with `CONSENT_LEDGER_URL` unset in
+  the preview environment. The `NOT RECORDED` block is the one an operator will
+  have to interpret under pressure, and it is the one nobody has ever looked at.
 - Submit a second enquiry with **neither** box ticked. Confirm the earlier
   timeline activity is unchanged and the new one records NOT GRANTED for both.
   A later submission must never rewrite an earlier record.
@@ -442,6 +466,13 @@ decision document named above. It is not built.
 
 **The manual rendering/usability check remains open** — it was not performed, and
 the research did not substitute for it.
+
+**The append-only ledger is now built** (code, migration and tests —
+`docs/updates/2026-09-09-consent-evidence-ledger.md`), so this check is executed
+against an **eleven**-row consent block with `CONSENT LEDGER` first. Use the
+procedure above, not a printout from an earlier document: the ten-row sample in
+`docs/updates/2026-09-09-communications-consent-foundation.md` is a dated record
+of what the foundation phase shipped and is not being rewritten.
 
 ### 6b. Datetime round-trip verification — DONE, 9 September 2026
 

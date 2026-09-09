@@ -144,9 +144,9 @@ export function toFormSubmission(payload, { pageUri, pageName } = {}) {
   if (lead.phone) fields.push(field("phone", lead.phone));
   if (lead.property_address) fields.push(field("address", lead.property_address));
   /* The complete enquiry block - whatever buildDescription() produces for
-     THIS submission. That is the base 23 rows, plus 10 consent rows when
+     THIS submission. That is the base 23 rows, plus 11 consent rows when
      the communications-consent feature is enabled and the payload carries
-     consent evidence, so 33 rows in that case and 23 otherwise. The count
+     consent evidence, so 34 rows in that case and 23 otherwise. The count
      is deliberately not asserted here: api/_lib/description.mjs owns the
      row list, and hard-coding a number in this file is how the comment got
      stale the first time.
@@ -434,8 +434,20 @@ export async function createLead(payload) {
      `payload.consent` is the server-owned evidence built in api/lead.js.
      The transition itself belongs to applySubmissionConsent() in
      api/_lib/consent.mjs and is NOT re-derived here - this function decides
-     WHEN to fold, never HOW. */
-  const consentOn = consentStateEnabled() && Boolean(payload.consent);
+     WHEN to fold, never HOW.
+
+     THE DURABILITY MARKER IS PART OF THE GATE, NOT A DETAIL.
+     `payload.consent.durable` is true only after api/lead.js confirmed the
+     submission's events reached the append-only consent ledger. A `cst_*`
+     property IS the permission - the thing api/_lib/permission.mjs reads at
+     send time - so writing one without durable evidence behind it creates
+     exactly the state the ledger exists to prevent: a permission this
+     business could not later prove it was given. The lead is still stored
+     and the timeline still carries the evidence rows; only the grant is
+     withheld, and the enquiry block says CONSENT LEDGER: NOT RECORDED so
+     an operator meets an explanation rather than a discrepancy.
+     `=== true` keeps it deny-by-default. */
+  const consentOn = consentStateEnabled() && payload.consent?.durable === true;
   const foldConsent = (existingState) =>
     consentOn
       ? toHubSpotConsentProperties(

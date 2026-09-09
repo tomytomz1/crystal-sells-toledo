@@ -15,6 +15,7 @@ import { validateLead, FieldError } from "./_lib/validate.mjs";
 import { createLead, isConfigured } from "./_lib/hubspot.mjs";
 import { sendAcknowledgement, classifyMailError } from "./_lib/mail.mjs";
 import { buildConsentEvidence, consentFeatureEnabled, consentLogShape } from "./_lib/consent.mjs";
+import { appendConsentEvents, ledgerLogShape } from "./_lib/consent-ledger.mjs";
 import { readBody, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
@@ -135,6 +136,46 @@ export default async function handler(req, res) {
       form_type: payload.lead.form_type,
       ...consentLogShape(payload.consent),
     });
+
+    /* --- the durable consent ledger --------------------------------
+       BEFORE the CRM write, and the position is load-bearing twice
+       over. It is what lets createLead() be told whether a grant may
+       happen at all, and it is what makes the CONSENT LEDGER row in the
+       enquiry block accurate - the block is built inside createLead(),
+       so an append moved after it would print NOT RECORDED on every
+       successful submission.
+
+       The evidence goes to the ledger first and the permission second,
+       never the other way round. If HubSpot then fails, the ledger holds
+       events for a lead that is not in the CRM: correct, and the safe
+       residue. It records what the person agreed to, which is true
+       whether or not HubSpot accepted the lead, and no permission exists
+       because no `cst_*` property was written. Evidence without
+       permission is survivable; permission without evidence is the thing
+       this whole gate exists to prevent. */
+    try {
+      await appendConsentEvents(payload.consent);
+      payload.consent.durable = true;
+      log("lead.consent.ledger_appended", { submission_id: sid });
+    } catch (ledgerErr) {
+      /* The lead still goes to HubSpot, with its timeline evidence rows
+         intact - dropping those would destroy the record that the visitor
+         ticked the box at all, which is the opposite of what an evidence
+         system should do when its evidence sink is unavailable. What does
+         NOT happen is a `cst_*` grant: a permission with no durable
+         evidence behind it is the one outcome the ledger exists to
+         prevent. The enquiry block says CONSENT LEDGER: NOT RECORDED, so
+         the discrepancy explains itself to an operator.
+
+         log(), not logError(): logError emits err.message, and a database
+         driver error can carry the connection string. Only the
+         classification is safe - the same treatment the Nodemailer
+         failure below gets, and for the same reason. */
+      log("lead.consent.ledger_failed", {
+        submission_id: sid,
+        ...ledgerLogShape(ledgerErr),
+      });
+    }
   }
 
   log("lead.accepted", {
