@@ -19,7 +19,22 @@ jobs:
       - run: npm ci
 
       # Only Chromium — it is the sole browser tests/browser.test.mjs launches.
-      - run: npx playwright install --with-deps chromium
+      #
+      # NO --with-deps, deliberately. That flag runs `apt-get update`, which
+      # reads every source in the runner image — including Google's
+      # chrome-stable repository, which is present because Chrome is
+      # preinstalled and has nothing to do with anything this suite tests. On
+      # 9 September 2026 that repository served a Packages.gz whose hash did
+      # not match its own Release file, apt exited 100, and main CI failed
+      # three times in a row before `npm test` ever started. The Ubuntu
+      # archives were fine throughout; one third-party index took the release
+      # gate down with it.
+      #
+      # Without the flag, Chromium comes from Playwright's own browser
+      # distribution and apt is never invoked, so no external package
+      # repository can fail this workflow. The shared libraries Chromium needs
+      # are already on ubuntu-latest, which ships Chrome and Firefox.
+      - run: npx playwright install chromium
 
       # tests/browser.test.mjs defaults to a container-specific Chromium path
       # and honours PW_CHROMIUM. Point it at the one just installed rather than
