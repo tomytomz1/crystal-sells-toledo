@@ -30,10 +30,12 @@ consent ledger. It does not matter that no supported *edit* path was found: a
 record that can be permanently destroyed by an ordinary authorized user cannot be
 the thing a compliance question is answered from years later.
 
-Note what this does **not** say. The timeline evidence is still valuable and is
-still being written. It is the copy an operator can actually see, next to the
-enquiry it belongs to, without querying anything. What changes is its *role*: it
-is an operational copy, not the system of record.
+Note what this does **not** say. The timeline evidence keeps its value, and the
+existing design and code will **continue writing the operator-visible timeline
+copy when the feature is eventually enabled** — nothing is written today, because
+the feature is off. What changes is its *role*: it is an operational copy, not
+the system of record. It remains the copy an operator will be able to see next to
+the enquiry it belongs to, without querying anything.
 
 ### Findings table
 

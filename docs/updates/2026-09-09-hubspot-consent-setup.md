@@ -389,8 +389,10 @@ permitted and messages that silently never arrive.
 > bulk; deletion removes the activity from the contact's timeline. No supported
 > direct *edit* path was found, but the deletion capability alone disqualifies it.
 >
-> The timeline evidence keeps its value and keeps being written — its **role**
-> changes, from system of record to operator-visible copy. The approved
+> The timeline evidence keeps its value, and the existing design and code will
+> continue writing the operator-visible timeline copy when the feature is
+> eventually enabled — nothing is written today, because the feature is off. Its
+> **role** changes, from system of record to operator-visible copy. The approved
 > architecture is three records with three jobs: `cst_*` properties as mutable
 > current state, the timeline as an operator-visible evidence copy, and an
 > **external append-only ledger** as the durable historical evidence.
@@ -433,9 +435,13 @@ If the answers are unsatisfactory, the fallback is an external append-only
 store of consent events. That is a larger change and should not be undertaken
 speculatively — check first.
 
-**The check was done, and the answers were unsatisfactory.** The append-only
-store is therefore the approved direction, no longer a speculative fallback —
-see the decision document named above. It is not built.
+**The durability research is complete, and it was sufficient to reject the
+HubSpot timeline activity as the sole durable ledger.** The append-only store is
+therefore the approved direction, no longer a speculative fallback — see the
+decision document named above. It is not built.
+
+**The manual rendering/usability check remains open** — it was not performed, and
+the research did not substitute for it.
 
 ### 6b. Datetime round-trip verification — DONE, 9 September 2026
 
