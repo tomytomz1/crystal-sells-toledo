@@ -124,22 +124,45 @@ claim more than is true.
 
 Consent evidence rides inside the enquiry block that already goes to HubSpot's
 **native form-submission timeline activity**. That activity is created per
-submission, dated from the server's submission time, and is not editable through
-the API. Eight rows are appended:
+submission and dated from the server's submission time. **Ten** rows are
+appended:
 
 ```
 SMS CONSENT: GRANTED
 SMS CONSENT VERSION: CST_SMS_CONSENT_2026_09_V1
+SMS CONSENT TEXT: I agree to receive text messages from Crystal Sells Toledo about my real estate inquiry, appointments, requested information, and related services. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of service. See the Privacy Policy and Communications Terms.
 SMS CONSENT AT: 2026-09-09T14:02:11.004Z
 SMS CONSENT PHONE: (419) 555-1234
 AI VOICE CONSENT: NOT GRANTED
 AI VOICE CONSENT VERSION: CST_AI_VOICE_CONSENT_2026_09_V1
+AI VOICE CONSENT TEXT: I agree to receive calls from Crystal Sells Toledo at the number I provided, including calls using automated technology and an artificial, prerecorded, or AI-generated voice, about my real estate inquiry, appointments, and requested services. Consent is not a condition of service. See the Privacy Policy and Communications Terms.
 AI VOICE CONSENT AT: -
 AI VOICE CONSENT PHONE: -
 ```
 
-A declined disclosure is recorded too, with its version and text — "declined" is
-meaningless unless you know which words were on the screen.
+**Both the version and the exact wording are stored.** A version identifier
+alone only answers "what did this person agree to" for someone who still has the
+source tree and can find the revision deployed that day. The TEXT row answers it
+from the CRM, on its own, after any number of rewordings. A test asserts a
+client-supplied disclosure can never take its place.
+
+A declined disclosure keeps its text too — "they said no" is meaningless without
+what they were saying no to.
+
+### What is proven, and what is not
+
+**Proven by code and tests here:** each submission builds its own snapshot
+server-side from canonical values; that snapshot travels in the same API call
+that stores the lead, so it cannot half-succeed; and building a later
+submission's payload never reads or rewrites an earlier one.
+
+**Not live-proven:** how the production portal renders and retains these rows,
+and whether a past form-submission activity can be altered or deleted by an
+admin, a bulk tool or a retention policy. A timeline activity is not editable
+*through the public API* — a narrower claim than immutable, and this document
+does not make the wider one. `docs/updates/2026-09-09-hubspot-consent-setup.md`
+§6a is a live verification procedure whose answers must be written down before
+anyone relies on this for audit.
 
 **This is CRITICAL, not a courtesy.** It travels in the same HubSpot write that
 stores the lead, through the existing `submitForm` call that already fails the
@@ -316,7 +339,7 @@ rewriting it retroactively falsifies their record.
 | `api/_lib/consent.mjs` | **new** — canonical copy, versions, strict parser, evidence builder, state model, submission-to-state transition |
 | `api/_lib/permission.mjs` | **new** — the resolver, suppression scopes, reasons |
 | `api/_lib/validate.mjs` | parses the two flags strictly; never requires them |
-| `api/_lib/description.mjs` | appends 8 consent rows when evidence is present |
+| `api/_lib/description.mjs` | appends 10 consent rows when evidence is present |
 | `api/lead.js` | builds evidence after the submission id, logs a PII-free shape |
 | `assets/js/main.js` | serialises the two booleans from `input.checked` |
 | `src/partials/consent-block.html` | **new** — the shared control |
@@ -328,7 +351,7 @@ rewriting it retroactively falsifies their record.
 | `tools/check.mjs` | the compliance guards |
 | `assets/css/styles.css` | `.consent` block |
 | `.env.example` | the flag, documented as build-time *and* runtime |
-| `tests/consent.test.mjs` | **new** — 55 tests |
+| `tests/consent.test.mjs` | **new** — 59 tests |
 | `package.json` | `test:consent` script |
 
 **No new dependency.** Nothing here needs one.
@@ -350,7 +373,7 @@ the comment carries a warning.
 | `npm run build` (off) | 10 pages, 9 sitemap URLs |
 | `npm run build` (on) | 11 pages, 10 sitemap URLs |
 | `npm run check` (off and on) | 0 errors, 0 warnings |
-| `npm run test:consent` | **55 passed, 0 failed** |
+| `npm run test:consent` | **59 passed, 0 failed** |
 | `npm run test:unit` | 97 passed |
 | `npm run test:hubspot` | 90 passed |
 | `npm run test:mail` | 36 passed |

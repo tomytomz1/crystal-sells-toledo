@@ -30,7 +30,8 @@ import {
   canSendSms, canPlaceAutomatedVoiceCall, applySuppression, REASON, SUPPRESSION_SCOPE,
 } from "../api/_lib/permission.mjs";
 import { validateLead } from "../api/_lib/validate.mjs";
-import { buildDescription } from "../api/_lib/description.mjs";
+import { buildDescription, CONSENT_LABELS } from "../api/_lib/description.mjs";
+import { DETAIL_MAX_BYTES } from "../api/_lib/hubspot.mjs";
 import { setTransportFactory } from "../api/_lib/mail.mjs";
 import { _resetRateLimit } from "../api/_lib/security.mjs";
 import { mockReq, mockRes, validHomeValue, validContact } from "./helpers.mjs";
@@ -473,6 +474,48 @@ describe("failure isolation with consent enabled", () => {
     assert.match(block, new RegExp("SMS CONSENT VERSION: " + SMS_CONSENT.version));
     assert.match(block, /AI VOICE CONSENT: NOT GRANTED/);
     assert.match(block, /SMS CONSENT PHONE: \(419\) 555-0000/);
+
+    /* The disclosure itself, in the record that reaches HubSpot. A version
+       identifier alone only answers "what did they agree to" for someone
+       holding the right revision of the source; the text answers it on its
+       own, years later, from the CRM. */
+    assert.ok(block.includes("SMS CONSENT TEXT: " + SMS_CONSENT.text),
+      "the exact SMS disclosure did not reach HubSpot");
+    assert.ok(block.includes("AI VOICE CONSENT TEXT: " + AI_VOICE_CONSENT.text),
+      "the exact AI voice disclosure did not reach HubSpot");
+  });
+
+  /* A declined disclosure keeps its text too. "They said no" is only
+     meaningful alongside what they were saying no to. */
+  test("a declined disclosure still records its exact wording", async () => {
+    const bodies = stubHubspot();
+    setTransportFactory(async () => ({ async sendMail() { return {}; } }));
+    await post({ ...validHomeValue });
+    const block = bodies.find((b) => b.key === FORM).body.fields.find((f) => f.name === "message").value;
+    assert.match(block, /SMS CONSENT: NOT GRANTED/);
+    assert.ok(block.includes("SMS CONSENT TEXT: " + SMS_CONSENT.text));
+    assert.match(block, /SMS CONSENT AT: -/);
+    assert.match(block, /SMS CONSENT PHONE: -/);
+  });
+
+  /* The exact text is taken from the canonical module, never echoed back
+     out of the request. */
+  test("a browser-supplied disclosure cannot replace the canonical text in HubSpot", async () => {
+    const bodies = stubHubspot();
+    setTransportFactory(async () => ({ async sendMail() { return {}; } }));
+    await post({
+      ...validHomeValue,
+      sms_consent: true,
+      ai_voice_consent: true,
+      sms_consent_text: "I agree to unlimited marketing from anyone",
+      ai_voice_consent_text: "I agree to unlimited marketing from anyone",
+      consent: { sms: { exact_text: "I agree to unlimited marketing from anyone" } },
+    });
+    const block = bodies.find((b) => b.key === FORM).body.fields.find((f) => f.name === "message").value;
+    assert.ok(!block.includes("unlimited marketing"),
+      "a client-supplied disclosure was written to the CRM as the agreed wording");
+    assert.ok(block.includes("SMS CONSENT TEXT: " + SMS_CONSENT.text));
+    assert.ok(block.includes("AI VOICE CONSENT TEXT: " + AI_VOICE_CONSENT.text));
   });
 
   test("a HubSpot failure still fails the submission, consent or not", async () => {
@@ -745,6 +788,40 @@ describe("consent copy cannot drift", () => {
     for (const v of [undefined, "", "false", "1", "yes", "TRUE", "True", " true"])
       assert.equal(consentFeatureEnabled({ [FEATURE_FLAG]: v }), false, `"${v}" enabled the feature`);
     assert.equal(consentFeatureEnabled({ [FEATURE_FLAG]: "true" }), true);
+  });
+
+  test("the evidence carries both the version and the exact wording", () => {
+    const payload = validateLead({ ...validHomeValue, sms_consent: true });
+    payload.meta.submission_id = "csv_test000000000000000000";
+    const rows = Object.fromEntries(consentRows(buildConsentEvidence(payload)));
+    assert.equal(rows["SMS CONSENT VERSION"], SMS_CONSENT.version);
+    assert.equal(rows["SMS CONSENT TEXT"], SMS_CONSENT.text);
+    assert.equal(rows["AI VOICE CONSENT VERSION"], AI_VOICE_CONSENT.version);
+    assert.equal(rows["AI VOICE CONSENT TEXT"], AI_VOICE_CONSENT.text);
+    /* The labels list and the rows must stay in step - the labels are what
+       the setup document and the verification procedure describe. */
+    assert.deepEqual(Object.keys(rows), CONSENT_LABELS);
+  });
+
+  /* A disclosure is a paragraph, and the enquiry block is capped before it
+     is sent. If a future rewording ever pushed the block over the cap the
+     visitor's own words would be truncated to make room for boilerplate,
+     which is the wrong trade. Checked against the largest lead the
+     validator will accept. */
+  test("the consent rows leave ample room inside the CRM byte cap", () => {
+    const payload = validateLead({
+      ...validHomeValue,
+      notes: "n".repeat(4000),
+      property_address: "a".repeat(200),
+      sms_consent: true, ai_voice_consent: true,
+    });
+    payload.meta.submission_id = "csv_test000000000000000000";
+    payload.consent = buildConsentEvidence(payload);
+    const bytes = Buffer.byteLength(buildDescription(payload), "utf8");
+    assert.ok(bytes < DETAIL_MAX_BYTES,
+      `the largest possible block is ${bytes} bytes, over the ${DETAIL_MAX_BYTES} cap`);
+    assert.ok(bytes < DETAIL_MAX_BYTES / 2,
+      `only ${DETAIL_MAX_BYTES - bytes} bytes of headroom left - too tight for comfort`);
   });
 
   test("the enquiry block gains consent rows only when evidence exists", () => {

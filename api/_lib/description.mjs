@@ -53,8 +53,10 @@ const ROWS = [
  * must not look the same when Crystal reads a lead six months from now.
  *
  * When the communications-consent feature is enabled, `payload.consent`
- * carries the submission's consent evidence and eight further rows are
- * appended. This block is what HubSpot's native form-submission timeline
+ * carries the submission's consent evidence and ten further rows are
+ * appended - including the exact disclosure text, so a stored submission
+ * answers "what words did this person agree to" without anyone having to
+ * find the revision of the source that was deployed that day. This block is what HubSpot's native form-submission timeline
  * activity carries, and those activities are per-submission, dated, and
  * not editable through the API - so the consent snapshot lands somewhere a
  * later submission adds to rather than overwrites. That is the audit trail
@@ -96,9 +98,10 @@ export const DESCRIPTION_LABELS = ROWS.map(([label]) => label);
 
 /** The consent rows' labels, in order. */
 export const CONSENT_LABELS = [
-  "SMS CONSENT", "SMS CONSENT VERSION", "SMS CONSENT AT", "SMS CONSENT PHONE",
-  "AI VOICE CONSENT", "AI VOICE CONSENT VERSION", "AI VOICE CONSENT AT",
-  "AI VOICE CONSENT PHONE",
+  "SMS CONSENT", "SMS CONSENT VERSION", "SMS CONSENT TEXT", "SMS CONSENT AT",
+  "SMS CONSENT PHONE",
+  "AI VOICE CONSENT", "AI VOICE CONSENT VERSION", "AI VOICE CONSENT TEXT",
+  "AI VOICE CONSENT AT", "AI VOICE CONSENT PHONE",
 ];
 
 /** The subset that appears in the summary, in order. */

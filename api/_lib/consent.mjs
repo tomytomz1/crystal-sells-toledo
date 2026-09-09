@@ -239,26 +239,46 @@ export function buildConsentEvidence(payload) {
 /**
  * The rows appended to the enquiry block written to HubSpot.
  *
- * This is the audit trail that works TODAY, with the scopes the
- * integration already has. Each website submission produces its own native
- * HubSpot form-submission timeline activity carrying this block; those
- * activities are dated, per-submission and not editable through the API,
- * so a later submission adds a record rather than replacing one.
+ * This is the best evidence the integration can produce TODAY, with the
+ * scopes it already has. Each website submission produces its own native
+ * HubSpot form-submission timeline activity carrying this block, so
+ * records accumulate: building a later submission's payload never reads or
+ * rewrites an earlier one.
  *
- * It is NOT the same thing as the contact's `message` property, which the
- * short summary overwrites every time. Only the timeline activity is the
- * durable evidence, and nothing here should be described as immutable
- * beyond that.
+ * Both the version AND the exact wording are stored. A version identifier
+ * alone only answers "what did they agree to" for someone holding the
+ * revision of this file that was deployed on the day; the text answers it
+ * from the CRM, on its own, years later.
+ *
+ * It is NOT the contact's `message` property, which the short summary
+ * overwrites on every submission. And it is NOT proven immutable: a
+ * timeline activity cannot be edited through the public API, which is a
+ * narrower claim than "cannot be altered or deleted". Whether the portal
+ * retains these for as long as an audit needs is a live question nobody
+ * has answered yet - see docs/updates/2026-09-09-hubspot-consent-setup.md
+ * section 6a. Do not describe this as an immutable audit trail.
  */
 export function consentRows(evidence) {
   const state = (c) => (c.granted ? "GRANTED" : "NOT GRANTED");
   return [
     ["SMS CONSENT", state(evidence.sms)],
     ["SMS CONSENT VERSION", evidence.sms.version],
+    /* The disclosure itself, not just its identifier.
+       A version string only answers "what did they agree to" if someone
+       still has the source tree that defines it, and can find the revision
+       that was deployed on the day. Two years and several rewordings from
+       now, the row below answers the question on its own - which is the
+       entire point of keeping evidence rather than a pointer to evidence.
+       Both are stored: the version to compare records against each other,
+       the text to read.
+       Server-owned. api/_lib/validate.mjs never copies a disclosure out of
+       the request, so a client cannot substitute its own wording here. */
+    ["SMS CONSENT TEXT", evidence.sms.exact_text],
     ["SMS CONSENT AT", evidence.sms.captured_at],
     ["SMS CONSENT PHONE", evidence.sms.phone],
     ["AI VOICE CONSENT", state(evidence.ai_voice)],
     ["AI VOICE CONSENT VERSION", evidence.ai_voice.version],
+    ["AI VOICE CONSENT TEXT", evidence.ai_voice.exact_text],
     ["AI VOICE CONSENT AT", evidence.ai_voice.captured_at],
     ["AI VOICE CONSENT PHONE", evidence.ai_voice.phone],
   ];
