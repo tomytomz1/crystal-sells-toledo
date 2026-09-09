@@ -12,6 +12,13 @@
             the market research and the page sources stay out of it.
    ===================================================================== */
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, cpSync, existsSync } from "node:fs";
+/* The canonical consent copy, imported from the module the SERVER records
+   it from. The disclosure a visitor reads and the disclosure stored as the
+   thing they agreed to are therefore one string with one derivation, and
+   there is no second copy in a template to drift. */
+import {
+  SMS_CONSENT, AI_VOICE_CONSENT, consentFeatureEnabled, assertConsentCopyIntact,
+} from "../api/_lib/consent.mjs";
 import { createHash } from "node:crypto";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -310,6 +317,26 @@ console.log(GA4_ON
   ? `  i Google Analytics enabled (${GA4_ID})`
   : "  i Google Analytics omitted - not a Vercel production build");
 
+/* ---------------------------------------------------------------------
+   COMMUNICATIONS CONSENT FEATURE GATE
+   ---------------------------------------------------------------------
+   Build-time half of one environment variable that is also read at
+   runtime by api/lead.js. OFF unless it is exactly "true".
+
+   OFF is what production runs today: no consent checkbox renders on any
+   form, /communications-terms is not built at all (so it cannot 404 from
+   a sitemap or describe a programme that does not run), and the privacy
+   page's messaging section is omitted. A visitor is never shown a consent
+   promise the backend is not yet configured to keep.
+   --------------------------------------------------------------------- */
+const CONSENT_ON = consentFeatureEnabled();
+/* Fails the build, not a test: displaying different words from the ones
+   recorded as the consent is not a shippable state. */
+assertConsentCopyIntact();
+console.log(CONSENT_ON
+  ? "  i Communications consent ENABLED - consent UI and /communications-terms will build"
+  : "  i Communications consent disabled - no consent UI, no /communications-terms");
+
 const shell = partial("_shell");
 const pagesDir = join(ROOT, "src/pages");
 const built = [];
@@ -320,6 +347,17 @@ mkdirSync(OUT, { recursive: true });
 
 for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort()) {
   const { meta, body } = parsePage(readFileSync(join(pagesDir, file), "utf8"), file);
+
+  /* A page may declare that it exists only when a feature is on. The page
+     is not built, not written, and not listed in the sitemap while the
+     feature is off - the alternative is publishing legal terms for a
+     programme that is not running. */
+  if (meta.featureGate) {
+    if (meta.featureGate !== "communications_consent")
+      throw new Error(`${file}: unknown featureGate "${meta.featureGate}"`);
+    if (!CONSENT_ON) { console.log(`  - ${basename(file, ".html")}.html (feature gated off)`); continue; }
+  }
+
   const slug = meta.slug ?? basename(file, ".html");
   const url = slug === "index" ? `${SITE}/` : `${SITE}/${slug}`;
 
@@ -337,6 +375,25 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     analytics: analyticsTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",
+    /* Empty string when the feature is off, so {{consentBlock}} vanishes
+       from every form without the templates knowing anything about it. */
+    consentBlock: CONSENT_ON ? PARTIALS["consent-block"] : "",
+    /* The privacy page's messaging disclosure. Also empty while the
+       feature is off: the page's whole discipline is that it describes the
+       runtime that actually ships, and describing Twilio as a processor
+       before a single message has been sent would break that. */
+    consentMessagingSection: CONSENT_ON ? PARTIALS["privacy-messaging"] : "",
+    /* Added ALONGSIDE the existing "Privacy & terms" link rather than
+       replacing it. The disclosures link to /communications-terms, so the
+       page has to be reachable from ordinary navigation too - but the
+       existing label is pinned by checks and rendered on every page, and
+       rewording it is a separate decision from shipping this feature. */
+    consentFooterLink: CONSENT_ON
+      ? '\n          <li><a href="/communications-terms">Communications terms</a></li>'
+      : "",
+    consentSmsHtml: SMS_CONSENT.html,
+    consentVoiceHtml: AI_VOICE_CONSENT.html,
+    consentEnabled: CONSENT_ON ? "true" : "",
     ...formCopyFor(meta, file),
     ...stickyCtaFor(meta, file),
     ...chromeCtaFor(meta, file),
@@ -346,7 +403,15 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
   if (meta.nav) vars["nav_" + meta.nav] = ' aria-current="page"';
 
   const banner = `<!-- Generated by tools/build.mjs from src/pages/${file} — edit the source, then run: npm run build -->\n`;
-  const html = banner + render(shell, vars).replace(/\n{3,}/g, "\n\n");
+  /* A feature-gated variable that renders to an empty string leaves its
+     own indentation behind - a line of spaces and a blank line. Harmless
+     to a browser, but it means the flag-off output is not byte-identical
+     to the build before the feature existed, which makes "disabled
+     changes nothing" harder to verify than it should be. Whitespace-only
+     lines are collapsed first, then runs of blank lines as before. */
+  const html = banner + render(shell, vars)
+    .replace(/\n[ \t]+(?=\n)/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
 
   const outPath = join(OUT, slug + ".html");
   mkdirSync(dirname(outPath), { recursive: true });

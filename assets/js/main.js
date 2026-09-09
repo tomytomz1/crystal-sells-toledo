@@ -312,6 +312,12 @@
     return data;
   }
 
+  /** Strictly boolean: ticked is true, unticked or absent is false. */
+  function consentValue(form, name) {
+    var box = form.querySelector('input[type=checkbox][name="' + name + '"]');
+    return box ? box.checked === true : false;
+  }
+
   function initForms() {
     document.querySelectorAll("form[data-form]").forEach(function (form) {
       var status = form.querySelector(".form-status");
@@ -346,6 +352,16 @@
           condition: data.condition || "",
           notes: data.notes || "",
           page: window.location.pathname,
+          /* Communications consent. Read from the checkbox itself rather
+             than from FormData: an unticked box is simply absent from
+             FormData, and "absent" would arrive as undefined instead of a
+             decision. These are the only two things the browser gets to
+             say about consent - the timestamp, the version and the exact
+             wording are attached server-side, so a tampered request cannot
+             claim a stronger consent than the page displayed. Absent
+             checkboxes (feature off) send false, which is truthful. */
+          sms_consent: consentValue(form, "sms_consent"),
+          ai_voice_consent: consentValue(form, "ai_voice_consent"),
           attribution: attribution.ensure(),
           _gotcha: honeypot || ""
         };

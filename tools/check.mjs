@@ -5,6 +5,13 @@
    malformed JSON-LD, duplicate or missing meta.
    ===================================================================== */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import {
+  SMS_CONSENT, AI_VOICE_CONSENT, consentFeatureEnabled, assertConsentCopyIntact,
+} from "../api/_lib/consent.mjs";
+
+/* The same gate tools/build.mjs read. check.mjs runs against whatever that
+   build produced, so it has to expect the same shape. */
+const CONSENT_ON = consentFeatureEnabled();
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -705,6 +712,112 @@ for (const file of pages) {
 }
 
 /* ---------------------------------------------------------------------
+   COMMUNICATIONS CONSENT
+   ---------------------------------------------------------------------
+   Only the invariants worth a build failure. Everything here is something
+   that breaks nothing, renders fine, and quietly turns a lawful consent
+   record into an unlawful one.
+   --------------------------------------------------------------------- */
+{
+  /* Displayed words must equal recorded words. Throws with its own
+     message; this is the same assertion the build runs. */
+  assertConsentCopyIntact();
+
+  const FORM_PAGES = ["index.html", "home-value.html", "43551-seller-review.html", "contact.html"];
+  const CONSENT_BOXES = ["sms_consent", "ai_voice_consent"];
+  const boxOf = (html, name) =>
+    new RegExp('<input\\b[^>]*\\bname="' + name + '"[^>]*>', "s").exec(html)?.[0] || null;
+
+  for (const file of FORM_PAGES) {
+    if (!existsSync(join(ROOT, file))) continue;
+    const html = readFileSync(join(ROOT, file), "utf8");
+
+    if (!CONSENT_ON) {
+      /* Gate off means gate off: no checkbox, no disclosure, nowhere. A
+         visitor must never be shown a consent promise the backend is not
+         configured to preserve. */
+      for (const name of CONSENT_BOXES)
+        if (boxOf(html, name))
+          fail(file, `renders the ${name} checkbox while COMMUNICATIONS_CONSENT_ENABLED is off - consent would be collected and not persisted`);
+      if (html.includes(SMS_CONSENT.version) || html.includes(AI_VOICE_CONSENT.version))
+        fail(file, "carries a consent disclosure while the feature is off");
+      continue;
+    }
+
+    for (const name of CONSENT_BOXES) {
+      const tag = boxOf(html, name);
+      if (!tag) { fail(file, `the ${name} checkbox is missing while the feature is on`); continue; }
+      /* A pre-ticked box is not consent, and a mandatory one contradicts
+         the disclosure's own promise that consent is not a condition of
+         service. Both are the classic way a consent UI goes bad. */
+      if (/\bchecked\b/.test(tag)) fail(file, `${name} is pre-checked - a pre-ticked box is not consent`);
+      if (/\brequired\b/.test(tag)) fail(file, `${name} is required - the disclosure promises consent is not a condition of service`);
+      if (!/type="checkbox"/.test(tag)) fail(file, `${name} is not a checkbox`);
+    }
+
+    /* Exactly one of each. Five copies of the fieldset shipped once,
+       because a partial named its own template token in a comment and
+       re-inserted itself on every render pass. */
+    for (const name of CONSENT_BOXES) {
+      const count = (html.match(new RegExp('name="' + name + '"', "g")) || []).length;
+      if (count !== 1) fail(file, `renders ${count} ${name} inputs - expected exactly 1`);
+    }
+
+    /* The exact words, and both links, on the page itself. */
+    for (const d of [SMS_CONSENT, AI_VOICE_CONSENT]) {
+      const flat = html.replace(/\s+/g, " ");
+      if (!flat.includes(d.html.replace(/\s+/g, " ")))
+        fail(file, `the rendered ${d.channel} disclosure does not match the canonical text in api/_lib/consent.mjs`);
+    }
+    for (const href of ["/privacy", "/communications-terms"])
+      if (!html.includes(`href="${href}"`))
+        fail(file, `the consent disclosure links to ${href}, but the page has no such link`);
+  }
+
+  /* The legal routes exist exactly when the feature does. */
+  const termsBuilt = existsSync(join(ROOT, "communications-terms.html"));
+  if (CONSENT_ON && !termsBuilt)
+    fail("site", "/communications-terms is not built, but the consent disclosures link to it");
+  if (!CONSENT_ON && termsBuilt)
+    fail("site", "/communications-terms is built while the feature is off - it describes a programme that is not running");
+  if (CONSENT_ON) {
+    const terms = readFileSync(join(ROOT, "communications-terms.html"), "utf8");
+    for (const required of ["STOP", "HELP", "Message frequency varies",
+                            "Message and data rates may apply",
+                            "not a condition of service", "/privacy"])
+      if (!terms.includes(required))
+        fail("communications-terms.html", `is missing the required disclosure "${required}"`);
+    const privacy = readFileSync(join(ROOT, "privacy.html"), "utf8");
+    for (const required of ["Twilio", "Retell",
+                            "will not be shared with third parties"])
+      if (!privacy.includes(required))
+        fail("privacy.html", `does not disclose ${required}, but messaging is enabled`);
+  } else {
+    const privacy = readFileSync(join(ROOT, "privacy.html"), "utf8");
+    for (const premature of ["Twilio", "Retell AI"])
+      if (privacy.replace(/<!--[\s\S]*?-->/g, "").includes(premature))
+        fail("privacy.html", `names ${premature} while messaging is off - the page must describe the runtime that ships`);
+  }
+
+  /* The server half. The browser sends two booleans; everything that gives
+     them meaning is attached server-side, and consent is never required. */
+  const validateSrc = readFileSync(join(ROOT, "..", "api/_lib/validate.mjs"), "utf8");
+  if (!/parseConsentFlag/.test(validateSrc))
+    fail("api/_lib/validate.mjs", "no longer parses consent through api/_lib/consent.mjs");
+  if (/MISSING_(SMS|AI_VOICE)_CONSENT/.test(validateSrc))
+    fail("api/_lib/validate.mjs", "rejects a lead for missing consent - consent is never a condition of service");
+
+  const consentSrc = readFileSync(join(ROOT, "..", "api/_lib/consent.mjs"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ");
+  if (/\bip\b|remoteAddress|x-forwarded-for/i.test(consentSrc))
+    fail("api/_lib/consent.mjs", "reads an IP address - consent evidence deliberately stores no IP");
+  const permissionSrc = readFileSync(join(ROOT, "..", "api/_lib/permission.mjs"), "utf8");
+  for (const fn of ["canSendSms", "canPlaceAutomatedVoiceCall"])
+    if (!new RegExp(`export function ${fn}\\b`).test(permissionSrc))
+      fail("api/_lib/permission.mjs", `no exported ${fn} - the resolver is the only place permission may be decided`);
+}
+
+/* ---------------------------------------------------------------------
    THE ZOHO MAIL ACKNOWLEDGEMENT IS SECONDARY, AND MUST STAY THAT WAY
    ---------------------------------------------------------------------
    One short email is sent from Crystal's mailbox after a lead reaches
@@ -836,8 +949,11 @@ for (const file of pages) {
      is the likeliest way it would actually happen, so the expected set is
      absolute. Changing this list means changing /api/lead and the HubSpot
      mapping too - that is the point of making it noisy. */
-  const EXPECTED_FIELDS =
-    "_gotcha,condition,email,first_name,last_name,notes,phone,property_address,timeline";
+  const EXPECTED_FIELDS = (CONSENT_ON
+    ? ["_gotcha", "ai_voice_consent", "condition", "email", "first_name", "last_name",
+       "notes", "phone", "property_address", "sms_consent", "timeline"]
+    : ["_gotcha", "condition", "email", "first_name", "last_name", "notes", "phone",
+       "property_address", "timeline"]).join(",");
   /* Same reasoning for the sticky bar: its second cell is overridable, so
      the pages that never override it must still render the site-wide
      wording and destination. */

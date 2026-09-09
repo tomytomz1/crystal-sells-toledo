@@ -1,0 +1,65 @@
+<!-- =====================================================================
+     Privacy: text messages and automated calls.
+     =====================================================================
+     Rendered into src/pages/privacy.html ONLY when
+     COMMUNICATIONS_CONSENT_ENABLED is "true" at build time. With the flag
+     off this file is not included anywhere, so the published policy never
+     names Twilio, never mentions AI calls, and never describes processing
+     that is not happening. The privacy page's rule is that it describes
+     the runtime that actually ships; a feature-gated section is how a
+     future disclosure stays ready without making today's policy false.
+
+     Two things are stated here that must stay true of the code:
+       * calls are not recorded or transcribed (nothing enables that)
+       * consent IP addresses are not stored (api/_lib/consent.mjs
+         deliberately omits them from the evidence it builds)
+     ===================================================================== -->
+      <h3>Text messages and automated calls</h3>
+      <p>The forms on this site have two <strong>optional</strong> tick boxes: one to allow text
+        messages about your inquiry, and a separate one to allow calls that may use automated
+        technology and an artificial, prerecorded, or AI-generated voice. Both start unticked.
+        Neither is required, and leaving both unticked has no effect on your request or on the help
+        you receive.</p>
+      <p>If you tick a box, what is recorded is the choice itself, the exact wording you were shown,
+        a version identifier for that wording, the phone number you provided, the page you were on,
+        the time, and a reference number for the submission. That record is stored with your inquiry
+        in HubSpot. Your IP address is <strong>not</strong> stored as part of it &mdash; addresses
+        are held briefly in server memory to limit repeated submissions, as described above, and are
+        not added to your contact record.</p>
+      <p>Permission is tied to the number you gave at the time. If your number changes, the earlier
+        permission does not follow you to the new one.</p>
+
+      <h3>Twilio &mdash; text message delivery</h3>
+      <p>When text messages are sent, <strong>Twilio</strong> is the provider that delivers them.
+        Twilio receives the recipient phone number, the message content, and delivery metadata such
+        as timestamps and delivery status, in order to send the message and report what happened to
+        it. If you reply, Twilio receives that reply and passes it on.</p>
+
+      <h3>Retell AI &mdash; automated voice calls</h3>
+      <p>When automated calls are made, <strong>Retell AI</strong> is the provider that places and
+        conducts them. Retell receives the phone number being called and the content of the
+        conversation in order to run the call. An automated call identifies itself as an AI
+        assistant at the start.</p>
+      <p><strong>Calls are not recorded or transcribed.</strong> If that ever changes, this page will
+        say so before it starts, not after.</p>
+
+      <h3>What is never done with your mobile information</h3>
+      <p>Mobile information will not be shared with third parties or affiliates for marketing or
+        promotional purposes. Text messaging originator opt-in data and consent will not be shared
+        with third parties for their marketing or promotional purposes. The providers named above
+        receive what they need to deliver a message or place a call you asked for, and nothing is
+        sold or handed to anyone for their own marketing.</p>
+      <p>These permissions cover your inquiry &mdash; replies, valuations you asked for,
+        appointments and reminders, information you requested, and closely related updates. They are
+        not a marketing list. Anything broader would be asked for separately.</p>
+
+      <h3>Stopping messages and calls</h3>
+      <p>Reply <strong>STOP</strong> to any text to end the texts, or <strong>HELP</strong> for
+        contact details. Plain English works too. On a call, saying you do not want to be called
+        again ends the automated calls. You can also email
+        <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a>.</p>
+      <p>Texts and calls are tracked separately, so stopping one does not automatically stop the
+        other &mdash; say you want to stop everything and both stop. Once you have opted out,
+        submitting another form does not quietly restart them. The record of your opt-out is kept so
+        it can be honoured, and turning a channel back on takes a deliberate re-opt-in.</p>
+      <p>Full detail is in the <a href="/communications-terms">Communications Terms</a>.</p>

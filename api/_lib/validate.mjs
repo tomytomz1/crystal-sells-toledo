@@ -2,6 +2,8 @@
    Server-side and authoritative: the client's own validation is a
    convenience, never a guarantee. */
 
+import { parseConsentFlag } from "./consent.mjs";
+
 export const FORM_TYPES = new Set(["home_value", "contact", "buyer_inquiry"]);
 
 export const ATTRIBUTION_KEYS = [
@@ -164,6 +166,19 @@ export function validateLead(raw) {
     if (!message) throw new FieldError("MISSING_MESSAGE", "Message is required");
   }
 
+  /* Communications consent. Two independent optional permissions, read
+     with the narrowest possible parser: a JSON boolean `true` and nothing
+     else (see api/_lib/consent.mjs). Neither is ever required - a lead
+     with both unticked is a completely valid lead, and making consent a
+     condition of service is exactly what the disclosure promises it is
+     not. Absent means false, and false means "no consent was granted on
+     this submission", never "revoke what came before".
+
+     These deliberately sit AFTER every existing field check, so a consent
+     flag can neither satisfy nor bypass any of them. */
+  const sms_consent = parseConsentFlag(raw.sms_consent);
+  const ai_voice_consent = parseConsentFlag(raw.ai_voice_consent);
+
   const src = raw.attribution && typeof raw.attribution === "object" ? raw.attribution : raw;
   const attribution = {};
   for (const k of ATTRIBUTION_KEYS) attribution[k] = cap(k, squash(src[k]));
@@ -175,7 +190,8 @@ export function validateLead(raw) {
 
   return {
     lead: { form_type, first_name, last_name, email, phone, property_address,
-            topic, timeline, condition, message, notes },
+            topic, timeline, condition, message, notes,
+            sms_consent, ai_voice_consent },
     attribution,
     meta,
   };

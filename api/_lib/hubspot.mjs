@@ -138,8 +138,16 @@ export function toFormSubmission(payload, { pageUri, pageName } = {}) {
   if (lead.last_name) fields.push(field("lastname", lead.last_name));
   if (lead.phone) fields.push(field("phone", lead.phone));
   if (lead.property_address) fields.push(field("address", lead.property_address));
-  /* The complete 23-row block. This is what makes the timeline activity carry
-     the whole enquiry rather than just a name. */
+  /* The complete enquiry block - whatever buildDescription() produces for
+     THIS submission. That is the base 23 rows, plus 10 consent rows when
+     the communications-consent feature is enabled and the payload carries
+     consent evidence, so 33 rows in that case and 23 otherwise. The count
+     is deliberately not asserted here: api/_lib/description.mjs owns the
+     row list, and hard-coding a number in this file is how the comment got
+     stale the first time.
+
+     This is what makes the timeline activity carry the whole enquiry
+     rather than just a name. */
   fields.push(field("message", capBytes(buildDescription(payload))));
 
   const body = {

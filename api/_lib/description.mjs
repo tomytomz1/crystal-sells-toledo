@@ -1,3 +1,5 @@
+import { consentRows } from "./consent.mjs";
+
 /* Builds the deterministic enquiry block written to the CRM.
 
    CRM-agnostic on purpose. It is written to HubSpot's default `message`
@@ -49,9 +51,24 @@ const ROWS = [
  * Every row is always emitted, empty ones included. A missing label would
  * be ambiguous - "no UTM source" and "we stopped recording UTM source"
  * must not look the same when Crystal reads a lead six months from now.
+ *
+ * When the communications-consent feature is enabled, `payload.consent`
+ * carries the submission's consent evidence and ten further rows are
+ * appended - including the exact disclosure text, so a stored submission
+ * answers "what words did this person agree to" without anyone having to
+ * find the revision of the source that was deployed that day. This block is what HubSpot's native form-submission timeline
+ * activity carries, and those activities are per-submission, dated, and
+ * not editable through the API - so the consent snapshot lands somewhere a
+ * later submission adds to rather than overwrites. That is the audit trail
+ * the integration can honestly provide with the scopes it already has.
+ *
+ * With the feature off there is no `payload.consent`, no rows are added,
+ * and the block is byte-for-byte what production writes today.
  */
 export function buildDescription(payload) {
-  return ROWS.map(([label, get]) => label + ": " + (get(payload) || "-")).join("\n");
+  const rows = ROWS.map(([label, get]) => [label, get(payload)]);
+  if (payload.consent) rows.push(...consentRows(payload.consent));
+  return rows.map(([label, value]) => label + ": " + (value || "-")).join("\n");
 }
 
 /**
@@ -75,8 +92,17 @@ export function buildSummary(payload) {
     .join("\n");
 }
 
-/** Field labels in order, for tests and documentation. */
+/** Field labels in order, for tests and documentation. The consent rows
+ *  are separate because they are appended only when the feature is on. */
 export const DESCRIPTION_LABELS = ROWS.map(([label]) => label);
+
+/** The consent rows' labels, in order. */
+export const CONSENT_LABELS = [
+  "SMS CONSENT", "SMS CONSENT VERSION", "SMS CONSENT TEXT", "SMS CONSENT AT",
+  "SMS CONSENT PHONE",
+  "AI VOICE CONSENT", "AI VOICE CONSENT VERSION", "AI VOICE CONSENT TEXT",
+  "AI VOICE CONSENT AT", "AI VOICE CONSENT PHONE",
+];
 
 /** The subset that appears in the summary, in order. */
 export const SUMMARY_LABELS = ROWS.filter(([, , s]) => s).map(([label]) => label);

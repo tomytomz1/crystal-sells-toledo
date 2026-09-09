@@ -132,6 +132,19 @@ Both halves are enforced and both are pinned by `tools/check.mjs`:
 Rejection messages name the field in the words the form uses ("Please choose
 when you might sell."), never a field key.
 
+### Communications consent (accepted, feature-gated OFF)
+
+`/api/lead` also accepts two optional booleans, `sms_consent` and
+`ai_voice_consent`. They are parsed strictly - only a JSON `true` grants
+anything - and **neither is ever required**; a lead with both absent is a
+complete, valid lead, and consent is never a condition of service.
+
+While `COMMUNICATIONS_CONSENT_ENABLED` is not exactly `"true"` (the production
+default today) nothing is displayed, nothing is recorded, and production
+behaves as this document otherwise describes. The full contract, the permission
+model and the HubSpot setup it is waiting on are in
+`docs/updates/2026-09-09-communications-consent-foundation.md`.
+
 ### Field limits (server-enforced)
 
 ```
