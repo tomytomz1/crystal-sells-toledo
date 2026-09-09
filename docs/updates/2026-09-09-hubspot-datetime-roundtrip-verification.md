@@ -5,9 +5,11 @@
 **Performed by:** the site operator, manually, in the HubSpot UI
 **Result: PASS**
 
-This closes the last outstanding verification step from
-`docs/updates/2026-09-09-hubspot-consent-setup.md` §6 — the one that gated
-turning the communications-consent feature on.
+This closes the non-midnight datetime round-trip verification required by
+`docs/updates/2026-09-09-hubspot-consent-setup.md` §6. **It does not close
+§6a, and it does not by itself make the communications-consent feature
+activation-ready.** §6a — the timeline-evidence durability and rendering
+check — remains outstanding, and activation remains gated on it. See §7.
 
 **`COMMUNICATIONS_CONSENT_ENABLED` remains OFF and absent from Vercel
 Production.** This test changed nothing about that. See §6 below.
@@ -69,9 +71,11 @@ The non-midnight time component survived save and reload. Specifically, it did
 - become date-only, or
 - lose the time component.
 
-`2:30 PM CDT` is `19:30 UTC` — non-midnight in both the operator's display
-timezone and the UTC instant the property stores, so neither reading of the
-result is ambiguous.
+`2:30 PM CDT` corresponds to `19:30 UTC`. Under HubSpot's documented UTC
+semantics for datetime properties, that is also a non-midnight instant. The
+manual test itself directly observed the CDT UI value before and after reload;
+it did not inspect the raw API representation. The two evidence sources stay
+separate — see §1 — and this test is the second of them, not both.
 
 No other property was intentionally modified. The contact was left in its
 original state.
@@ -117,7 +121,8 @@ collected timestamps would be unrecoverable.
 
 `docs/updates/2026-09-09-hubspot-consent-setup.md` §6 required this check to
 happen **before any consent is captured**. It has now happened, before the
-feature is enabled and before any visitor has been shown a tick box.
+feature is enabled and before any visitor has been shown a tick box. That
+removes one gate on activation, not all of them.
 
 ---
 
@@ -127,9 +132,10 @@ feature is enabled and before any visitor has been shown a tick box.
   Production.**
 - **The communications consent UI is still not active.** No visitor sees a tick
   box on any form; the published privacy policy carries no messaging section.
-- **No consumer SMS or AI voice functionality is active.** No Twilio number
-  sends, no Retell agent calls, no A2P campaign is registered, and nothing in
-  the deployed code sends or calls.
+- **No consumer SMS traffic is active.** No Twilio SMS was sent and no Retell
+  call was placed, and nothing in the deployed code sends or calls. A2P/TCR
+  readiness is a separate activation dependency and is deliberately not
+  described by this document.
 
 Merging the Phase 2 wiring (`3c98607`) did not turn anything on, and neither did
 this test.
@@ -148,7 +154,13 @@ per-submission consent evidence, not about these contact properties:
    a bulk tool.
 
 Those remain unanswered, and until they are written down the evidence
-architecture is verified in code and unverified in practice.
+architecture is verified in code and unverified in practice. **§6a is still an
+activation gate.** The project's consistent position after this test is:
+
+- datetime round trip — **PASS**
+- §6a timeline-evidence durability and rendering — **still outstanding**
+- communications consent feature — **still OFF**
+- activation — **still gated**
 
 ---
 

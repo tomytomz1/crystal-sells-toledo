@@ -421,9 +421,11 @@ A controlled UI round-trip test of the **production** portal. Full write-up:
 | **Result** | **PASS** |
 
 The non-midnight time survived: it did not collapse to midnight, did not become
-date-only, and did not lose the time component. `2:30 PM CDT` is `19:30 UTC`, so
-the result is unambiguous in both the display timezone and the stored instant.
-No other property was intentionally modified.
+date-only, and did not lose the time component. `2:30 PM CDT` corresponds to
+`19:30 UTC`; under HubSpot's documented UTC semantics for datetime properties
+that is also a non-midnight instant. What the test directly observed is the CDT
+UI value before and after reload — it did not inspect the raw API
+representation. No other property was intentionally modified.
 
 **Two independent supports, kept apart.** HubSpot's official CRM Properties
 documentation establishes that a `datetime` property stores date *and* time,
