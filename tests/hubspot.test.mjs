@@ -313,7 +313,11 @@ describe("The form submission is the timeline activity", () => {
     assert.ok(names.includes("email") && names.includes("message"));
   });
 
-  test("the submission carries the complete 23-row block in `message`", async () => {
+  /* 23 is the block WITHOUT consent evidence, which is what this suite
+     builds: no feature flag is set, so no consent rows are appended. With
+     the feature on the same payload produces 33 rows - covered in
+     tests/consent.test.mjs, not here. */
+  test("the submission carries the complete base 23-row block in `message`", async () => {
     const calls = stubFetch({ [SEARCH]: noHits, [CREATE]: { json: { id: "1" } } });
     await createLead(payloadOf({
       ...validHomeValue,

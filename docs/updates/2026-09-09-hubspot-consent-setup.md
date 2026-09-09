@@ -14,12 +14,20 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 
 The website will offer two optional tick boxes: one for text messages, one for
 automated/AI voice calls. Two different things then have to be stored, and only
-one of them works today.
+only one of them can be built on what HubSpot already offers this integration.
 
-| | Where it lives | Works today? |
+Neither is running in production today: the feature is off, and nothing below is
+active until it is turned on.
+
+| | Where it lives | Status |
 |---|---|---|
-| **Evidence** — what this person agreed to, when, for which number, in which exact words | The native HubSpot **form-submission timeline activity**, inside the enquiry block already written to the `message` field | **Yes.** No setup, no new scopes, no form change. Practical durability in this portal is **not yet live-verified** — see §1a. |
-| **Current state** — are we allowed to text/call them *right now* | Custom contact properties | **No.** They do not exist. This document creates them. |
+| **Evidence** — what this person agreed to, when, for which number, in which exact words | The native HubSpot **form-submission timeline activity**, inside the enquiry block already written to the `message` field | **Implemented using the existing HubSpot form-submission contract.** Requires no new HubSpot schema, no new scopes and no change to the form — but consent evidence is **not active until the feature is enabled**. Practical durability in this portal is **not yet live-verified** — see §1a. |
+| **Current state** — are we allowed to text/call them *right now* | Custom contact properties | **Not implemented, and not possible yet.** The properties do not exist; this document creates them. Writes come in a follow-up change. |
+
+Keep the two ideas apart when reading the rest of this document:
+**technically supported by the existing integration** is not the same as
+**actually active in production**. Everything here is currently the first and
+none of it is the second.
 
 The distinction matters. A timeline activity is created per submission and
 carries its own dated snapshot, so records accumulate rather than replace one
@@ -147,7 +155,7 @@ off is a deliberate re-opt-in decision (§5), not data cleanup.
 Set when a suppressed contact ticks a box again. Recording the request does
 **not** grant anything — see §5.
 
-### 2e. The five timestamp properties — do NOT use a plain Date picker
+### 2e. The six timestamp properties — do NOT use a plain Date picker
 
 `cst_sms_consent_at`, `cst_ai_voice_consent_at`, `cst_sms_suppressed_at`,
 `cst_do_not_call_at`, `cst_do_not_contact_at` and `cst_reoptin_requested_at`
@@ -195,10 +203,41 @@ round — the schema is what it always was.
 | | |
 |---|---|
 | **Mutable current state** | Everything in §2. These say what is true *now* and are expected to change. |
-| **Event evidence** | The consent rows inside each form-submission timeline activity: `SMS CONSENT`, `SMS CONSENT VERSION`, `SMS CONSENT AT`, `SMS CONSENT PHONE`, and the four AI voice equivalents. One set per submission, dated, not editable through the API. |
+| **Event evidence** | Ten consent rows inside each form-submission timeline activity — listed in full below. One set per submission, dated. |
+
+The ten rows, in the order they appear in the enquiry block:
+
+```
+SMS CONSENT                 GRANTED | NOT GRANTED
+SMS CONSENT VERSION         e.g. CST_SMS_CONSENT_2026_09_V1
+SMS CONSENT TEXT            the exact disclosure the visitor was shown
+SMS CONSENT AT              full ISO-8601 UTC timestamp, or "-" if not granted
+SMS CONSENT PHONE           normalised number, or "-" if not granted
+
+AI VOICE CONSENT            GRANTED | NOT GRANTED
+AI VOICE CONSENT VERSION    e.g. CST_AI_VOICE_CONSENT_2026_09_V1
+AI VOICE CONSENT TEXT       the exact disclosure the visitor was shown
+AI VOICE CONSENT AT         full ISO-8601 UTC timestamp, or "-" if not granted
+AI VOICE CONSENT PHONE      normalised number, or "-" if not granted
+```
+
+The **TEXT** rows are the ones that make this evidence rather than a lookup key.
+A version identifier alone only answers "what did this person agree to" for
+someone who still has the source tree and can find the revision deployed that
+day; the text answers it from the CRM on its own. Both are kept — the version to
+compare records against each other, the text to read.
+
+A **declined** disclosure keeps its VERSION and TEXT (its AT and PHONE are `-`),
+because "they said no" means nothing without what they were saying no to.
+
+These ten rows are appended to the base 23-row enquiry block only when the
+feature is enabled, giving a 33-row block. With the feature off the block is the
+base 23 rows and carries no consent information at all.
 
 If the two ever disagree, the timeline activities are the record of what
-happened; the properties are a cache of the current conclusion.
+happened; the properties are a cache of the current conclusion. On the limits of
+that claim, see §1a — the activities are per-submission and additive by
+construction, which is not the same as proven immutable.
 
 ---
 
