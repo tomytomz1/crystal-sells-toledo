@@ -1,16 +1,23 @@
 # The append-only consent ledger — implemented
 
 **Date:** 9 September 2026
-**Status:** code, migration, tests and documentation. **Not provisioned, not
-migrated, not live.**
+**Status:** code, migration, tests and documentation.
+**Superseded in part on 9 September 2026** — the database has since been
+provisioned and its grant verified. See
+`docs/updates/2026-09-09-consent-ledger-provisioning-verification.md`. Still
+**not live**: nothing in Vercel points at it.
 **Feature status:** `COMMUNICATIONS_CONSENT_ENABLED` remains OFF / absent from
 Vercel Production. This phase did not change it and does not propose changing it.
 
 This closes the *code* half of activation gate 3 — *"append-only consent ledger
 implemented and tested"* — in
 `docs/updates/2026-09-09-consent-evidence-ledger-decision.md` §3. The other half
-is human work in a database that does not exist yet; §7 lists it. **Nothing in
-this document has ever run against a real database.**
+was human work in a database that did not exist when this was written; §7 listed
+it, and it has since been done.
+
+**Nothing described in this document has ever run against a real database.** The
+provisioning record covers what a human ran by hand; no line of the code
+described here has yet connected to Postgres.
 
 Design source: `docs/updates/2026-09-09-consent-evidence-ledger-proposal.md`
 (what to build). Insertion points and the resolved gaps:
@@ -475,6 +482,15 @@ it beyond leaving the columns in place.
 
 ## 7. What a human must still do
 
+> **Steps 1–5 and 7 were completed on 9 September 2026.** What was actually done,
+> how it differed from this list, and what it proved:
+> `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md`. Two
+> corrections that document records rather than repeats: **step 1's Marketplace
+> route was rejected** (it injects a privileged credential into Vercel), and
+> **step 5 could not be run as written** — Neon's SQL Editor has no role selector,
+> so the grants were verified another way, with the credential itself left
+> unproven. **Step 6 has deliberately not been done.**
+
 Code alone does not close gate 3.
 
 1. Provision **Neon Postgres via the Vercel Marketplace**, same region as the
@@ -516,19 +532,26 @@ Code alone does not close gate 3.
    **both** states while there — the `NOT CONFIRMED` block is the one an operator
    will have to interpret under pressure, and nobody has ever looked at it.
 
-Gates 4–10 remain outstanding. This phase closes gate 3's code half only.
+Gates 4–10 remain outstanding. This phase closes gate 3's code half only; the
+database half closed on 9 September 2026 in the document named above.
 
 ---
 
 ## 8. What is unproven
 
-**No append has ever reached a database.** No Neon project exists, no migration
-has been applied, no role has been created, and the `gen_random_uuid()` default
-has never been executed. The executor seam is injected in every test, so what is
-proven is the statement this code *would* send, the parameters it would bind, and
-what it does when an executor fails, hangs or is absent — not that a real
-Postgres accepts it, that the `ON CONFLICT` clause matches a real unique index,
-or that the connection succeeds from a Vercel function.
+**No append has ever reached a database *from this code*.** That remains true
+after provisioning, and it is the sentence to keep hold of. A Neon project now
+exists, the migration has been applied, the role has been created and the
+`gen_random_uuid()` default has been executed — all by a human typing SQL into a
+console. The executor seam is still injected in every test, so what this
+repository proves is the statement the code *would* send, the parameters it would
+bind, and what it does when an executor fails, hangs or is absent — not that a
+real Postgres accepts that statement, that the `ON CONFLICT` clause matches the
+real unique index, or that a connection succeeds from a Vercel function.
+
+**Nor has any client logged in as the application role.** The provisioning checks
+ran inside the owner's session using `SET ROLE`, which proves the grants and not
+the credential.
 
 **No `CONSENT LEDGER` row has ever been rendered in HubSpot or seen by an
 operator**, in either state. The E.164 refusal has never been observed against a
@@ -541,4 +564,5 @@ to anything.
 `COMMUNICATIONS_CONSENT_ENABLED` remains OFF. This phase changed no HubSpot
 record, form, workflow or property; no Vercel setting; no Twilio or Retell
 configuration; no lead, no SMS, no call. No database resource was created and no
-migration was applied.
+migration was applied **by this phase** — both happened later, by hand, and are
+recorded separately.

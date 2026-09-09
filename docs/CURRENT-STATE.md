@@ -47,8 +47,10 @@ Schema in the production HubSpot portal:
   the published privacy policy carries no messaging section.
 - **No consumer SMS or AI voice traffic is active.** No Twilio SMS is sent and no
   Retell call is placed.
-- **No ledger database exists.** `CONSENT_LEDGER_URL` is absent from Vercel, the
-  migration has not been applied, and no role has been created.
+- **The ledger database exists and is verified, and is connected to nothing.**
+  Provisioned and grant-verified on 9 September 2026 — see "The ledger" below.
+  `CONSENT_LEDGER_URL` is still **absent from Vercel in every environment**, so
+  the site has no connection to it.
 - **§6a research is complete (9 September 2026).** The HubSpot form-submission
   timeline evidence is **useful operationally but is not sufficient as the sole
   durable consent ledger** — a submission can be permanently and irreversibly
@@ -57,9 +59,11 @@ Schema in the production HubSpot portal:
   the HubSpot UI renders the whole enquiry block or truncates it. **Full
   rendering of the actual consent evidence is unverified** until that check is
   done.
-- **Activation remains gated.** Gate 3's *code* half is closed by the ledger
-  phase; its human half (§7 of the ledger write-up) is not. Gates 4–10 remain
-  outstanding, listed in the decision document below.
+- **Activation remains gated.** Gate 3 is now closed on **both** halves — code
+  merged, database provisioned and verified. Gates 4–10 remain outstanding,
+  listed in the decision document below. Gate 4 needs a decision nobody has
+  made: a round-trip requires `COMMUNICATIONS_CONSENT_ENABLED` on *somewhere*,
+  and Production is not a candidate.
 - **A2P/TCR readiness is a separate activation dependency.** This repository makes
   no claim about its status.
 
@@ -83,9 +87,10 @@ Decision, findings, sources and the full gate list:
 and the resolved gaps:
 `docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md`.
 
-### The ledger — built, and inert
+### The ledger — built, provisioned, verified, and connected to nothing
 
-**Code, migration and tests are merged. No database exists.**
+**Code, migration and tests are merged. The database exists and its append-only
+grant has been proven. Nothing in Vercel points at it.**
 
 - `api/_lib/consent-ledger.mjs` is the only module that names the table, its
   columns or `CONSENT_LEDGER_URL`. `tools/check.mjs` enforces that containment.
@@ -102,7 +107,10 @@ and the resolved gaps:
   only a confirmed append sets `durable`, and unproven withholds the grant exactly
   as unwritten does. Reconcile by querying `submission_id`, not by reading the
   row as absence.
-- `db/001_communication_consent_events.sql` is **checked in and not applied.**
+- `db/001_communication_consent_events.sql` was **applied unmodified on
+  9 September 2026** to Neon Postgres 18 (project
+  `crystal-sells-toledo-consent-ledger`, AWS US East 2). Do not edit that file —
+  its worth as a record depends on it staying byte-identical to what was run.
   Append-only is the role grant in that file, not a convention in the code — if
   the grant step is skipped the ledger is an ordinary mutable table. The
   application role gets **`INSERT` and nothing else, not even `SELECT`**: nothing
@@ -111,12 +119,25 @@ and the resolved gaps:
   **owner-credential** job, off Vercel.
 - Runtime dependency: `@neondatabase/serverless`, pinned, lazily imported. With
   the feature off it is never loaded.
-- **Nothing has ever been appended.** No Neon project, no migration, no role, no
-  live call. What the tests prove is the statement this code would send and how
-  it behaves when its executor fails, hangs or is absent.
+- **The grant is proven, by attempt and not by assertion.** Role
+  `consent_ledger_app` holds `LOGIN` and `INSERT` and nothing else. `INSERT`
+  succeeds under its own identity; `SELECT`, `UPDATE`, `DELETE` and `TRUNCATE`
+  are each refused with `permission denied (42501)`, and the refusals left the
+  data untouched. `event_id` and `recorded_at` were confirmed
+  database-generated. One clearly-labelled synthetic verification row is in the
+  table and is being kept.
+- **No client has ever logged in as the application role.** Every check ran
+  inside the owner's session via `SET ROLE`, which proves the *grants* and not
+  the *credential*. A password typo would have passed everything so far and
+  would fail on the first real connection. That closes at gate 4.
+- **No application code has ever touched this database.** What the tests prove
+  is the statement the code would send and how it behaves when its executor
+  fails, hangs or is absent.
 
-Full write-up, the failure-semantics contract and the remaining human steps:
-`docs/updates/2026-09-09-consent-evidence-ledger.md`.
+Design, failure-semantics contract and the code:
+`docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
+it was verified, and what is still unproven:
+`docs/updates/2026-09-09-consent-ledger-provisioning-verification.md`.
 
 ### Not built, and not active
 
@@ -143,5 +164,6 @@ Open one of these only when the task actually needs it.
 | Ledger implementation design — schema, event types, idempotency, DB roles, failure semantics | `docs/updates/2026-09-09-consent-evidence-ledger-proposal.md` |
 | Ledger implementation plan — where it attaches in this codebase, the change set, testing, human steps | `docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md` |
 | Ledger as built — module contract, failure semantics, the CONSENT LEDGER row, the static guards, what a human must still do | `docs/updates/2026-09-09-consent-evidence-ledger.md` |
+| Ledger as provisioned — Neon project, role creation, grant verification, the Neon-specific traps, what is still unproven | `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
