@@ -75,7 +75,10 @@ an additional evidence sink.
 Decision, findings, sources and the full gate list:
 `docs/updates/2026-09-09-consent-evidence-ledger-decision.md`. Implementation
 design for when the ledger is built:
-`docs/updates/2026-09-09-consent-evidence-ledger-proposal.md`.
+`docs/updates/2026-09-09-consent-evidence-ledger-proposal.md`. The plan for
+building it in this codebase — insertion points, the change set, failure
+semantics and the human steps — is
+`docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md`.
 
 ### Not built, and not active
 
@@ -98,5 +101,6 @@ Open one of these only when the task actually needs it.
 | The datetime round-trip test and its scope | `docs/updates/2026-09-09-hubspot-datetime-roundtrip-verification.md` |
 | §6a findings, evidence architecture decision, activation gates | `docs/updates/2026-09-09-consent-evidence-ledger-decision.md` |
 | Ledger implementation design — schema, event types, idempotency, DB roles, failure semantics | `docs/updates/2026-09-09-consent-evidence-ledger-proposal.md` |
+| Ledger implementation plan — where it attaches in this codebase, the change set, testing, human steps | `docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
