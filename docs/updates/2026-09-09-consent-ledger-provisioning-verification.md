@@ -12,8 +12,9 @@ database that did not exist yet. It now exists. Performed manually in the Neon
 console by the operator; every statement below was run by a person, not by any
 code in this repository.
 
-**Read the "what is still unproven" section before treating this as done.** One
-substantial gap remains, and it is the one that would be easiest to gloss.
+**Read §5 before treating this as done.** The credential gap this document
+originally described has since been closed (§4.6); a narrower one remains, and it
+is the one that would be easiest to gloss.
 
 ---
 
@@ -28,6 +29,7 @@ substantial gap remains, and it is the one that would be easiest to gloss.
 | Branch / database | `production` / `neondb` |
 | Table | `communication_consent_events`, from `db/001_communication_consent_events.sql`, applied unmodified |
 | Application role | `consent_ledger_app` — `LOGIN`, and nothing else |
+| Rows | 2, both synthetic verification rows (§4.5, §4.6) |
 
 ### Provisioned directly, NOT through the Vercel Marketplace
 
@@ -85,10 +87,24 @@ Every `NO...` clause above is a PostgreSQL default written out on purpose: this
 role's powers should be readable at a glance by whoever audits this, not inferred
 from what was left unsaid.
 
-The password was generated in a password manager, is 32 alphanumeric characters
-(no symbols, which have to be escaped inside a connection string), and **exists
-only in the operator's password manager**. It has never been placed in Vercel, in
-this repository, or in any conversation.
+The password was generated in a password manager and is 32 alphanumeric
+characters (no symbols, which have to be escaped inside a connection string). It
+has never been placed in Vercel, in this repository, or in any conversation.
+
+**Correction, recorded because an earlier revision of this document got it
+wrong.** That revision claimed the password *"exists only in the operator's
+password manager"*. **It does not.** Neon captures the password even when a role
+is created with SQL, stores it in its own vault, and will display it: the Connect
+panel shows a complete, working connection string for `consent_ledger_app` behind
+a **Show password** button, with the note *"Your password is saved in a secure
+storage vault."*
+
+The practical consequence, which belongs in the threat model rather than in a
+footnote: **anyone with console access to this Neon project can retrieve the
+application credential.** Neon console access is therefore equivalent to holding
+it. That is not a defect — it is how Neon works, and it made the verification in
+§4.6 much easier — but a document that claimed an isolation the system does not
+provide would have been worse than no document.
 
 ---
 
@@ -212,32 +228,66 @@ application can never remove it. It was written to be unmistakable:
 actually happened, and it grants nothing to anyone. The owner credential could
 remove it; there is no reason to.
 
+### 4.6 The credential itself — a real login, later the same day
+
+The gap §5 originally described has since been closed. A database client
+(TablePlus) connected **as `consent_ledger_app`**, over the pooled endpoint,
+using the connection string from Neon's Connect panel.
+
+| | |
+|---|---|
+| Server reported | **PostgreSQL 18.6** |
+| Transport | **TLSv1.3** (`sslmode=require`) |
+| Host | `…-pooler.c-4.us-east-2.aws.neon.tech`, port 5432 |
+
+| Statement | Result |
+|---|---|
+| `SELECT current_user;` | ran successfully |
+| `INSERT INTO communication_consent_events (…);` | **`INSERT 0 1, 1 rows affected`** |
+| `SELECT count(*) FROM communication_consent_events;` | **`ERROR: permission denied for table communication_consent_events`** |
+
+**The refusal does double duty.** It shows the append-only grant holds over a
+genuine login and not merely under `SET ROLE`, and it independently confirms the
+session's identity: the owner *can* read this table, so being refused proves the
+connection was not accidentally the admin one.
+
+This added a **second** clearly-labelled synthetic row
+(`submission_id = 'csv_credential_verification_20260909'`,
+`form_type = 'credential_verification'`). The ledger now holds two rows, both
+synthetic, both permanent as far as the application is concerned, neither
+granting anything to anyone.
+
 ---
 
 ## 5. What is still unproven
 
-**Nobody has ever connected to this database using the application credential.**
+The credential gap is **closed** (§4.6): the role can log in, append, and is
+refused a read over a real connection. What remains is narrower, and worth
+stating precisely rather than waving at.
 
-Every check above ran inside the owner's session, borrowing the application
-role's identity with `SET ROLE`. That is a sound test of *grants* — PostgreSQL
-evaluates permissions as the assumed role — but it is **not** a test of the
-credential. Specifically, still unknown:
+**No application code has ever touched this database.** §4.6 used an ordinary
+PostgreSQL client over TCP on port 5432. `api/_lib/consent-ledger.mjs` uses
+`@neondatabase/serverless`, whose **HTTP query path is a different transport
+entirely** — it does not open a Postgres TCP connection at all. So still unknown:
 
-- whether `consent_ledger_app` can actually **log in** with the password that was
-  set;
-- whether the connection string built from it works from a Vercel function;
-- whether the `@neondatabase/serverless` HTTP path behaves as the tests predict
-  against this database.
+- whether that driver's HTTP endpoint accepts this connection string;
+- whether the pooled host is the right one to put in `CONSENT_LEDGER_URL`, or
+  whether the direct host should be used instead;
+- whether the module's real multi-row
+  `INSERT … ON CONFLICT (dedupe_key) DO NOTHING` succeeds against this table —
+  §4.6 inserted a single row with hand-written SQL, so the `ON CONFLICT` clause
+  has never been matched against the real unique index;
+- whether any of it works from within a Vercel function, under that runtime's
+  network and timeout constraints.
 
-A password typo would have passed every check in §4 and would fail on the first
-real connection. **Do not read §4 as evidence that the application can write to
-this ledger.** It is evidence that *if* it connects, it may only append.
+**Do not read §4 as evidence that the application can write to this ledger.** It
+is evidence that a client can, and that whatever connects may only append.
 
-That gap closes at gate 4 — the controlled round-trip against a preview
-deployment — which is also the first moment `CONSENT_LEDGER_URL` is exercised.
+Those close at gate 4 — the controlled round-trip — which is also the first
+moment `CONSENT_LEDGER_URL` is exercised.
 
-Also unproven, unchanged from before: no `CONSENT LEDGER` row has ever been
-rendered in HubSpot or seen by an operator, in either state.
+Also unproven, unchanged: no `CONSENT LEDGER` row has ever been rendered in
+HubSpot or seen by an operator, in either state.
 
 ---
 
@@ -299,7 +349,7 @@ Re-granting it is one statement if the checks ever need repeating.
 | Gate | Status |
 |---|---|
 | **3** — append-only ledger implemented and tested | **Closed.** Code half merged; database half is this document |
-| **4** — controlled ledger round-trip | Open. Needs `CONSENT_LEDGER_URL` set and the feature enabled somewhere; the first real use of the application credential |
+| **4** — controlled ledger round-trip | Open. Needs `CONSENT_LEDGER_URL` set and the feature enabled somewhere. The credential itself is now proven (§4.6); what gate 4 still proves is the `@neondatabase/serverless` HTTP path, the `ON CONFLICT` clause against the real index, and the Vercel runtime |
 | **5** — HubSpot timeline display check | Open. Now against an eleven-row consent block — `docs/updates/2026-09-09-hubspot-consent-setup.md` §6a |
 | **6–10** | Open — `docs/updates/2026-09-09-consent-evidence-ledger-decision.md` §3 |
 

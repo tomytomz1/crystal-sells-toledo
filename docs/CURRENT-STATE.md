@@ -126,13 +126,23 @@ grant has been proven. Nothing in Vercel points at it.**
   data untouched. `event_id` and `recorded_at` were confirmed
   database-generated. One clearly-labelled synthetic verification row is in the
   table and is being kept.
-- **No client has ever logged in as the application role.** Every check ran
-  inside the owner's session via `SET ROLE`, which proves the *grants* and not
-  the *credential*. A password typo would have passed everything so far and
-  would fail on the first real connection. That closes at gate 4.
-- **No application code has ever touched this database.** What the tests prove
-  is the statement the code would send and how it behaves when its executor
-  fails, hangs or is absent.
+- **The credential is proven.** A database client logged in as
+  `consent_ledger_app` over TLS 1.3 to PostgreSQL 18.6, appended a row, and was
+  refused `SELECT count(*)` — so the append-only grant holds over a real login,
+  not merely under `SET ROLE`. The ledger holds two synthetic verification rows
+  and nothing else.
+- **The application credential is retrievable from the Neon console.** Neon
+  stores the password in its own vault even for a role created with SQL, and
+  will display it. Neon console access is therefore equivalent to holding the
+  credential — a property of the platform, recorded because an earlier revision
+  of the provisioning document wrongly claimed the password existed only in a
+  password manager.
+- **No application code has ever touched this database.** The credential was
+  proven with an ordinary Postgres client over TCP; `@neondatabase/serverless`
+  uses a different transport (HTTP), so the driver path, the real
+  `ON CONFLICT` clause against the live unique index, and the Vercel runtime are
+  all still unexercised. What the tests prove is the statement the code would
+  send and how it behaves when its executor fails, hangs or is absent.
 
 Design, failure-semantics contract and the code:
 `docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
