@@ -53,7 +53,7 @@ const ROWS = [
  * must not look the same when Crystal reads a lead six months from now.
  *
  * When the communications-consent feature is enabled, `payload.consent`
- * carries the submission's consent evidence and ten further rows are
+ * carries the submission's consent evidence and eleven further rows are
  * appended - including the exact disclosure text, so a stored submission
  * answers "what words did this person agree to" without anyone having to
  * find the revision of the source that was deployed that day. This block is what HubSpot's native form-submission timeline
@@ -61,6 +61,12 @@ const ROWS = [
  * not editable through the API - so the consent snapshot lands somewhere a
  * later submission adds to rather than overwrites. That is the audit trail
  * the integration can honestly provide with the scopes it already has.
+ *
+ * The first of the eleven is CONSENT LEDGER, which says whether this
+ * submission's consent evidence reached the durable append-only ledger.
+ * It is what explains a block reading GRANTED beside a contact whose
+ * permission property correctly reads never_granted: no durable evidence,
+ * so no grant.
  *
  * With the feature off there is no `payload.consent`, no rows are added,
  * and the block is byte-for-byte what production writes today.
@@ -96,8 +102,12 @@ export function buildSummary(payload) {
  *  are separate because they are appended only when the feature is on. */
 export const DESCRIPTION_LABELS = ROWS.map(([label]) => label);
 
-/** The consent rows' labels, in order. */
+/** The consent rows' labels, in order. Pinned to consentRows() by an
+ *  assertion in tests/consent.test.mjs, so the two cannot drift apart. */
 export const CONSENT_LABELS = [
+  /* First, because it qualifies every row after it - see consentRows()
+     in api/_lib/consent.mjs. */
+  "CONSENT LEDGER",
   "SMS CONSENT", "SMS CONSENT VERSION", "SMS CONSENT TEXT", "SMS CONSENT AT",
   "SMS CONSENT PHONE",
   "AI VOICE CONSENT", "AI VOICE CONSENT VERSION", "AI VOICE CONSENT TEXT",

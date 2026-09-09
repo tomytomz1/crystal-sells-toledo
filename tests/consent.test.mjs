@@ -30,7 +30,8 @@ import {
   canSendSms, canPlaceAutomatedVoiceCall, applySuppression, REASON, SUPPRESSION_SCOPE,
 } from "../api/_lib/permission.mjs";
 import { validateLead } from "../api/_lib/validate.mjs";
-import { buildDescription, CONSENT_LABELS } from "../api/_lib/description.mjs";
+import { buildDescription, buildSummary, CONSENT_LABELS } from "../api/_lib/description.mjs";
+import { LEDGER_URL_VAR, _setExecutor, _resetExecutor } from "../api/_lib/consent-ledger.mjs";
 import { DETAIL_MAX_BYTES } from "../api/_lib/hubspot.mjs";
 import { setTransportFactory } from "../api/_lib/mail.mjs";
 import { _resetRateLimit } from "../api/_lib/security.mjs";
@@ -795,6 +796,8 @@ describe("consent copy cannot drift", () => {
     payload.meta.submission_id = "csv_test000000000000000000";
     const rows = Object.fromEntries(consentRows(buildConsentEvidence(payload)));
     assert.equal(rows["SMS CONSENT VERSION"], SMS_CONSENT.version);
+    assert.equal(Object.keys(rows)[0], "CONSENT LEDGER",
+      "the durability caveat is not the first row an operator reads");
     assert.equal(rows["SMS CONSENT TEXT"], SMS_CONSENT.text);
     assert.equal(rows["AI VOICE CONSENT VERSION"], AI_VOICE_CONSENT.version);
     assert.equal(rows["AI VOICE CONSENT TEXT"], AI_VOICE_CONSENT.text);
@@ -833,5 +836,127 @@ describe("consent copy cannot drift", () => {
     assert.equal(withRows.length - without.length, consentRows(payload.consent).length);
     assert.ok(!without.some((l) => l.startsWith("SMS CONSENT")));
     assert.ok(withRows.some((l) => l === "SMS CONSENT: GRANTED"));
+    /* Eleven rows since the ledger phase, and the block gains exactly one
+       line versus the pre-ledger row set. */
+    assert.equal(consentRows(payload.consent).length, 11);
+    assert.ok(!without.some((l) => l.startsWith("CONSENT LEDGER")));
+  });
+
+  /* =====================================================================
+     THE CONSENT LEDGER ROW
+     ---------------------------------------------------------------------
+     The row exists to explain a discrepancy an operator would otherwise
+     meet with no explanation: an activity saying SMS CONSENT: GRANTED
+     beside a contact whose permission property correctly says
+     never_granted, because the durable evidence never landed.
+     ===================================================================== */
+  describe("the CONSENT LEDGER row", () => {
+    const blockFor = (durable) => {
+      const payload = validateLead({ ...validHomeValue, sms_consent: true });
+      payload.meta.submission_id = "csv_test000000000000000000";
+      payload.consent = buildConsentEvidence(payload);
+      if (durable === "absent") delete payload.consent.durable;
+      else payload.consent.durable = durable;
+      return buildDescription(payload).split("\n");
+    };
+
+    test("a confirmed append renders RECORDED", () => {
+      /* Whole lines, not substrings: "NOT CONFIRMED" contains "RECORDED". */
+      assert.ok(blockFor(true).includes("CONSENT LEDGER: RECORDED"));
+      assert.ok(!blockFor(true).includes("CONSENT LEDGER: NOT CONFIRMED"));
+    });
+
+    /* Deny by default: a missing marker, an undefined, or anything that is
+       merely truthy all read NOT CONFIRMED. An evidence object built by some
+       future path that never heard of the ledger must not claim durability
+       it does not have. */
+    test("everything that is not exactly true renders NOT CONFIRMED", () => {
+      for (const marker of [false, undefined, "absent", null, "true", 1, {}])
+        assert.ok(blockFor(marker).includes("CONSENT LEDGER: NOT CONFIRMED"),
+          `durable=${JSON.stringify(marker)} claimed durable evidence`);
+    });
+
+    /* buildDescription() substitutes "-" for a blank value, so a design
+       that emitted nothing on success would print "CONSENT LEDGER: -" -
+       worse than either real value. Both values are non-empty strings. */
+    test("the row never renders as a dash", () => {
+      for (const marker of [true, false, "absent"])
+        assert.ok(!blockFor(marker).includes("CONSENT LEDGER: -"));
+    });
+
+    test("it is the first consent row, above every claim it qualifies", () => {
+      const lines = blockFor(false);
+      const ledger = lines.findIndex((l) => l.startsWith("CONSENT LEDGER:"));
+      const sms = lines.findIndex((l) => l.startsWith("SMS CONSENT:"));
+      assert.ok(ledger >= 0 && sms >= 0);
+      assert.ok(ledger < sms, "the caveat renders below the claim it qualifies");
+    });
+
+    /* The contact's `message` sidebar property is the short summary of the
+       latest enquiry, and has never carried consent. It still does not. */
+    test("buildSummary carries no CONSENT LEDGER line", () => {
+      const payload = validateLead({ ...validHomeValue, sms_consent: true });
+      payload.meta.submission_id = "csv_test000000000000000000";
+      payload.consent = buildConsentEvidence(payload);
+      payload.consent.durable = true;
+      const summary = buildSummary(payload);
+      assert.ok(!summary.includes("CONSENT LEDGER"));
+      assert.ok(!summary.includes("SMS CONSENT"));
+    });
+
+    /* ORDERING IS LOAD-BEARING FOR RENDERING, not just for the grant.
+       api/lead.js appends to the ledger BEFORE createLead() builds the
+       block. An append moved after the CRM write would print NOT CONFIRMED
+       on every successful submission and grant nothing, and every other
+       test in this repository would still pass. This one would not. */
+    test("a successful append is already recorded when the block is built", async () => {
+      const PORTAL = "247240486";
+      const GUID = "536a356d-d854-49ec-b204-b76e591cecaa";
+      const FORM_KEY = "POST /submissions/v3/integration/secure/submit/" + PORTAL + "/" + GUID;
+      const realFetch = globalThis.fetch;
+      const httpRes = ({ status = 200, json = null }) => ({
+        ok: status >= 200 && status < 300, status,
+        async text() { return json === null ? "" : JSON.stringify(json); },
+      });
+      const savedEnv = {};
+      const KEYS = [FEATURE_FLAG, "HUBSPOT_ACCESS_TOKEN", "HUBSPOT_PORTAL_ID",
+                    "HUBSPOT_FORM_GUID", LEDGER_URL_VAR];
+      for (const k of KEYS) savedEnv[k] = process.env[k];
+      process.env[FEATURE_FLAG] = "true";
+      process.env.HUBSPOT_ACCESS_TOKEN = "pat-na1-TEST";
+      process.env.HUBSPOT_PORTAL_ID = PORTAL;
+      process.env.HUBSPOT_FORM_GUID = GUID;
+      process.env[LEDGER_URL_VAR] = "postgres://app:secret@ledger.invalid/db";
+
+      const bodies = [];
+      globalThis.fetch = async (url, options = {}) => {
+        const u = new URL(String(url));
+        const key = (options.method || "GET") + " " + u.pathname;
+        if (options.body) bodies.push({ key, body: JSON.parse(options.body) });
+        if (key.endsWith("/contacts/search")) return httpRes({ json: { total: 0, results: [] } });
+        if (key === "POST /crm/v3/objects/contacts") return httpRes({ json: { id: "1" } });
+        if (key === FORM_KEY) return httpRes({ json: { inlineMessage: "ok" } });
+        throw new Error("unstubbed " + key);
+      };
+      _setExecutor(async () => []);
+
+      try {
+        _resetRateLimit();
+        const res = mockRes();
+        await handler(mockReq({ body: { ...validHomeValue, sms_consent: true } }), res);
+        assert.equal(res.statusCode, 200);
+        const message = bodies.find((b) => b.key === FORM_KEY).body.fields
+          .find((f) => f.name === "message").value;
+        assert.ok(message.split("\n").includes("CONSENT LEDGER: RECORDED"),
+          "the block was built before the ledger append resolved");
+      } finally {
+        globalThis.fetch = realFetch;
+        _resetExecutor();
+        for (const k of KEYS) {
+          if (savedEnv[k] === undefined) delete process.env[k];
+          else process.env[k] = savedEnv[k];
+        }
+      }
+    });
   });
 });

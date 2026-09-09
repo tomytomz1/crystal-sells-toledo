@@ -178,6 +178,9 @@ const SECRET_NAMES = [
      sent entirely inside the Vercel function. */
   "ZOHO_SMTP_PASSWORD", "ZOHO_SMTP_USER", "ZOHO_SMTP_HOST", "ZOHO_SMTP_PORT",
   "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "ZOHO_CLIENT_ID",
+  /* The append-only consent ledger's connection string. A database
+     credential, and one for the store that exists to be trustworthy. */
+  "CONSENT_LEDGER_URL",
 ];
 for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
   const text = readFileSync(join(ROOT, file), "utf8");
@@ -838,6 +841,96 @@ for (const file of pages) {
       if (new RegExp(`SUPPRESSION_PROPERTIES\\.${suppression}\\b`).test(writeFn))
         fail("api/_lib/hubspot-consent-state.mjs",
           `the write path references SUPPRESSION_PROPERTIES.${suppression} - an ordinary form submission must never write a suppression`);
+  }
+
+  /* ---------------------------------------------------------------
+     THE APPEND-ONLY CONSENT LEDGER
+     ---------------------------------------------------------------
+     Four static guards. All cheap, and each one guards an invariant a
+     well-meaning refactor could delete without breaking anything that
+     looks important. */
+  const ledgerPath = join(ROOT, "..", "api/_lib/consent-ledger.mjs");
+  if (!existsSync(ledgerPath))
+    fail("api/_lib/consent-ledger.mjs", "missing - the durable consent evidence sink is gone");
+  else {
+    const ledgerSrc = readFileSync(ledgerPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+    /* The same rule the evidence builder follows: consent evidence stores
+       no IP, and adding a ledger is not a reason to start. */
+    if (/\bip\b|remoteAddress|x-forwarded-for/i.test(ledgerSrc))
+      fail("api/_lib/consent-ledger.mjs", "reads an IP address - consent evidence deliberately stores no IP");
+    /* An event's identity is the database's. A client-side UUID puts the
+       uniqueness guarantee of a primary key in a process holding no UPDATE
+       privilege to repair a collision with. */
+    if (/randomUUID/.test(ledgerSrc))
+      fail("api/_lib/consent-ledger.mjs",
+        "mints an event_id in Node - event_id is a database default (db/001_communication_consent_events.sql)");
+
+    /* Containment, exactly as for the cst_ names: one module owns the
+       table and its columns. Scattering them is how a schema contract
+       drifts from the database it describes. db/ and tests/ name them
+       legitimately; nothing else under api/ may. */
+    /* `consent_copy_version` is deliberately absent: HubSpot's own
+       `cst_sms_consent_copy_version` contains it, and a containment rule
+       that fires on the adapter that legitimately owns those names would
+       just get deleted. The five below are unambiguous. */
+    const LEDGER_NAMES = ["communication_consent_events", "phone_e164", "dedupe_key",
+                          "source_event_id", "occurred_at"];
+    for (const rel of ["api/lead.js", "api/_lib/consent.mjs", "api/_lib/hubspot.mjs",
+                       "api/_lib/hubspot-consent-state.mjs", "api/_lib/description.mjs",
+                       "api/_lib/permission.mjs"]) {
+      const text = readFileSync(join(ROOT, "..", rel), "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+      const stray = LEDGER_NAMES.filter((n) => text.includes(n));
+      if (stray.length)
+        fail(rel, `names consent ledger schema (${stray.join(", ")}) - it belongs to api/_lib/consent-ledger.mjs`);
+    }
+  }
+
+  /* The invariant a refactor is most likely to delete, because deleting it
+     breaks nothing visible: a `cst_*` grant requires durable evidence.
+     Without it a permission can be written that this business could not
+     later prove it was given.
+
+     tests/consent-ledger.test.mjs builds the exact regressions this guard
+     exists to catch, in a throwaway copy of the tree, and confirms this
+     script still refuses them - a guard nobody has ever seen fail is a
+     guard nobody knows works. It pins the two call-site strings below, so
+     renaming one here without updating the test fails the test rather than
+     silently disarming the guard. */
+  {
+    /* The awaited CALL SITES, matched literally. */
+    const LEDGER_APPEND_CALL = "await appendConsentEvents(";
+    const CRM_WRITE_CALL = "await createLead(";
+    const hubspotSrc = readFileSync(join(ROOT, "..", "api/_lib/hubspot.mjs"), "utf8");
+    if (!/const consentOn\s*=\s*consentStateEnabled\(\)\s*&&\s*payload\.consent\?\.durable\s*===\s*true/
+      .test(hubspotSrc))
+      fail("api/_lib/hubspot.mjs",
+        "the consent write gate no longer requires payload.consent.durable === true - a cst_ grant " +
+        "could be written with no durable ledger evidence behind it");
+    /* THE CALL SITES, NOT THE IMPORT.
+       An earlier version of this guard searched for the bare identifier
+       `appendConsentEvents`, which matches the import statement at the top
+       of the file. An import is always before everything else, so the
+       ordering comparison was between the import and the CRM write and
+       could never fail - it proved nothing at all, and the presence check
+       would have kept passing after the call itself was deleted.
+       Both halves now look for the awaited call. */
+    const leadSrc = readFileSync(join(ROOT, "..", "api/lead.js"), "utf8");
+    const appendAt = leadSrc.indexOf(LEDGER_APPEND_CALL);
+    const createAt = leadSrc.indexOf(CRM_WRITE_CALL);
+    if (appendAt === -1)
+      fail("api/lead.js",
+        `does not call \`${LEDGER_APPEND_CALL}…\` - nothing appends to the consent ledger, so no ` +
+        "submission could ever be granted a permission");
+    if (createAt === -1)
+      fail("api/lead.js", `does not call \`${CRM_WRITE_CALL}…\` - the CRM write is gone`);
+    /* Order is load-bearing twice: the append must resolve before
+       createLead() decides whether a grant may happen AND before it builds
+       the enquiry block, or every good submission prints
+       CONSENT LEDGER: NOT CONFIRMED and no grant is ever written.
+       `indexOf` takes the FIRST CRM write, which is the conservative
+       comparison - the append must precede the earliest one. */
+    else if (appendAt !== -1 && appendAt > createAt)
+      fail("api/lead.js", "appends to the consent ledger after the CRM write - the grant and the block would both be wrong");
   }
 
   const permissionSrc = readFileSync(join(ROOT, "..", "api/_lib/permission.mjs"), "utf8");

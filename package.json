@@ -25,6 +25,7 @@
     "playwright": "^1.55.1"
   },
   "dependencies": {
+    "@neondatabase/serverless": "1.1.0",
     "nodemailer": "^10.0.1"
   }
 }
