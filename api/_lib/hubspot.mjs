@@ -26,7 +26,7 @@ import { buildDescription, buildSummary } from "./description.mjs";
 import { applySubmissionConsent } from "./consent.mjs";
 import {
   consentStateEnabled, consentPropertiesToRead, fromHubSpotConsentProperties,
-  toHubSpotConsentProperties, emptyConsentState,
+  toHubSpotConsentProperties, emptyConsentState, requireConsentProperties,
 } from "./hubspot-consent-state.mjs";
 import { log, logError } from "./log.mjs";
 
@@ -281,7 +281,14 @@ export async function findContactByEmail(email) {
   if (!hit.id) throw new Error("HUBSPOT_SEARCH_MALFORMED_RESPONSE");
   return {
     id: String(hit.id),
-    consent: consentProps.length ? fromHubSpotConsentProperties(hit.properties || {}) : null,
+    /* `hit.properties || {}` would be a lie here. A contact WAS found, so an
+       empty consent state is a claim about that contact - that it has never
+       granted and is not suppressed - and a malformed response is no basis
+       for making it. requireConsentProperties throws instead, and the lead
+       fails loudly rather than folding a grant into an invented blank. */
+    consent: consentProps.length
+      ? fromHubSpotConsentProperties(requireConsentProperties(hit.properties, "SEARCH"))
+      : null,
   };
 }
 
@@ -296,7 +303,10 @@ async function readConsentState(ref, { byEmail = false } = {}) {
   const res = await hubspotFetch(contactUrl(ref, { byEmail, properties }));
   const json = await readJson(res);
   if (!res.ok) throw hubspotError("READ", res.status, json);
-  return fromHubSpotConsentProperties(json?.properties || {});
+  /* Same rule as the search, and it matters more here: this contact exists
+     precisely because it collided with our create, and it is the one most
+     likely to be carrying a suppression written seconds ago. */
+  return fromHubSpotConsentProperties(requireConsentProperties(json?.properties, "READ"));
 }
 
 async function createContact(props) {
@@ -508,6 +518,24 @@ export async function createLead(payload) {
         action_required:
           "confirm the `forms` scope is on the HubSpot service key and that " +
           "HUBSPOT_ACCESS_TOKEN in Vercel is that key, then redeploy",
+      });
+    }
+    if (err.consentStateInvalid) {
+      /* Not a transient fault. HubSpot answered, and what it said about this
+         contact's consent could not be understood - so the submission was
+         failed rather than folded into a guess. Someone has to look at the
+         named property. The bad VALUE is deliberately absent: a mis-mapped
+         CRM field can hold anything, up to and including another person's
+         details. */
+      logError("hubspot.consent_state_invalid", err, {
+        submission_id: sid,
+        consent_error: err.token,
+        property: err.property,
+        action_required:
+          "inspect the named HubSpot contact property - a permission status outside " +
+          "never_granted/granted/revoked/suppressed, or a suppression flag that is " +
+          "neither true nor false nor empty, must be corrected in the portal; the lead " +
+          "was NOT saved and the visitor was told so",
       });
     }
     if (err.formDefinitionProblem) {

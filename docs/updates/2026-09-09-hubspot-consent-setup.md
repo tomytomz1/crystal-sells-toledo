@@ -23,7 +23,10 @@ Until every step here is done, leave `COMMUNICATIONS_CONSENT_ENABLED` set to
 >   definitions were independently verified against §2.
 > - **All six timestamp properties are genuine `datetime`** properties, not
 >   date-only pickers — the outcome §2e required.
-> - The three enumerations carry exactly the values listed in §2.
+> - The six enumeration/dropdown properties — `cst_sms_permission_status`,
+>   `cst_ai_voice_permission_status`, `cst_sms_suppression_reason`,
+>   `cst_do_not_call_reason`, `cst_do_not_contact_reason` and
+>   `cst_reoptin_requested_channel` — carry exactly the values listed in §2.
 >
 > **Still not done, and still gating activation:**
 >
@@ -77,9 +80,12 @@ not one this document is entitled to use.
 
 - Each website submission constructs its own consent snapshot, server-side, from
   canonical values a client cannot influence.
-- That snapshot is included in the HubSpot form-submission payload, in the same
-  API call that stores the lead — so it cannot half-succeed. A HubSpot failure
-  fails the submission loudly.
+- The consent evidence is part of the same HubSpot Forms submission as the full
+  enquiry activity, so the activity's evidence block is submitted as one unit.
+  The Contact current-state write and the Forms activity are separate API
+  requests, however, and there is no transaction across them. A Contact write
+  can succeed before a Forms submission fails; the application reports that
+  failure rather than hiding it.
 - Constructing a later submission's payload does not read, modify or overwrite
   any earlier payload. Each is built fresh from that submission alone.
 - The exact disclosure text, its version, the timestamp and the bound phone

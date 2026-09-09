@@ -11,6 +11,7 @@
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { createLead, findContactByEmail } from "../api/_lib/hubspot.mjs";
 import {
@@ -19,6 +20,8 @@ import {
   REOPTIN_CHANNEL_VALUES, HUBSPOT_SUPPRESSION_VOCABULARY,
   fromHubSpotConsentProperties, toHubSpotConsentProperties, toHubSpotDateTime,
   parseHubSpotBoolean, consentPropertiesToRead, emptyConsentState,
+  assertConsentEnum, requireConsentProperties,
+  MALFORMED_RESPONSE, MALFORMED_VALUE, DATETIME_INVALID, ENUM_REJECTED,
 } from "../api/_lib/hubspot-consent-state.mjs";
 import {
   PERMISSION_STATE, FEATURE_FLAG, buildConsentEvidence, applySubmissionConsent,
@@ -68,7 +71,8 @@ const httpRes = ({ status = 200, json = null }) => ({
  * `existing` — properties of a contact the search finds (null = none).
  * `raced`    — properties of a contact that appears only after a 409.
  */
-function stubHubspot({ existing = null, raced = null, formStatus = 200 } = {}) {
+function stubHubspot({ existing = null, raced = null, formStatus = 200,
+                       searchHit, refetchBody } = {}) {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(String(url));
@@ -78,6 +82,9 @@ function stubHubspot({ existing = null, raced = null, formStatus = 200 } = {}) {
     calls.push({ key, method, path: u.pathname, search: u.search, body });
 
     if (key === SEARCH) {
+      /* `searchHit` replaces the matched result wholesale, so a test can
+         hand back a hit whose `properties` is missing, null or an array. */
+      if (searchHit !== undefined) return httpRes({ json: { total: 1, results: [searchHit] } });
       return httpRes({ json: existing
         ? { total: 1, results: [{ id: "77", properties: { email: "x@y.co", ...existing } }] }
         : { total: 0, results: [] } });
@@ -87,6 +94,7 @@ function stubHubspot({ existing = null, raced = null, formStatus = 200 } = {}) {
       return httpRes({ json: { id: "1" } });
     }
     if (method === "GET" && u.pathname.startsWith("/crm/v3/objects/contacts/")) {
+      if (refetchBody !== undefined) return httpRes({ json: refetchBody });
       return httpRes({ json: { id: "88", properties: raced || {} } });
     }
     if (method === "PATCH" && u.pathname.startsWith("/crm/v3/objects/contacts/")) {
@@ -166,29 +174,86 @@ describe("feature off", () => {
    4-10  READ ADAPTER
    ===================================================================== */
 describe("reading HubSpot properties into consent state", () => {
-  test("blank or unrecognised status is never_granted", () => {
-    for (const value of [undefined, null, "", "   ", "GRANTED", "yes", "enabled", 1]) {
+  test("a blank status is never_granted", () => {
+    for (const value of [undefined, null, "", "   "]) {
       const st = fromHubSpotConsentProperties({ [SMS.status]: value });
       assert.equal(st.sms.status, NEVER_GRANTED, `"${value}" should read as never_granted`);
     }
     assert.equal(emptyConsentState().sms.status, NEVER_GRANTED);
     assert.equal(emptyConsentState().ai_voice.status, NEVER_GRANTED);
+    for (const value of PERMISSION_STATUS_VALUES)
+      assert.equal(fromHubSpotConsentProperties({ [SMS.status]: value }).sms.status,
+        value === SUPPRESSED ? SUPPRESSED : value);
+  });
+
+  /* Normalising an unknown status to never_granted is how a permission gets
+     erased: a fresh grant would then overwrite whatever it actually meant.
+     A nonblank value outside the vocabulary is a fault, not a default. */
+  test("a nonblank unrecognised status is malformed CRM state, not never_granted", () => {
+    /* Surrounding whitespace is HubSpot's, not a fault - `" granted "` is
+       still granted. Everything else here is a fault. */
+    assert.equal(fromHubSpotConsentProperties({ [SMS.status]: " granted " }).sms.status, GRANTED);
+    for (const value of ["GRANTED", "yes", "enabled", "granted!", 1, 0, true, {}, []]) {
+      assert.throws(
+        () => fromHubSpotConsentProperties({ [SMS.status]: value }),
+        (err) => err.token === MALFORMED_VALUE && err.property === SMS.status,
+        `${JSON.stringify(value)} was silently normalised`);
+    }
+    assert.throws(
+      () => fromHubSpotConsentProperties({ [AIV.status]: "unknown_future_value" }),
+      (err) => err.property === AIV.status);
+  });
+
+  /* The error names the property so an operator can find the bad field, and
+     never the value - a mis-mapped CRM field can hold anything, PII
+     included. */
+  test("a malformed-state error carries no value", () => {
+    try {
+      fromHubSpotConsentProperties({ [S.smsSuppressed]: "banana(419) 555-0000" });
+      assert.fail("a malformed suppression flag was accepted");
+    } catch (err) {
+      assert.equal(err.token, MALFORMED_VALUE);
+      assert.equal(err.property, S.smsSuppressed);
+      assert.ok(!err.message.includes("banana"), "the bad value leaked into the message");
+      assert.ok(!err.message.includes("419"), "the bad value leaked into the message");
+      assert.equal(err.consentStateInvalid, true);
+    }
   });
 
   /* The bug this exists to prevent: Boolean("false") is true. */
   test("HubSpot's string booleans are parsed, never coerced", () => {
     assert.equal(parseHubSpotBoolean("false"), false, '"false" must not be true');
     assert.equal(parseHubSpotBoolean("FALSE"), false);
-    assert.equal(parseHubSpotBoolean("no"), false);
-    assert.equal(parseHubSpotBoolean("0"), false);
-    assert.equal(parseHubSpotBoolean(""), false);
-    assert.equal(parseHubSpotBoolean(null), false);
-    assert.equal(parseHubSpotBoolean(undefined), false);
+    assert.equal(parseHubSpotBoolean(" true "), true);
     assert.equal(parseHubSpotBoolean("true"), true);
     assert.equal(parseHubSpotBoolean("True"), true);
-    assert.equal(parseHubSpotBoolean(" true "), true);
     assert.equal(parseHubSpotBoolean(true), true, "a real boolean must still work");
     assert.equal(parseHubSpotBoolean(false), false);
+    /* An unset HubSpot boolean genuinely means "not suppressed", and that is
+       the ordinary case for almost every contact. */
+    assert.equal(parseHubSpotBoolean(""), false);
+    assert.equal(parseHubSpotBoolean("   "), false);
+    assert.equal(parseHubSpotBoolean(null), false);
+    assert.equal(parseHubSpotBoolean(undefined), false);
+  });
+
+  /* "banana" is not a way of saying "not suppressed". It is a sign this
+     field does not hold what this code believes it holds, and answering
+     "no, not suppressed" to that question is how a STOP gets ignored. */
+  test("a nonblank uninterpretable boolean throws rather than reading as false", () => {
+    for (const value of ["banana", "yes", "no", "1", "0", 1, 0, {}, [], "TRUE.", "falsey"])
+      assert.throws(
+        () => parseHubSpotBoolean(value, S.smsSuppressed),
+        (err) => err.token === MALFORMED_VALUE && err.property === S.smsSuppressed,
+        `${JSON.stringify(value)} was read as a boolean`);
+  });
+
+  test("a malformed suppression flag fails the whole read, on every flag", () => {
+    for (const flag of [S.smsSuppressed, S.doNotCall, S.doNotContact])
+      assert.throws(
+        () => fromHubSpotConsentProperties({ ...grantedSmsProps, [flag]: "maybe" }),
+        (err) => err.token === MALFORMED_VALUE && err.property === flag,
+        `${flag} was interpreted`);
   });
 
   test('a "false" suppression flag does not suppress', () => {
@@ -292,9 +357,37 @@ describe("granting", () => {
     assert.equal(new Date(at).toISOString(), at);
     assert.equal(toHubSpotDateTime("2026-09-09T14:02:11.004Z"), "2026-09-09T14:02:11.004Z");
     assert.equal(toHubSpotDateTime(new Date("2026-09-09T14:02:11.004Z")), "2026-09-09T14:02:11.004Z");
-    /* Never send garbage as a date. */
-    for (const bad of ["", null, undefined, "not a date", {}])
-      assert.equal(toHubSpotDateTime(bad), "");
+  });
+
+  /* Returning "" for a bad instant made `granted` with no timestamp a
+     reachable write - a grant that looks complete and records nothing about
+     when it was given. */
+  test("an invalid timestamp throws instead of serialising to blank", () => {
+    for (const bad of ["", "   ", null, undefined, "not a date", {}, [], NaN, new Date("x")])
+      assert.throws(
+        () => toHubSpotDateTime(bad, SMS.at),
+        (err) => err.token === DATETIME_INVALID && err.property === SMS.at,
+        `${JSON.stringify(bad)} produced a datetime`);
+  });
+
+  test("a granted status can never be written without a valid timestamp", () => {
+    /* The transition result is well-formed except for the one thing that
+       cannot be recovered: when it happened. */
+    const broken = { sms: { changed: true, consent_at: "the other day", consent_phone: PHONE } };
+    assert.throws(
+      () => toHubSpotConsentProperties(broken, { sms: { captured_at: "" } }),
+      (err) => err.token === DATETIME_INVALID && err.property === SMS.at);
+
+    const missing = { sms: { changed: true, consent_phone: PHONE } };
+    assert.throws(
+      () => toHubSpotConsentProperties(missing, { sms: {} }),
+      (err) => err.token === DATETIME_INVALID);
+
+    /* A pending re-opt-in has the same invariant. */
+    assert.throws(
+      () => toHubSpotConsentProperties(
+        { sms: { outcome: "pending_reoptin", pending_reoptin: {} } }, {}),
+      (err) => err.token === DATETIME_INVALID && err.property === REOPTIN_PROPERTIES.at);
   });
 
   test("the submitted normalised phone, version, source and page are stored", async () => {
@@ -509,6 +602,89 @@ describe("a contact that appears mid-request", () => {
 });
 
 /* =====================================================================
+   A MALFORMED RESPONSE IS NOT AN EMPTY CONSENT STATE
+   =====================================================================
+   `json?.properties || {}` is the shape of this bug. A 200 whose body is
+   not what the code expects falls through it into a consent state that says
+   "this contact has never granted anything and is not suppressed" - a claim
+   about a real person, invented from a response that made no such claim.
+
+   A contact that was FOUND and a contact that does not EXIST are different
+   facts. Only the second one may become emptyConsentState().
+   ===================================================================== */
+describe("a malformed HubSpot response fails rather than inventing a state", () => {
+  const malformed = (err) => err.token === MALFORMED_RESPONSE && err.consentStateInvalid === true;
+
+  test("a search hit with no properties at all", async () => {
+    await assert.rejects(
+      () => submit({ sms_consent: true }, { searchHit: { id: "77" } }),
+      (err) => malformed(err) && err.property === "SEARCH");
+  });
+
+  test("a search hit whose properties is null", async () => {
+    await assert.rejects(
+      () => submit({ sms_consent: true }, { searchHit: { id: "77", properties: null } }),
+      malformed);
+  });
+
+  test("a search hit whose properties is an array", async () => {
+    await assert.rejects(
+      () => submit({ sms_consent: true }, { searchHit: { id: "77", properties: [] } }),
+      malformed);
+  });
+
+  test("no contact is written when the search response is malformed", async () => {
+    const calls = stubHubspot({ searchHit: { id: "77", properties: null } });
+    const payload = validateLead({ ...validHomeValue, sms_consent: true });
+    payload.meta.submission_id = "csv_test000000000000000000";
+    payload.consent = buildConsentEvidence(payload);
+    await assert.rejects(() => createLead(payload), malformed);
+    assert.equal(calls.filter((c) => c.method === "PATCH" || c.key === CREATE).length, 0,
+      "a contact was written despite an uninterpretable consent state");
+    assert.equal(calls.filter((c) => c.key === FORM).length, 0);
+  });
+
+  test("a 409 refetch with no properties", async () => {
+    await assert.rejects(
+      () => submit({ sms_consent: true }, { raced: {}, refetchBody: { id: "88" } }),
+      (err) => malformed(err) && err.property === "READ");
+  });
+
+  test("a 409 refetch with a malformed properties value", async () => {
+    for (const properties of [null, [], "granted", 7]) {
+      await assert.rejects(
+        () => submit({ sms_consent: true }, { raced: {}, refetchBody: { id: "88", properties } }),
+        malformed, `properties=${JSON.stringify(properties)} was accepted`);
+    }
+  });
+
+  /* The whole point. The empty state is correct in exactly one place: a
+     contact the search genuinely did not find. */
+  test("a genuinely new contact still uses the empty state", async () => {
+    const props = contactWrite(await submit({ sms_consent: true }));
+    assert.equal(props[SMS.status], GRANTED);
+    assert.equal(emptyConsentState().sms.status, NEVER_GRANTED);
+    assert.deepEqual(emptyConsentState().suppression, {});
+  });
+
+  test("requireConsentProperties accepts an object and only an object", () => {
+    assert.deepEqual(requireConsentProperties({}, "SEARCH"), {});
+    const ok = { [SMS.status]: GRANTED };
+    assert.equal(requireConsentProperties(ok, "READ"), ok);
+    for (const bad of [null, undefined, [], "x", 0, true])
+      assert.throws(() => requireConsentProperties(bad, "SEARCH"),
+        (err) => err.token === MALFORMED_RESPONSE);
+  });
+
+  test("with the feature off a malformed response is not even looked at", async () => {
+    delete process.env[FEATURE_FLAG];
+    const calls = await submit({ sms_consent: true }, { searchHit: { id: "77" } });
+    assert.ok(calls.some((c) => c.method === "PATCH"), "the submission did not proceed");
+    assert.deepEqual(cstKeys(contactWrite(calls)), []);
+  });
+});
+
+/* =====================================================================
    36-38  FAILURE SEMANTICS ARE UNCHANGED
    ===================================================================== */
 describe("HubSpot remains critical", () => {
@@ -548,13 +724,6 @@ describe("HubSpot remains critical", () => {
    39-40  SCHEMA CONTRACT
    ===================================================================== */
 describe("the HubSpot schema contract", () => {
-  /* Reaches the enum guard through the public function by forcing a status
-     the transition layer could never legitimately produce. */
-  const assertEnumEscapeHatch = (status) =>
-    toHubSpotConsentProperties({
-      sms: { changed: true, consent_at: "2026-09-09T00:00:00.000Z" },
-    }, { sms: {} }, { forceStatus: status });
-
   test("exactly the 23 approved internal names, no duplicates", () => {
     assert.equal(CONSENT_PROPERTIES.length, 23);
     assert.equal(new Set(CONSENT_PROPERTIES).size, 23, "a name is duplicated");
@@ -599,11 +768,37 @@ describe("the HubSpot schema contract", () => {
     assert.equal(pending(false, false), undefined, "a channel was written with nothing pending");
     for (const v of ["sms", "ai_voice", "both"]) assert.ok(REOPTIN_CHANNEL_VALUES.includes(v));
 
-    /* The guard itself bites when handed something outside the set. */
+    /* The guard itself bites when handed something outside the set. It is
+       tested directly rather than through a production override: the
+       function that writes consent must not take a parameter naming the
+       status, because a caller could then use it. */
     assert.throws(
-      () => assertEnumEscapeHatch("definitely_yes"),
-      /HUBSPOT_CONSENT_ENUM_REJECTED/,
+      () => assertConsentEnum(SMS.status, "definitely_yes", PERMISSION_STATUS_VALUES),
+      (err) => err.token === ENUM_REJECTED && err.property === SMS.status,
       "an arbitrary status was accepted");
+    assert.throws(
+      () => assertConsentEnum(REOPTIN_PROPERTIES.channel, "everything", REOPTIN_CHANNEL_VALUES),
+      (err) => err.token === ENUM_REJECTED);
+    for (const v of PERMISSION_STATUS_VALUES)
+      assert.equal(assertConsentEnum(SMS.status, v, PERMISSION_STATUS_VALUES), v);
+  });
+
+  /* The seam that used to exist. toHubSpotConsentProperties took an `opts`
+     object whose `forceStatus` overrode the transition result; it was there
+     only to make the test above possible, and a production caller could
+     have reached for it just as easily. */
+  test("no caller can override the status a grant writes", () => {
+    assert.equal(toHubSpotConsentProperties.length, 2,
+      "toHubSpotConsentProperties grew a third parameter");
+    const state = { sms: { changed: true, consent_at: "2026-09-09T00:00:00.000Z" } };
+    const forced = toHubSpotConsentProperties(state, { sms: {} }, { forceStatus: SUPPRESSED });
+    assert.equal(forced[SMS.status], GRANTED,
+      "a third argument still influenced the status written");
+    /* Comments stripped: the module explains in prose why the seam was
+       removed, and that sentence is not the seam. */
+    const code = readFileSync(new URL("../api/_lib/hubspot-consent-state.mjs", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+    assert.ok(!/forceStatus|\bopts\b/.test(code), "the status override seam is still in the module");
   });
 
   /* The footgun this phase must not walk into: consent.mjs has internal

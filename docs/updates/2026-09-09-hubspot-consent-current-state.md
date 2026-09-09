@@ -135,13 +135,51 @@ Parsing rules that matter:
 
 - **Booleans are strings.** HubSpot returns `"true"` / `"false"`, sometimes
   real booleans. `Boolean("false")` is `true`, which would read a cleared
-  suppression as an active one. `parseHubSpotBoolean()` compares the
-  lower-cased trimmed string to `"true"`; anything unrecognised is `false`.
-- **Blank status is `never_granted`,** and so is any value outside the four
-  accepted ones.
+  suppression as an active one, so string truthiness is never used.
+- **Blank is `false` / `never_granted`.** An unset HubSpot boolean genuinely
+  means "not suppressed", and an unset status genuinely means "no permission
+  recorded". That is the ordinary case for almost every contact.
+- **Anything else nonblank fails** — see §4a.
 - **Suppression is read from both directions** — an explicit flag *and* a
   channel status of `suppressed`.
 - **`cst_do_not_contact` suppresses both channels.**
+
+### 4a. Failing closed on state that cannot be understood
+
+Three separate ways an unreadable answer used to become a confident one, all
+now closed. The rule behind all three: **when the code cannot truthfully say
+what a contact's consent state is, it fails the HubSpot operation rather than
+answering.** A manufactured conclusion about consent is indistinguishable from
+a real one once it has been written to a contact.
+
+| Case | Old behaviour | New behaviour |
+|---|---|---|
+| A found contact's response has no usable `properties` object | `hit.properties \|\| {}` → an invented empty state | `HUBSPOT_CONSENT_STATE_MALFORMED_RESPONSE` |
+| A suppression flag holds something other than `true`/`false`/blank | read as `false` — *not suppressed* | `HUBSPOT_CONSENT_STATE_MALFORMED_VALUE` |
+| A permission status holds a nonblank value outside the four | normalised to `never_granted` | `HUBSPOT_CONSENT_STATE_MALFORMED_VALUE` |
+
+**Malformed response.** `requireConsentProperties(properties, stage)` requires
+a non-null, non-array object. `findContactByEmail()` applies it to the search
+hit (stage `SEARCH`) and `readConsentState()` to the 409 refetch (stage
+`READ`). "HubSpot said nothing" and "HubSpot said this contact has never
+granted anything" are different facts and no longer share a representation.
+
+A **genuinely new** contact — one the search did not find — still uses
+`emptyConsentState()`. That is not a guess: no record exists.
+
+**Malformed value.** `"banana"`, `"yes"`, `"1"`, `"0"`, `{}` and `[]` are not
+ways of saying "not suppressed". Note `[]` specifically: `String([])` is `""`,
+so an empty array would have slipped through a blank check — non-string,
+non-boolean values are now rejected before any stringification. For the
+permission enum, normalising an unknown value to `never_granted` was the
+dangerous direction: a fresh grant would then overwrite whatever it actually
+meant. Surrounding whitespace is still tolerated — `" granted "` is `granted`.
+
+**The errors carry the property name, never the value.** A mis-mapped CRM
+field can hold anything, up to and including another person's details, so no
+malformed value reaches an error message or a log line. `api/_lib/hubspot.mjs`
+logs `hubspot.consent_state_invalid` with the token, the property name and the
+operator action required; the submission fails and the visitor is told so.
 
 ### Suppression precedence
 
@@ -180,16 +218,28 @@ did not look".
 4. **No suppression property is ever emitted, on any path.**
 5. Enum values are checked against the accepted vocabularies before the
    request is built. HubSpot rejects an unknown enum with a 400, which would
-   fail the lead; `assertEnum()` throws `HUBSPOT_CONSENT_ENUM_REJECTED`
-   first, loudly, rather than letting a malformed write reach the API.
+   fail the lead; `assertConsentEnum()` throws
+   `HUBSPOT_CONSENT_ENUM_REJECTED` first, loudly, rather than letting a
+   malformed write reach the API.
+6. **A grant is never written without a valid timestamp.** See §7a.
 
 Each granted channel writes status, timestamp, phone, source (the form type),
 page, and copy version — the same six values the timeline evidence carries.
 
-`toHubSpotConsentProperties()` accepts a third `opts` argument with a single
-documented **test seam**, `forceStatus`, so a test can drive a value through
-the enum guard that the transition layer would never produce. Production
-callers pass two arguments and always write `granted`.
+`toHubSpotConsentProperties(nextState, evidence)` takes exactly two arguments.
+`granted` is a literal in the one branch that writes a status; there is no
+parameter and no branch that can make it anything else.
+
+An earlier revision of this phase gave the function a third `opts` argument
+with a `forceStatus` seam, present only so a test could push an invalid status
+through the enum guard. **It has been removed.** Production code should not
+carry an override of the transition result for a test's benefit — a parameter
+that lets a caller name the permission status is not something consent-writing
+code should own, whatever the comment above it says, and any production caller
+could have reached for it. The guard is now tested directly through the
+exported pure validator `assertConsentEnum(property, value, allowed)`, and a
+test asserts both that the function's arity is 2 and that a third argument
+cannot influence what is written.
 
 ### Where the write happens
 
@@ -258,13 +308,47 @@ converting anything. It is also readable in a log.
 `toHubSpotDateTime()` returns `""` for anything that is not a valid instant,
 so a malformed value can never be sent as a date.
 
-**How this was verified, and the limit of that verification.**
-`developers.hubspot.com` is unreachable from the build environment (egress
-policy), so the primary documentation page could not be fetched. The format
-was confirmed from two independent secondary sources describing the current
-CRM API behaviour, which agreed on both accepted forms and on the
-`date`-versus-`datetime` distinction. **It was not confirmed against the live
-API.** A live non-midnight write remains untested — see §10.
+`toHubSpotDateTime()` **throws** `HUBSPOT_CONSENT_DATETIME_INVALID` for
+anything that is not a valid instant, blank included. See §7a.
+
+**Verification status — two different questions, answered differently.**
+
+*Is ISO-8601 the right format?* **Verified against HubSpot's primary CRM
+Properties documentation.** It states that a `datetime` property stores date
+**and** time, that API values are UTC, that a value may be supplied either as
+an ISO-8601 string or as UNIX epoch milliseconds, and that its ISO-8601
+example carries the complete timestamp with the trailing `Z`. It also places
+the midnight constraint on *date-only* values supplied as epoch timestamps —
+not on `datetime` properties. An earlier draft of this document recorded the
+format as confirmed only from secondary sources because
+`developers.hubspot.com` was unreachable from the build environment; that
+limitation no longer stands and is not the project's conclusion.
+
+*Does the Crystal Sells Toledo portal retain a non-midnight time on these six
+properties?* **Not tested.** Nobody has written a value with a real time to
+one of the six `*_at` properties, reloaded the record, and confirmed the time
+survived. That is a portal-behaviour question, not a format question, and it
+remains open — see §10 and §11.
+
+### 7a. An invalid timestamp throws
+
+`toHubSpotDateTime()` previously returned `""` for anything it could not
+parse. That made this contact state reachable:
+
+```
+cst_sms_permission_status = granted
+cst_sms_consent_at        = ""
+```
+
+A grant with no record of when it was given — worse than no grant at all,
+because it looks complete. These timestamps are server-owned invariants, not
+decoration.
+
+It now throws `HUBSPOT_CONSENT_DATETIME_INVALID` for anything that is not a
+valid instant, **blank included**, naming the property and never the value.
+The throw happens while the property object is still being built, so nothing
+is sent: the request under construction is discarded along with it. The same
+rule covers `cst_reoptin_requested_at`.
 
 ---
 
@@ -291,7 +375,7 @@ Run locally on this branch:
 
 | Suite | Result |
 |---|---|
-| `npm run test:consent-state` (new) | **38 passed, 0 failed** |
+| `npm run test:consent-state` (new) | **54 passed, 0 failed** |
 | `npm run test:consent` | **59 passed, 0 failed** |
 | `npm run test:hubspot` | **91 passed, 0 failed** |
 | `npm run test:unit` | **97 passed, 0 failed** |
@@ -300,7 +384,7 @@ Run locally on this branch:
 | `npm run check`, flag off | 10 pages, 0 errors |
 | `npm run check`, flag on | 11 pages, 0 errors |
 
-The 38 new tests cover: feature-off equivalence (no consent properties
+The 54 new tests cover: feature-off equivalence (no consent properties
 requested, none written); the read adapter (blank → `never_granted`, `"false"`
 must not parse as true, suppression flags overriding a stale `granted`, global
 DNC suppressing both channels); grants (channel isolation, ISO timestamp,
@@ -309,6 +393,17 @@ prior consent preserved); suppression survival across a submission; re-opt-in
 for `sms`, `ai_voice` and `both`; phone binding; the 409 race (a suppression
 discovered only after the conflict is preserved); failure semantics; and the
 23-name schema contract.
+
+The hardening pass added tests for: a search hit with no `properties`, with
+`properties: null` and with `properties: []`; a 409 refetch with no
+`properties` and with a malformed one; that **no contact is written and no
+form submitted** when a response is malformed; that a nonblank uninterpretable
+boolean or permission status throws rather than reading as false /
+`never_granted`; that an error carries the property name and not the value;
+that an invalid or blank timestamp throws; that a granted status cannot be
+written without a valid timestamp; that `assertConsentEnum` rejects
+out-of-vocabulary values; and that no caller can override the status a grant
+writes.
 
 All HubSpot requests in the tests are stubbed. **No production contact was
 read or modified, and no production form was submitted.**
@@ -323,9 +418,11 @@ pull request.
 - **No live HubSpot call has been made by this phase.** Every test uses a
   stubbed fetch. "Tests pass" does not mean "this works against the real
   portal".
-- **Non-midnight datetime retention is untested.** Nobody has written a value
-  with a real time to one of the six `*_at` properties, reloaded the record
-  and confirmed the time survived. Until that is done, "these are datetime
+- **Non-midnight datetime retention is untested against this portal.** The
+  ISO-8601 format is verified against HubSpot's primary documentation (§7),
+  but nobody has written a value with a real time to one of the six `*_at`
+  properties on the Crystal Sells Toledo portal, reloaded the record and
+  confirmed the time survived. Until that is done, "these are datetime
   properties" is a portal setting that has been read, not a behaviour that has
   been observed.
 - **There is no transaction** across the HubSpot Contacts API and the Forms
@@ -333,6 +430,11 @@ pull request.
   requests, so a partial write is possible. It is never hidden: a failure
   fails loudly, per the repository rule that a contact saved without its
   enquiry block is worthless.
+- **Nothing recovers a contact whose stored consent state is malformed.** The
+  code now refuses to interpret it, which fails that contact's submissions
+  until a human corrects the property in the portal. That is deliberate — the
+  alternative is a silent wrong answer — but it does mean a single bad CRM
+  field blocks a lead, and the log line is the only signal.
 - **Suppression conflicts are interpreted, not repaired.** A contact whose
   flag and status disagree stays that way until a human or a future phase
   fixes it. That is deliberate.
