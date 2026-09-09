@@ -63,9 +63,9 @@ database.
   as a withdrawal would silently destroy a lawful permission. The website path
   emits no `revoked`, `suppressed` or `unsuppressed` event in any circumstance.
 - `appendConsentEvents()` issues **one parameterised multi-row
-  `INSERT … ON CONFLICT (dedupe_key) DO NOTHING`**, in a single statement. Both
-  channel rows land together or neither does. A conflict is success: a retry
-  finding its own earlier row is what deterministic keys are for.
+  `INSERT … ON CONFLICT (dedupe_key) DO NOTHING`**, in a single statement. What
+  that does and does not guarantee is set out precisely below — it is not
+  "both rows land together or neither does".
 - Dedupe keys are `website:<submission_id>:<channel>:<event_type>`. **Every
   component must be non-empty and colon-free**, and a blank one is refused rather
   than defaulted — a blank submission id would collapse every submission onto one
@@ -78,6 +78,31 @@ database.
 - Failures are classified into stable PII-free tokens by `ledgerLogShape()`.
   **No driver error text ever survives**: a Postgres error message routinely
   carries the host, the role and sometimes the offending parameter values.
+
+#### What the single statement actually guarantees
+
+The convenient one-liner — "both channel rows land together or neither does" —
+is right about failure and **wrong about retries**, and the difference is a
+healed gap versus a permanent one. Precisely:
+
+- **A statement runs in its own transaction, so a failure cannot half-write the
+  two new rows.** Either both commit or neither does. That is the guarantee
+  worth having: a failed append can never leave an SMS grant recorded with no
+  trace of the voice decision beside it.
+- **`ON CONFLICT (dedupe_key) DO NOTHING` is evaluated per row, not per
+  statement.** On a retry against a ledger that already holds one of the two
+  rows, the existing row no-ops and **the missing one is inserted**. That is not
+  a hole in the model — it is what makes a retry *converge* on the complete
+  pair. All-or-nothing on retry would be strictly worse: it would leave the gap
+  in place forever.
+- **A fully duplicated retry inserts nothing and succeeds.** Postgres answers it
+  with no rows; nothing was written and nothing needed to be, because the events
+  are already there.
+
+No half-write on failure; convergence rather than refusal on retry. Both follow
+from deterministic dedupe keys, and neither weakens the other. Idempotency is
+unchanged — a retry still cannot create a duplicate event, because the key it
+would collide with is its own.
 
 ### `phone_e164` — a new conversion, used nowhere else
 
@@ -393,13 +418,16 @@ What the new assertions actually pin, beyond the obvious:
 - an unticked box yields `consent_not_selected` and **never** a revocation or
   suppression event type;
 - PII containment asserted against the real values in `validHomeValue`;
-- **atomicity** — a failing executor appends neither row;
+- **no half-write on failure** — a failing executor appends neither of the two
+  new rows, and the statement's per-row conflict target and distinct dedupe keys
+  are asserted, so a retry can fill a missing row beside an existing one;
 - **idempotency** — replaying a submission produces byte-identical keys and
   parameters, and the conflict path reports success;
 - **`event_id` is the database's** — asserted on the statement the injected
   executor receives, and on the module source;
 - the migration's declared columns cover every column the module writes, and its
-  `GRANT` lines contain no `UPDATE`, `DELETE`, `TRUNCATE`, `SEQUENCE` or `ALL`;
+  `GRANT` lines contain no `SELECT`, `UPDATE`, `DELETE`, `TRUNCATE`, `SEQUENCE`
+  or `ALL`, and its verification procedure requires all four refusals;
 - a failed append writes **no** `cst_*` property, does not blank a prior grant,
   does not clear a suppression, and still stores the lead with its evidence rows;
 - feature **off** ⇒ the executor is never invoked even with a URL configured, and
@@ -424,8 +452,20 @@ Twilio or Retell integration, and **enabling
 `reason_code`, `evidence_text`, `metadata` and the `all` channel are created and
 unused: the full table ships now so the STOP/DNC phase needs no second migration
 against an append-only table. There is **no read path**, no admin query tool and
-no export — nothing yet needs to read the ledger, and `SELECT` is granted narrowly
-so the round-trip verification can be done with the application role.
+no export — nothing in `api/` reads the ledger, and the application role is not
+granted `SELECT` at all. Reading it back, for the controlled round-trip or an
+audit, is done with the **owner** credential outside Vercel. When a read path is
+genuinely needed it gets its own migration, its own role and a narrow view, not a
+grant added to this one.
+
+This is **tighter than the proposal and the decision document**, both of which
+sketch the role as `INSERT` plus a narrow `SELECT`. Those are dated records and
+are not being rewritten; this document and
+`db/001_communication_consent_events.sql` are what to build the role from. The
+`SELECT` in that sketch existed so the round-trip verification could be done as
+the application role — that check now uses the owner credential instead, which
+costs nothing and removes a standing read grant from the credential that lives in
+Vercel.
 
 Revocations, STOP and DNC invert this phase's priority — suppress first, append
 after, retry and alert. That is a later phase and this code does not anticipate
@@ -447,21 +487,30 @@ Code alone does not close gate 3.
    default does not resolve fails on the first real append and not before.
 3. Apply `db/001_communication_consent_events.sql` **with the owner credential**,
    replacing `<application_role>`.
-4. Create the application role with **`INSERT` and narrow `SELECT` only** — no
+4. Create the application role with **`INSERT` and nothing else** — no `SELECT`,
    `UPDATE`, `DELETE`, `TRUNCATE`, DDL ownership, table ownership or `CREATE` on
-   the schema, and **no sequence grant**. Verify by attempting an `UPDATE` and a
-   `DELETE` as that role and confirming both are refused, and by inserting one
-   row and confirming the database assigned its `event_id`. **Append-only is a
-   database grant, not a code convention**: skip this and the ledger is an
-   ordinary mutable table and gate 3 is not met however good the code is.
-5. Set `CONSENT_LEDGER_URL` in Vercel to the **application** role's string. The
-   owner credential must never reach the Vercel application.
-6. Keep a separate privileged path, off Vercel, for migrations and legally
-   required privacy deletion. Append-only does not override a deletion
-   obligation.
-7. Gate 4 (controlled ledger round-trip) is a **live** exercise against a preview
-   deployment and cannot be satisfied by any test in this repository.
-8. Gate 5 (the HubSpot timeline display check) is now executed against an
+   the schema, and **no sequence grant**. **Append-only is a database grant, not
+   a code convention**: skip this and the ledger is an ordinary mutable table and
+   gate 3 is not met however good the code is.
+5. **Verify the grant with two credentials, and mind which runs what.** As the
+   **application** role: one `INSERT` must succeed, and `SELECT`, `UPDATE`,
+   `DELETE` and `TRUNCATE` must **all four** be refused. Then, as the **owner /
+   admin verification** credential, read the row back and confirm the database
+   assigned its `event_id`. The application role cannot perform that read, by
+   design — that is the point of the exercise, not an obstacle to it. Three
+   refusals out of four is a role nobody checked.
+6. Set `CONSENT_LEDGER_URL` in Vercel to the **application** role's string. The
+   owner credential is used for the migration and the verification read and
+   **never reaches Vercel**.
+7. Keep a separate privileged path, off Vercel, for migrations, for the
+   verification read and for legally required privacy deletion. Append-only does
+   not override a deletion obligation.
+8. Gate 4 (controlled ledger round-trip) is a **live** exercise against a preview
+   deployment and cannot be satisfied by any test in this repository. Same
+   division of credentials: the submission's append happens as the application
+   role through the deployed function; the row is confirmed with the owner
+   credential.
+9. Gate 5 (the HubSpot timeline display check) is now executed against an
    **eleven**-row block with `CONSENT LEDGER` first, using the corrected
    procedure in `docs/updates/2026-09-09-hubspot-consent-setup.md` §6a. Produce
    **both** states while there — the `NOT CONFIRMED` block is the one an operator

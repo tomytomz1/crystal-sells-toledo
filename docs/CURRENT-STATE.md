@@ -104,7 +104,11 @@ and the resolved gaps:
   row as absence.
 - `db/001_communication_consent_events.sql` is **checked in and not applied.**
   Append-only is the role grant in that file, not a convention in the code — if
-  the grant step is skipped the ledger is an ordinary mutable table.
+  the grant step is skipped the ledger is an ordinary mutable table. The
+  application role gets **`INSERT` and nothing else, not even `SELECT`**: nothing
+  in `api/` reads the ledger, so a leaked `CONSENT_LEDGER_URL` must not be able
+  to enumerate the numbers and consent decisions it holds. Reading it back is an
+  **owner-credential** job, off Vercel.
 - Runtime dependency: `@neondatabase/serverless`, pinned, lazily imported. With
   the feature off it is never loaded.
 - **Nothing has ever been appended.** No Neon project, no migration, no role, no

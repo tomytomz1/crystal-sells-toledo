@@ -14,8 +14,11 @@
      operation in the portal.
    * This ledger — the DURABLE HISTORICAL EVIDENCE, and the system of
      record. Append-only as a database grant, not as a code convention:
-     the application role holds INSERT and a narrow SELECT and nothing
-     else, so this module could not mutate history if it tried.
+     the application role holds INSERT and NOTHING ELSE — not even SELECT —
+     so this module could not mutate history if it tried, and a leaked
+     CONSENT_LEDGER_URL cannot enumerate the numbers and consent decisions
+     already in the table. Nothing here reads, and adding a read means a
+     new migration, a new role and a narrow view, not a grant on this one.
 
    Conflating any two of those is how a consent programme fails an audit.
    The reasoning, the sources and the decision are in
@@ -301,10 +304,31 @@ export function buildLedgerEvents(evidence, { source = SOURCE_WEBSITE } = {}) {
 /* ---------------------------------------------------------------------
    THE STATEMENT
    ---------------------------------------------------------------------
-   ONE parameterised multi-row INSERT, in a single statement, so both
-   channel rows land together or neither does. A half-recorded submission —
-   an SMS grant with no record of the voice decision beside it — is not a
-   state this system can be in.
+   ONE parameterised multi-row INSERT, in a single statement.
+
+   WHAT THAT DOES AND DOES NOT GUARANTEE. Be precise here, because the
+   sloppy version of this sentence — "both rows land together or neither
+   does" — is wrong in a way that matters.
+
+   * A statement runs in its own transaction, so a FAILURE cannot leave one
+     of the two NEW rows behind. Either both are committed or neither is.
+     That is the guarantee, and it is the one that stops an SMS grant being
+     recorded with no trace of the voice decision beside it.
+
+   * ON CONFLICT (dedupe_key) DO NOTHING is evaluated PER ROW, not for the
+     statement. So on a retry where one dedupe key already exists and the
+     other does not, the existing row no-ops and the MISSING ONE IS
+     INSERTED. That is not a hole — it is the behaviour that HEALS a
+     partial state (one left by some earlier phase, a manual insert, or a
+     future non-website writer) instead of refusing to touch it. All-or-
+     nothing on retry would be strictly worse: it would leave the gap.
+
+   * A fully duplicated retry inserts nothing and SUCCEEDS. Nothing was
+     written and nothing needed to be — the events are already in the
+     ledger, which is the answer the caller wanted.
+
+   So: no half-write on failure; convergence, not refusal, on retry. Both
+   follow from deterministic dedupe keys, and neither weakens the other.
    --------------------------------------------------------------------- */
 export function buildInsert(rows) {
   if (!Array.isArray(rows) || !rows.length)
@@ -322,8 +346,9 @@ export function buildInsert(rows) {
   const text =
     "INSERT INTO " + LEDGER_TABLE + " (" + LEDGER_COLUMNS.join(", ") + ")\n" +
     "VALUES " + tuples.join(", ") + "\n" +
-    /* A conflict is SUCCESS. It means this exact event is already in the
-       ledger, which is the answer a retry wants. */
+    /* A conflict is SUCCESS, per row. It means that exact event is already
+       in the ledger, which is the answer a retry wants; any sibling row
+       that is NOT already there is still inserted. */
     "ON CONFLICT (dedupe_key) DO NOTHING";
 
   return { text, params };

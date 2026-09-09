@@ -92,31 +92,53 @@ CREATE INDEX communication_consent_events_submission_idx
 -- ---------------------------------------------------------------------------
 -- THE APPEND-ONLY GRANT
 -- ---------------------------------------------------------------------------
--- INSERT and SELECT, nothing else, and no ownership. Replace
--- <application_role> with the role whose connection string becomes
--- CONSENT_LEDGER_URL.
+-- INSERT. That is the whole grant. Replace <application_role> with the role
+-- whose connection string becomes CONSENT_LEDGER_URL.
 --
 -- Deliberately NOT granted, and not to be added later without a reason
 -- written down beside it:
 --   UPDATE, DELETE, TRUNCATE  — the whole point;
+--   SELECT — the application never reads this table. Nothing in api/ issues
+--     a read, and until something does, table-wide read access to a ledger
+--     of phone numbers and consent decisions is a standing disclosure risk
+--     that buys nothing. A leaked CONSENT_LEDGER_URL should not be able to
+--     enumerate every number that ever submitted the form. When a read path
+--     is genuinely needed it gets its own migration, its own role, and a
+--     narrow view rather than the table;
 --   table ownership, CREATE on the schema, any DDL privilege — the uuid
 --     default is baked in by this migration and evaluated server-side on
 --     every INSERT, so the role depends on a default it cannot alter or drop;
 --   USAGE ON SEQUENCE — a uuid default uses no sequence. The proposal's role
 --     sketch listed one, which assumed a serial/identity key. An unnecessary
 --     grant on an append-only ledger is a grant to justify later.
---
--- SELECT is granted narrowly so the controlled round-trip verification
--- (activation gate 4) can be done as the application role. Nothing in the
--- application reads the ledger yet.
-GRANT INSERT, SELECT ON communication_consent_events TO <application_role>;
+GRANT INSERT ON communication_consent_events TO <application_role>;
 
 -- ---------------------------------------------------------------------------
--- VERIFY THE GRANT, as the application role, before calling gate 3 closed:
+-- VERIFY THE GRANT before calling gate 3 closed. TWO CREDENTIALS, and which
+-- one runs which statement is the point of the exercise.
 --
---   INSERT one row and confirm the database assigned its event_id;
---   UPDATE communication_consent_events SET form_type = 'x';   -- must be refused
---   DELETE FROM communication_consent_events;                  -- must be refused
+-- As the APPLICATION role (the CONSENT_LEDGER_URL credential):
+--
+--   INSERT INTO communication_consent_events (...) VALUES (...);   -- must SUCCEED
+--   SELECT * FROM communication_consent_events;                    -- must be REFUSED
+--   UPDATE communication_consent_events SET form_type = 'x';       -- must be REFUSED
+--   DELETE FROM communication_consent_events;                      -- must be REFUSED
+--   TRUNCATE communication_consent_events;                         -- must be REFUSED
+--
+-- All four refusals are required. A role that can read is not append-only in
+-- the sense this ledger needs, and three refusals out of four is a role
+-- nobody checked.
+--
+-- Then, as the OWNER / admin verification credential, confirm the row that
+-- INSERT produced and that the database assigned its event_id:
+--
+--   SELECT event_id, recorded_at, dedupe_key
+--     FROM communication_consent_events
+--    WHERE submission_id = '<the test submission id>';
+--
+-- The application role cannot perform that read, by design. THE OWNER
+-- CREDENTIAL IS USED HERE AND NOWHERE ELSE — it is never put into Vercel and
+-- never becomes CONSENT_LEDGER_URL.
 --
 -- A separate privileged path, off Vercel, stays for migrations and for
 -- legally required privacy deletion. Append-only does not override a

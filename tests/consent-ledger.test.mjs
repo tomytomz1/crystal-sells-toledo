@@ -340,12 +340,22 @@ describe("the INSERT statement", () => {
     assert.match(sql, /event_id\s+uuid\s+PRIMARY KEY DEFAULT gen_random_uuid\(\)/);
     assert.match(sql, /recorded_at\s+timestamptz NOT NULL DEFAULT now\(\)/);
     assert.match(sql, /dedupe_key\s+text\s+NOT NULL UNIQUE/);
-    /* Append-only is the grant. UPDATE, DELETE and TRUNCATE are not in it,
-       and no sequence grant is needed by a uuid default. */
-    assert.match(sql, /GRANT INSERT, SELECT ON communication_consent_events/);
+    /* APPEND-ONLY IS THE GRANT, and the grant is INSERT and nothing else.
+       SELECT is refused along with UPDATE, DELETE and TRUNCATE: the
+       application never reads this table, and table-wide read access to a
+       ledger of phone numbers and consent decisions is a standing
+       disclosure risk a leaked CONSENT_LEDGER_URL would cash in. No
+       sequence grant either — a uuid default uses none. */
+    assert.match(sql, /^GRANT INSERT ON communication_consent_events TO /m);
     const grants = sql.split("\n").filter((l) => /^\s*GRANT\b/.test(l)).join("\n");
-    for (const forbidden of ["UPDATE", "DELETE", "TRUNCATE", "SEQUENCE", "ALL"])
+    for (const forbidden of ["SELECT", "UPDATE", "DELETE", "TRUNCATE", "SEQUENCE", "ALL"])
       assert.ok(!grants.includes(forbidden), `the migration grants ${forbidden}`);
+    /* And the human procedure has to actually check all four refusals, as
+       the application role, or nobody ever finds out the grant is wrong. */
+    const verify = sql.slice(sql.indexOf("VERIFY THE GRANT"));
+    for (const refused of ["SELECT", "UPDATE", "DELETE", "TRUNCATE"])
+      assert.match(verify, new RegExp(refused + "[\\s\\S]{0,120}must be REFUSED"),
+        `the verification procedure does not require ${refused} to be refused`);
     /* Every column the module writes must exist in the table. */
     for (const col of LEDGER_COLUMNS)
       assert.match(sql, new RegExp("^\\s*" + col + "\\s", "m"), `the table has no ${col} column`);
@@ -481,9 +491,14 @@ describe("the append-order guard in tools/check.mjs", () => {
    8  ATOMICITY, IDEMPOTENCY AND TIMEOUT
    ===================================================================== */
 describe("failure semantics", () => {
-  /* One statement, so both rows land or neither does. A half-recorded
-     submission — an SMS grant with no record of the voice decision beside
-     it — is not a state this system can be in. */
+  /* One statement, in its own transaction, so a FAILURE cannot leave one of
+     the two new rows behind. That is the guarantee worth having: an SMS
+     grant recorded with no trace of the voice decision beside it is not a
+     state a failed append can produce.
+
+     It is NOT the stronger claim that the table always holds 0 or 2 rows
+     for a submission — see the retry test below, where per-row conflict
+     resolution deliberately fills a gap rather than refusing to. */
   test("a failing executor appends neither row", async () => {
     const calls = captureExecutor({ fail: new Error("could not connect") });
     await assert.rejects(
@@ -506,9 +521,10 @@ describe("failure semantics", () => {
     }
   });
 
-  /* Replaying one submission produces byte-identical keys, so the second
-     attempt is absorbed by ON CONFLICT DO NOTHING and reported as success.
-     That is what deterministic keys are for. */
+  /* Replaying one submission produces byte-identical keys and parameters,
+     so whatever is already in the ledger is found by its own key. That is
+     what deterministic keys are for, and it is the property every retry
+     claim below rests on. */
   test("replaying a submission produces the same keys and reports success", async () => {
     const calls = captureExecutor();
     const evidence = evidenceFor({ sms_consent: true });
@@ -517,9 +533,46 @@ describe("failure semantics", () => {
     assert.deepEqual(first, second);
     assert.deepEqual(calls[0].params, calls[1].params);
     assert.equal(calls[0].text, calls[1].text);
-    /* Postgres answers a fully-conflicting insert with no rows. That is a
-       success, not an error. */
+    /* A FULLY duplicated retry inserts nothing and succeeds: Postgres
+       answers it with no rows, which is not an error and is not treated as
+       one. Nothing was written and nothing needed to be. */
     assert.deepEqual(await appendConsentEvents(evidence, { env: ENV }), { appended: true, events: 2 });
+  });
+
+  /* THE PER-ROW SEMANTICS, stated exactly, because the convenient summary
+     ("both rows land together or neither does") is wrong about retries and
+     the difference is a healed gap versus a permanent one.
+
+     ON CONFLICT (dedupe_key) DO NOTHING is evaluated per row. A retry
+     against a ledger that already holds ONE of the two rows no-ops that
+     one and inserts the MISSING one, converging on the complete pair.
+     All-or-nothing on retry would leave the gap forever.
+
+     Asserted here on the statement, which is what this repository can
+     honestly prove without a database: the same statement carries both
+     rows with independent dedupe keys and a per-row conflict target, so
+     the outcome for one row does not depend on the other. */
+  test("the statement lets a retry fill a missing row beside an existing one", async () => {
+    const calls = captureExecutor();
+    await appendConsentEvents(evidenceFor({ sms_consent: true }), { env: ENV });
+    const { text, params } = calls[0];
+
+    /* The conflict target is the per-row unique key, not the statement. */
+    assert.match(text, /ON CONFLICT \(dedupe_key\) DO NOTHING/);
+    assert.ok(!/ON CONFLICT DO NOTHING\b/.test(text),
+      "a bare conflict clause would not name the per-row key");
+
+    /* Two rows, two DIFFERENT keys — so one can conflict while the other
+       inserts. If both rows ever shared a key, the second would be
+       silently discarded and a submission would be half-recorded on the
+       FIRST attempt, which is the failure dedupeKey() refuses outright. */
+    const keyIdx = LEDGER_COLUMNS.indexOf("dedupe_key");
+    const keys = [params[keyIdx], params[LEDGER_COLUMNS.length + keyIdx]];
+    assert.equal(new Set(keys).size, 2, "the two channel rows share a dedupe key");
+    assert.deepEqual(keys, [
+      `website:${SID}:sms:consent_selected`,
+      `website:${SID}:ai_voice:consent_not_selected`,
+    ]);
   });
 
   /* A hanging evidence write must never become a hanging lead. */
