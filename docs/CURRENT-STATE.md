@@ -327,10 +327,58 @@ How it was applied and every reading taken:
 
 ### Not built, and not active
 
-Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
-`reoptin_requested` ledger events, webhooks, and send-time enforcement are
-**later phases**. The ledger's `reason_code`, `evidence_text`, `metadata` and
-`all` channel exist and are unused, so that phase needs no second migration.
+**Corrected 10 September 2026.** This section previously said that *"suppression
+writing, STOP processing, DNC processing, re-opt-in / unsuppression,
+`reoptin_requested` ledger events, webhooks, and send-time enforcement are later
+phases"*, and that the ledger's `reason_code`, `evidence_text`, `metadata` and
+`all` channel *"exist and are unused"*. Both statements were true when written
+and were made false by the gate 7 SMS implementation merged in
+[#20](https://github.com/tomytomz1/crystal-sells-toledo/pull/20); they are
+corrected rather than deleted, because a stale claim that survived a merge is
+worth seeing. The list below is what is actually built and what is actually not.
+
+**Built, merged, and inert** — the SMS half of gate 7, `api/twilio-inbound.js`
+and `api/_lib/optout.mjs`:
+
+- **Suppression writing.** A `suppressed` ledger event, carrying its
+  `reason_code`, the consumer's exact words in `evidence_text` (opt-out
+  classifications only) and `metadata`.
+- **STOP processing.** Twilio's own `OptOutType` where the Messaging Service
+  supplies one, and a deterministic keyword layer where it does not.
+- **DNC processing.** *"stop calling me"* classifies as `voice_dnc` on the
+  `ai_voice` channel; *"stop contacting me"* as `global_dnc` on the **`all`**
+  channel.
+- **`reoptin_requested` ledger events.** `START` — and `UNSTOP`, `YES`,
+  `OPT IN` — recorded as a request. Never a grant, and it clears nothing.
+- **The webhook.** `POST /api/twilio-inbound`, signature-verified with the
+  Twilio SDK before the body is parsed, idempotent by `MessageSid`.
+- **The HubSpot projection** of the suppression flags onto the contact.
+
+So `reason_code`, `evidence_text`, `metadata` and the `all` channel are **in use
+by merged code**, not reserved. The claim that depended on them — that this work
+needs no second migration against `db/001` — still holds: `db/002` added the
+send-time *lookup* function, and changed no table, column or constraint.
+
+**Inert** means the path has never carried a request: no Twilio number points at
+the endpoint, `TWILIO_AUTH_TOKEN` is set in no environment, and with it absent
+the endpoint answers 503 without reading the body. **No suppression row has ever
+been committed.**
+
+**Not built — genuinely later phases:**
+
+- **Send-time enforcement.** Nothing in `api/` calls `get_suppression_state()`.
+  That is gate 8, and it has not begun.
+- **Re-opt-in / unsuppression.** The `unsuppressed` event type exists and
+  **nothing writes it.** A `reoptin_requested` event is recorded, deliberately
+  without clearing anything — a suppression is never cleared automatically —
+  and no operator workflow exists to clear one deliberately.
+- **Voice ingress.** Nothing receives a Retell webhook, so a *spoken*
+  do-not-call reaches none of the above.
+- **Operator surfacing** of unclassified inbound messages.
+- **Webhook retry** on the Messaging Service — frozen under the TCR hold.
+
+The last three are the three requirements that keep gate 7 open; see the
+paragraph below.
 
 **Gate 7 is implemented for SMS, inert, and NOT fully complete.** The endpoint,
 the classifier, the suppression ledger events, the HubSpot projection and six
