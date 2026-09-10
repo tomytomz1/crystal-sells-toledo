@@ -33,6 +33,34 @@ credential. Gate 8 is not begun.
 > 3. **It leaked more PII than it needed to.** It put the full E.164 number in
 >    the email subject — and therefore on a lock screen. §4.2 now uses the last
 >    four digits.
+>
+> ## Revision 3 — 10 September 2026
+>
+> Revision 2 was reviewed against `main` and two **architectural
+> inconsistencies** were found. Both are fixed, and the superseded positions are
+> again stated rather than deleted:
+>
+> 4. **It recorded the wrong act, and destroyed the evidence of it.** Revision 2
+>    wrote an operator-classified opt-out as `event_type = suppressed` with
+>    `evidence_text = NULL`. Both halves contradict `main`. `api/_lib/optout.mjs`
+>    deliberately emits **`revoked`** for a natural-language withdrawal precisely
+>    because *"recording the two identically would lose the reason a future
+>    reader needs"*, and `api/_lib/consent-ledger.mjs` stores the consumer's
+>    words for an opt-out because **"the message IS the evidence of the
+>    opt-out."** *"Quit hassling me"* does not become a different kind of
+>    consumer act because a human, rather than a regular expression, recognised
+>    it. §6.4 now writes **`revoked` with the consumer's exact words**, and §6.2
+>    carries those words **inside the sealed token** so the URL still holds
+>    ciphertext only.
+> 5. **It left HubSpot inconsistent.** Revision 2 wrote the ledger and stopped,
+>    so a manual suppression would never reach the `cst_*` current-state
+>    properties that the automatic path already projects into. **§6.9 is new**:
+>    the same ledger-first, best-effort-projection model as the webhook, with
+>    `SUPPRESSION_TRIGGER.MANUAL`.
+>
+> A third finding was **process, not design**: the pull-request description still
+> described revision 1. It has been rewritten to describe the current design; the
+> correction comments in the thread are left intact.
 
 ---
 
@@ -359,8 +387,24 @@ delete.** Compare what each option leaves behind:
 That table is also the answer to constraint 3. **The message already exists in
 Twilio's own log before any of this runs** — the email is a second copy, and every
 rejected option would have been a third, in a system with worse deletion
-properties. **The operator action in §6 adds no further copy of the words**: it
-records a decision, by reference.
+properties.
+
+**The operator action in §6 does write the consumer's words into the ledger — but
+only when a human has classified the message as an opt-out.** That is not a
+widening of constraint 2; it is the rule `api/_lib/consent-ledger.mjs` already
+states: *"the message IS the evidence of the opt-out, which is why it is
+stored"*, and *"ordinary inbound conversation produces no row at all."* The
+classifier being a human rather than a regular expression does not change which
+of those two a message is. **An ordinary message that Crystal reads and closes
+writes nothing, ever** — no row, no words, no record that it was reviewed.
+
+Revision 2 got this backwards. It set `evidence_text = NULL` and pointed at
+Twilio's log and the operator's mailbox instead — which makes the durable
+compliance record **depend on two retention policies this project does not
+control**: Twilio's message retention and whether Crystal keeps an email. The
+ledger exists precisely because evidence must not depend on a platform that can
+delete it, so an opt-out whose only evidence lives in Twilio and a mailbox is the
+failure this system was built to prevent.
 
 And on constraint 1: notification volume for one agent's number is low enough
 that per-message email is legible. **No digest, no batching** — a digest delays an
@@ -413,19 +457,46 @@ reason and `tools/check.mjs` fails the build if the message body reaches `log()`
 Sealing means the path carries ciphertext and the plaintext exists only inside
 the function.
 
-Payload — small, and deliberately incomplete:
+Payload:
 
 | Field | Value |
 |---|---|
 | `v` | payload version |
 | `sid` | Twilio `MessageSid` — correlation key **and** idempotency key |
-| `p` | the consumer's number in E.164 — the only PII, and it is sealed |
+| `p` | the consumer's number in E.164 |
+| `b` | **the consumer's message, already capped** by the existing evidence rule |
 | `iat` / `exp` | issued at; **expires after 30 days** |
 
-**The message body is not in the payload.** Not in the URL, not in the POST, not
-in the ledger row. The words stay in Twilio's record — which `sid` reaches — and
-in the notification email itself. **The `MessageSid` cannot contain a colon**, so
-it is a safe dedupe-key component (`dedupeKey()` refuses one).
+**The message travels inside the seal, and that is the whole point of sealing
+it.** The endpoint has no datastore and must not acquire one, so when the
+operator classifies the message as an opt-out the exact words have to reach
+`buildSuppressionEvent()` from somewhere. Carrying them in the sealed payload
+keeps the promise that made the token sealed in the first place: **the URL
+contains ciphertext and nothing else.** The plaintext exists in the function's
+memory for the duration of one request.
+
+`b` is capped **before** it is sealed, by the same `capEvidence()` rule that
+governs `evidence_text` — 1 KB, byte-safe truncation, `…[truncated]` — so the
+token cannot carry more than the ledger would accept, and the words written are
+byte-identical to the words the operator read.
+
+**Size, checked rather than assumed at implementation.** 1 KB of plaintext plus a
+12-byte nonce, a 16-byte tag and a small JSON envelope encodes to roughly 1.5 KB
+of base64url, so the whole URL lands near 1.6 KB. Node's default request-header
+budget is 16 KB and the request line counts against it, so the margin is about
+tenfold. **Budget the whole URL at 4 KB**, measure the worst case with a
+full-length message during implementation, and deflate before sealing if it ever
+approaches that. A message longer than the cap cannot enlarge the token, because
+the cap is applied first.
+
+**Rejected: fetching the message back from Twilio at POST time.** It would add a
+network dependency, a second credential, and a hard dependence on Twilio's
+retention window to a write whose entire purpose is to be independent of exactly
+that. Rejected: a datastore to hold the message between the notification and the
+click — that is the message archive this endpoint exists to avoid.
+
+**The `MessageSid` cannot contain a colon**, so it is a safe dedupe-key component
+(`dedupeKey()` refuses one).
 
 ### 6.3 Three things a link scanner cannot supply
 
@@ -456,26 +527,47 @@ credential. No new module may name the table, its columns or that variable —
 
 | Column | Value |
 |---|---|
-| `event_type` | **`suppressed`** — the only value this endpoint can emit |
+| `event_type` | **`revoked`** — the only value this endpoint can emit |
 | `channel` | from the chosen scope |
 | `phone_e164` | from the sealed payload |
 | `source` | **`operator`** — a new constant beside `SOURCE_TWILIO`. `buildSuppressionEvent()` already accepts any source except `website`, so this needs a constant, not a rule change |
 | `source_event_id` | the `MessageSid` |
 | `reason_code` | **`SUPPRESSION_REASON.MANUAL`** — already defined in `api/_lib/consent.mjs` |
-| `evidence_text` | **NULL.** Evidence by reference, not by copy — see below |
+| `evidence_text` | **the consumer's exact words**, from the sealed payload, capped by `capEvidence()` |
 | `metadata` | `{ MessageSid, classified_by: "operator", entered_via: "email_action", token_v }`, plus an optional short operator note |
 
-**`evidence_text` is NULL on an operator entry, and that is deliberate.** The
-column's meaning is *the consumer's exact words*; the operator's own prose is not
-that, and putting it there would corrupt a column the ledger's value depends on.
-An optional note the operator types goes in `metadata` instead. The consumer's
-words are reachable through `MessageSid` in Twilio's record and are already in the
-operator's mailbox — so this keeps the promise in §5 that the action adds **no
-third copy** of the message text.
+**`revoked`, not `suppressed` — because that is what actually happened.**
+`api/_lib/optout.mjs` already draws this line for the automatic path: a whole-word
+keyword or a carrier action produces `suppressed`; a consumer withdrawing **in
+words** produces `revoked`, with the comment *"recording the two identically would
+lose the reason a future reader needs."* A message the deterministic classifier
+missed and a human recognised is a consumer withdrawing in words. It reached this
+endpoint **because** it was not a keyword. Writing it as `suppressed` would file a
+natural-language withdrawal under the one label that means "keyword or carrier",
+and it would do so for exactly the messages whose wording is most worth
+preserving.
+
+**`reason_code` still says who classified it.** `MANUAL` is what distinguishes an
+operator entry from the classifier's `natural_language` — so the pair
+(`revoked`, `manual`) reads correctly: *withdrawn in words, recognised by a
+human.* The act and the recogniser are recorded in separate columns, which is why
+neither has to be distorted to carry the other.
+
+**Send-time enforcement is unaffected — verified, not assumed.**
+`get_suppression_state()` in `db/002_suppression_lookup.sql` filters
+`e.event_type IN ('suppressed', 'revoked')`, and its own comment says *"`revoked`
+counts alongside `suppressed`"*. So an operator entry suppresses at send time
+exactly as a keyword STOP does. **`db/002` needs no change**, and neither does
+`db/001`.
+
+**`evidence_text` carries the consumer's words, and nothing else.** The operator's
+own note, if she types one, goes in `metadata` — never in `evidence_text`. That
+column means *what the consumer said*, and mixing an operator's prose into it
+would corrupt the one field whose value depends on being verbatim.
 
 ### 6.5 Idempotency comes free
 
-The dedupe key is `operator:<MessageSid>:<channel>:suppressed`, and
+The dedupe key is `operator:<MessageSid>:<channel>:revoked`, and
 `appendSuppressionEvents()` inserts with `ON CONFLICT DO NOTHING` — measured
 against live Neon on 10 September 2026, including a partial-pair heal.
 
@@ -486,8 +578,8 @@ datastore is needed to make this safe**, which is the point.
 
 ### 6.6 It cannot clear a suppression — enforced twice
 
-- **The endpoint emits only `suppressed`.** `unsuppressed` is not reachable from
-  it at all.
+- **The endpoint emits only `revoked`.** Neither `unsuppressed` nor any other
+  event type is reachable from it at all.
 - **The credential holds `INSERT` and nothing else** — no `UPDATE`, no `DELETE`,
   not even `SELECT`. Even a fully compromised endpoint cannot unsuppress, cannot
   read the ledger, and cannot enumerate the numbers in it.
@@ -504,6 +596,12 @@ password, for one operator who receives the link in her own mailbox.
   is permanent under today's design. That is a real cost, not a hypothetical, and
   it is why the token is scoped to **one `MessageSid`**, expires, and is never a
   general "suppress any number" endpoint.
+- **A stolen token also discloses the message it seals**, because the
+  confirmation page shows the consumer's words — which it must, so the operator
+  can see what she is acting on. That is **the same disclosure as the email the
+  token arrived in**: the seal exists to keep plaintext out of URLs and logs, not
+  to be a second confidentiality boundary against someone already holding the
+  link.
 - **The unsuppression counterpart remains unbuilt and out of scope**, and it
   should be settled before gate 9 — otherwise the only correction for a mistake
   is a database owner, which is the thing this design exists to avoid.
@@ -521,7 +619,57 @@ answers 503 and renders no page, so the endpoint is inert until it is set.
 It must be added to `SECRET_NAMES` in `tools/check.mjs`, so the build fails if it
 ever appears in anything delivered to a browser.
 
-### 6.9 Alternatives rejected for this workflow
+### 6.9 The HubSpot projection — the same model as the webhook
+
+**The ledger write is authoritative. HubSpot is the operational projection, and
+nothing more.** That is the architecture this project already committed to —
+`cst_*` properties are *mutable current permission state*, the ledger is *durable
+historical evidence and the enforcement source* — and the manual path must follow
+it rather than invent a second model.
+
+Revision 2 wrote the ledger and stopped, which would have left a manually
+recorded opt-out invisible in the CRM while an automatic one was visible. Same
+consumer act, two different outcomes depending on which classifier caught it.
+
+**After — and only after — the ledger append succeeds**, the POST does exactly
+what `projectToHubSpot()` in `api/twilio-inbound.js` already does:
+
+1. **If `consentStateEnabled()` is false, skip it**, and log the skip with
+   `reason: "consent_state_disabled"` — the same early return the webhook makes.
+   With the flag off in Production, no `cst_*` property is read or written, which
+   is what makes "off" mean production-equivalent.
+2. **If HubSpot is not configured, skip it** and log that instead.
+3. Otherwise **`findContactsByPhone()`**, then for each contact
+   **`toHubSpotSuppressionProperties({ scope, trigger: SUPPRESSION_TRIGGER.MANUAL, at, current: contact.consent })`**
+   and `writeSuppressionProperties()`.
+4. **One contact failing does not stop the rest**, and the whole projection is
+   wrapped so that no HubSpot error escapes.
+
+**`SUPPRESSION_TRIGGER.MANUAL` already exists** in
+`api/_lib/hubspot-consent-state.mjs`, and all three reason maps —
+`SMS_REASON_BY_TRIGGER`, `VOICE_REASON_BY_TRIGGER`, `GLOBAL_REASON_BY_TRIGGER` —
+already carry a `manual` value. So this needs **no new HubSpot property, no new
+dropdown option and no new scope**: `crm.objects.contacts.read` and
+`crm.objects.contacts.write`, both already held, are enough.
+
+**A HubSpot failure must never weaken the ledger suppression**, and cannot:
+
+- The append has already committed before the projection runs. There is nothing
+  to roll back, and nothing that would want to.
+- Enforcement resolves suppression **by phone number against the ledger**
+  (`get_suppression_state()`), never against HubSpot. So a failed projection costs
+  **visibility, not compliance** — the same sentence the webhook's header comment
+  already uses, and the same reason it may answer 200 when HubSpot fails.
+- The POST therefore reports **success once the ledger append is confirmed**, and
+  says on the result page whether the CRM projection also succeeded. A partial
+  outcome is shown, not hidden — but it is not a failure.
+
+**What is deliberately not projected:** nothing at all when the operator decides
+the message is *not* an opt-out. There is no "reviewed, no action" state in either
+system. She closes the tab, and the ledger and the CRM stay untouched — which is
+the same outcome the classifier already produces for an ordinary message.
+
+### 6.10 Alternatives rejected for this workflow
 
 - **A Neon owner-credential SQL procedure** *(revision 1's answer)* — hands a
   realtor a credential that can read every consent decision and drop the table,
@@ -602,7 +750,14 @@ the projection is visibility — but it should be a decision rather than a surpr
   has to say so.
 - **It does not change what reaches the ledger from the webhook**, or the
   ledger's role. §6 adds one new *writer*, with a new `source`, and no schema
-  change: `db/001` is untouched and `db/002` is unaffected.
+  change: `db/001` is untouched, and `db/002` needs no change because
+  `get_suppression_state()` already counts `revoked` alongside `suppressed`.
+- **It records nothing when the operator decides a message is not an opt-out.**
+  There is no "reviewed, no action" state in the ledger or in HubSpot, and adding
+  one would be the message archive by another name.
+- **It does not change the automatic classifier.** `api/_lib/optout.mjs` keeps its
+  keyword list, its ten patterns and its `suppressed` / `revoked` split exactly as
+  merged; the operator action is a second writer, not a second opinion.
 
 ---
 
@@ -622,8 +777,13 @@ the projection is visibility — but it should be a decision rather than a surpr
    somebody.
 6. **Measure the real webhook latency at gate 9** against Twilio's ~15 s timeout.
 7. **Walk the operator action once, end to end, on a test number**: GET renders
-   and writes nothing; POST writes exactly one row; a second POST writes none.
-8. **Decide the unsuppression path** (§6.7) before gate 9.
+   and writes nothing; POST writes exactly one `revoked` row carrying the
+   consumer's exact words; a second POST writes none; and — with the consent
+   feature on — the `cst_*` properties are projected onto every matching contact.
+8. **Confirm on that walkthrough that `get_suppression_state()` returns the
+   operator's row.** It should, because the function counts `revoked`; confirm it
+   rather than trust this document.
+9. **Decide the unsuppression path** (§6.7) before gate 9.
 
 ---
 
@@ -634,6 +794,7 @@ the projection is visibility — but it should be a decision rather than a surpr
 | SMS suppression ingress | built, merged, inert |
 | **Operator surfacing of unclassified messages** | **design settled — §4. Not built.** |
 | **Operator-initiated suppression entry** | **design settled — §6. Not built.** |
+| Its HubSpot projection | **design settled — §6.9, same model as the webhook. Not built.** |
 | Unsuppression | not designed, out of scope, required before gate 9 |
 | Voice / Retell ingress | not built |
 | `TWILIO_AUTH_TOKEN` in Production | not set, in any environment |
@@ -646,3 +807,34 @@ the projection is visibility — but it should be a decision rather than a surpr
 what should be built. The endpoint behaves today exactly as it did before this was
 written: an unclassified message produces a log line and a 200, and reaches
 nobody.
+
+---
+
+## 11. One stale code comment, recorded and deliberately not fixed here
+
+Found while verifying this revision against `main`:
+
+**`api/_lib/consent-ledger.mjs`, in the `appendSuppressionEvents()` doc comment:**
+
+> *"The webhook that calls this returns 5xx when it throws, **so Twilio
+> retries** — and the retry is safe because the dedupe key is derived from the
+> provider's own message id."*
+
+**"So Twilio retries" is false, and it is the same misconception this project has
+already corrected twice elsewhere.** Twilio does **not** redeliver a failed
+incoming-message webhook by default; retry must be configured explicitly on the
+Messaging Service, and that configuration is frozen under the TCR hold and listed
+as a live-activation prerequisite. `api/twilio-inbound.js` states the true
+position correctly in its own comments — *"5xx is the fail-closed answer, NOT a
+retry mechanism"* — so the module and its caller currently disagree with each
+other.
+
+The sentence's second half is accurate: the dedupe key **is** derived from
+`MessageSid`, and the no-op **was** measured against live Neon. The defect is the
+causal claim, and the risk is that a reader treats redelivery as a property they
+already have.
+
+**Not fixed in this pull request**, which is documentation-only and touches no
+file under `api/`. **It must be fixed in the next implementation pull request
+that touches this module** — which, if this decision is accepted, is the one that
+adds `SOURCE_OPERATOR` to it.

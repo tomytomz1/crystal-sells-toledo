@@ -394,9 +394,11 @@ environment until gate 8.
   way of acting on one**. **Both designs are now settled and neither is built** —
   an operator email over the existing Zoho Mail SMTP transport, fail-closed with
   a 503 when it cannot be sent; and a sealed-token operator action where GET only
-  confirms and POST performs one `suppressed` ledger append on the existing
-  `INSERT`-only credential, so **no privileged database credential is ever handed
-  to the operator**. See
+  confirms and POST performs one **`revoked`** ledger append on the existing
+  `INSERT`-only credential — carrying the consumer's exact words as
+  `evidence_text` — followed by the same best-effort HubSpot projection the
+  webhook already does. **No privileged database credential is ever handed to the
+  operator.** See
   `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md`.
 - **Webhook retry** on the Messaging Service — frozen under the TCR hold.
 
@@ -433,13 +435,27 @@ one — are now **designed and still unbuilt**; the other two are unchanged:
 - **The operator has no way to record a suppression by hand** — also **decided
   and unbuilt**. The settled design is one endpoint where **GET renders a
   confirmation page and writes nothing** (link scanners issue unattended GETs)
-  and **POST**, carrying an explicitly chosen scope, appends one `suppressed`
-  event through the existing `INSERT`-only `CONSENT_LEDGER_URL` credential.
-  Idempotent by the existing dedupe key `operator:<MessageSid>:<channel>:
-  suppressed`; **it cannot clear a suppression**, enforced both by the endpoint
-  and by a credential that holds no `UPDATE`, `DELETE` or `SELECT`; and **no Neon
-  owner credential is ever given to the operator.** It needs one new secret,
-  `OPERATOR_ACTION_SECRET`, **which is set in no environment.** See
+  and **POST**, carrying an explicitly chosen scope, appends one **`revoked`**
+  event through the existing `INSERT`-only `CONSENT_LEDGER_URL` credential —
+  `revoked` rather than `suppressed` because the automatic path already reserves
+  `suppressed` for a keyword or carrier action and `revoked` for a consumer
+  withdrawing in words, which is what an unclassified message is. `reason_code`
+  is `manual`, so the act and its recogniser are recorded in separate columns.
+  **The consumer's exact words are stored in `evidence_text`**, reaching the
+  endpoint inside the sealed token so no plaintext ever appears in a URL — the
+  durable record must not depend on Twilio's retention or on an email being kept.
+  **`db/002` needs no change: `get_suppression_state()` already counts `revoked`
+  alongside `suppressed`.** After the append, the same **best-effort HubSpot
+  projection** the webhook performs, with `SUPPRESSION_TRIGGER.MANUAL` — which
+  already exists, along with a `manual` value in all three reason maps, so **no
+  new HubSpot scope, property or dropdown option is needed**. The ledger write is
+  authoritative; HubSpot is the projection, and its failure costs visibility, not
+  compliance. Idempotent by the existing dedupe key
+  `operator:<MessageSid>:<channel>:revoked`; **it cannot clear a suppression**,
+  enforced both by the endpoint and by a credential that holds no `UPDATE`,
+  `DELETE` or `SELECT`; and **no Neon owner credential is ever given to the
+  operator.** It needs one new secret, `OPERATOR_ACTION_SECRET`, **which is set in
+  no environment.** See
   `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md`.
 - **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
   redeliver** an incoming-message webhook. Until retry is configured — a
@@ -495,7 +511,7 @@ Open one of these only when the task actually needs it.
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
 | Gate 7 as built — the endpoint, the classifier and its near-misses, the ledger event shape, the HubSpot projection, migration 002, the static guards | `docs/updates/2026-09-10-stop-dnc-suppression.md` |
-| Operator surfacing of unclassified inbound SMS — the options rejected and why, the chosen email path and its failure behaviour, the sealed-token operator suppression action (GET confirms, POST writes), and the corrected gate 7 activation prerequisites | `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md` |
+| Operator surfacing of unclassified inbound SMS — the options rejected and why, the chosen email path and its failure behaviour, the sealed-token operator action (GET confirms, POST writes a `revoked` event with the consumer's words, then projects to HubSpot), and the corrected gate 7 activation prerequisites | `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md` |
 | Migration 002 as applied — the owner credential, the sender role, the SECURITY DEFINER and search_path readings, the four refusals, the rolled-back mis-pairing regression | `docs/updates/2026-09-10-suppression-lookup-provisioning-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
