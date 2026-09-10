@@ -107,6 +107,56 @@ changed. Update `docs/CURRENT-STATE.md` only when material current project state
 changes — never merely because a commit SHA changed. Neither file carries a SHA,
 so no follow-up pin commit is ever needed.
 
+## The Pulse Handoff Protocol — GitHub is the handoff, not the chat
+
+**Every implementation session, and every meaningful operator or configuration
+session, ends with a PULSE HANDOFF posted to GitHub — before the final chat
+response is written.** A chat window is unreadable by the next agent,
+unsearchable, and detached from the commit it describes. Anything material that
+lives only there is lost when the session ends.
+
+- **Session with a pull request** → a top-level comment on that pull request.
+  Posting it *after* the merge is preferred, so it carries the real merge SHA
+  and the final CI result instead of a prediction.
+- **Manual session with no pull request** — Vercel, HubSpot, Neon, Twilio,
+  Retell, DNS — → a new comment appended to the one permanent issue
+  **"Crystal Sells Toledo - Pulse Log"**. Never a new issue per session.
+
+**The final chat response must be a subset of the handoff.** If writing the
+response surfaces a fact, warning, blocker, next step, decision or verification
+result the handoff omits, edit the handoff first.
+
+**Never put a credential in a handoff** — no password, access token, connection
+string, secret value or personal test data. Environment variable **names and
+scopes** only. Treat it as a public artifact.
+
+A handoff does not replace `docs/CURRENT-STATE.md`; when material current state
+changed, update that file too. The handoff is the session record,
+`CURRENT-STATE.md` is the standing truth.
+
+The full required contents and the template: `docs/WORKFLOW.md`.
+
+### "pulse Claude"
+
+An instruction to another agent to recover this project's state from GitHub
+alone. It means: read
+
+1. `CLAUDE.md`
+2. `docs/CURRENT-STATE.md`
+3. `docs/WORKFLOW.md`
+4. current `origin/main`, resolved dynamically
+5. the latest relevant pull request and its PULSE HANDOFF
+6. the latest **"Crystal Sells Toledo - Pulse Log"** comment, if it is newer
+   than that pull-request handoff
+7. a specific implementation document **only** when the task actually needs it
+
+Then **independently verify GitHub state rather than trusting the handoff.** A
+handoff is a claim about the world made by an agent that has since stopped
+running. Check the merge actually landed, the CI actually passed, the file
+actually says what the handoff says it says. This project has already had two
+merged documents assert things that were false; the protocol exists to make
+those findable, not to make them authoritative.
+
 ## Commands
 
 ```bash
@@ -138,4 +188,5 @@ Do not add one-off scripts for individual test names.
 | CRM | **HubSpot** — Contacts API + authenticated Forms Submission API. Service Key scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `forms`. Zoho code is a dormant rollback path, imported by nothing. |
 
 Current status, feature flags and what is still gated: `docs/CURRENT-STATE.md`.
-Execution procedure and the final-report template: `docs/WORKFLOW.md`.
+Execution procedure, the PULSE HANDOFF template and the final-report template:
+`docs/WORKFLOW.md`.
