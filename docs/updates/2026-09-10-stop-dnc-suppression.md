@@ -168,9 +168,16 @@ the request. The two are normally milliseconds apart and can diverge under
 queueing or redelivery.
 
 **`MessageSid`, in `source_event_id`, remains the correlation key** to Twilio's
-own message record, which holds the authoritative timestamp. Anyone
-reconstructing a timeline from the ledger should treat `occurred_at` as "not
-later than the opt-out" and resolve the exact moment through Twilio.
+own message record, which holds the authoritative timestamp.
+
+The direction matters and an earlier draft of this document had it backwards.
+Receipt time is **at or AFTER** the moment the consumer sent the message and
+Twilio created it — never before. So `occurred_at` is an **upper bound**: the
+opt-out happened at or before this instant. Anyone reconstructing a timeline
+should read it that way and resolve the exact moment through Twilio via
+`MessageSid`. Reading it as a lower bound would place an opt-out later than it
+really was, which is the direction that matters — it could make a send that
+happened after the opt-out look as though it happened before.
 
 ## The HubSpot projection
 

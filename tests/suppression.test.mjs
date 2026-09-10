@@ -53,6 +53,7 @@ import {
 } from "../api/_lib/hubspot-consent-state.mjs";
 import { phoneSearchVariants } from "../api/_lib/hubspot.mjs";
 import { SUPPRESSION_SCOPE, applySuppression, canSendSms, canPlaceAutomatedVoiceCall } from "../api/_lib/permission.mjs";
+import { SUPPRESSION_REASON } from "../api/_lib/consent.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TOKEN = "test_auth_token_not_a_real_credential";
@@ -307,6 +308,32 @@ describe("opt-out classification", () => {
     assert.equal(classifyInbound("START").kind, "reoptin");
     assert.equal(classifyInbound("START").eventType, EVENT_TYPE.REOPTIN_REQUESTED);
     assert.equal(classifyInbound("HELP").kind, "help");
+  });
+
+  /* REGRESSION. This branch was two-way — voice or "everything else" —
+     so every all-channel request was recorded as `stop_keyword`. "stop
+     contacting me" is not the STOP keyword, and the ledger row exists to
+     describe the act accurately. Caught in review. */
+  test("an all-channel request records GLOBAL_DNC, not a keyword stop", () => {
+    for (const text of ["stop contacting me", "remove me from your list",
+                        "do not contact me"]) {
+      const r = classifyInbound(text);
+      assert.equal(r.scope, SUPPRESSION_SCOPE.GLOBAL, text);
+      assert.equal(r.channel, CHANNEL.ALL, text);
+      assert.equal(r.eventType, EVENT_TYPE.REVOKED, text);
+      assert.equal(r.reasonCode, SUPPRESSION_REASON.GLOBAL_DNC, text);
+    }
+  });
+
+  test("each scope records its own reason, and no two share one", () => {
+    const reasonFor = (t) => classifyInbound(t).reasonCode;
+    assert.equal(reasonFor("stop texting me"), SUPPRESSION_REASON.STOP_KEYWORD);
+    assert.equal(reasonFor("stop calling me"), SUPPRESSION_REASON.VOICE_DNC);
+    assert.equal(reasonFor("stop contacting me"), SUPPRESSION_REASON.GLOBAL_DNC);
+    assert.equal(new Set([
+      reasonFor("stop texting me"), reasonFor("stop calling me"),
+      reasonFor("stop contacting me"),
+    ]).size, 3, "two scopes collapsed onto one ledger reason");
   });
 
   test("a natural-language opt-out is `revoked`, a keyword is `suppressed`", () => {

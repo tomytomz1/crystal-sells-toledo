@@ -155,7 +155,17 @@ export const OPT_OUT_RULES = Object.freeze([
   },
 ]);
 
-/* Scope -> the channel written to the ledger, and the reason recorded. */
+/* Scope -> the LEDGER reason. Not HubSpot's vocabulary: that mapping lives
+   in api/_lib/hubspot-consent-state.mjs, is keyed by trigger rather than by
+   scope, and is deliberately left alone. These are the internal event
+   classifications, and the two vocabularies are not the same list. */
+const REASON_BY_SCOPE = Object.freeze({
+  [SUPPRESSION_SCOPE.SMS]: SUPPRESSION_REASON.STOP_KEYWORD,
+  [SUPPRESSION_SCOPE.VOICE]: SUPPRESSION_REASON.VOICE_DNC,
+  [SUPPRESSION_SCOPE.GLOBAL]: SUPPRESSION_REASON.GLOBAL_DNC,
+});
+
+/* Scope -> the channel written to the ledger. */
 const SCOPE_TO_CHANNEL = Object.freeze({
   [SUPPRESSION_SCOPE.SMS]: CHANNEL.SMS,
   [SUPPRESSION_SCOPE.VOICE]: CHANNEL.AI_VOICE,
@@ -217,9 +227,13 @@ export function classifyInbound(body) {
          than through a keyword or a carrier action, and recording the two
          identically would lose the reason a future reader needs. */
       eventType: EVENT_TYPE.REVOKED,
-      reasonCode: rule.scope === SUPPRESSION_SCOPE.VOICE
-        ? SUPPRESSION_REASON.VOICE_DNC
-        : SUPPRESSION_REASON.STOP_KEYWORD,
+      /* One reason per scope, and all three are distinct. An all-channel
+         request is GLOBAL_DNC, not a keyword stop: "stop contacting me"
+         is not the STOP keyword, and recording it as one would make the
+         ledger describe the wrong act in the row that exists to describe
+         the act. Caught in review — this branch was two-way and silently
+         labelled every global request `stop_keyword`. */
+      reasonCode: REASON_BY_SCOPE[rule.scope],
       rule: rule.id,
     };
   }

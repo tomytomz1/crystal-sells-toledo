@@ -2,6 +2,14 @@
 
 **10 September 2026. DESIGN ONLY. Nothing here is implemented.**
 
+> **Implementation-review corrections, 10 September 2026.** Three statements in
+> this document were found inaccurate when it was implemented and reviewed
+> against current Twilio documentation. They are corrected **in place, marked as
+> corrections** — the design decisions themselves are unchanged and were not
+> reopened. See §2.8 (what "before parsing" means), §2.9 (retry is not
+> automatic), and the note at §2.1 on the lookup function's result shape.
+> The as-built record is `docs/updates/2026-09-10-stop-dnc-suppression.md`.
+
 Assume no repository access and no memory of previous conversations.
 
 This settles *what* suppression means in this system and *why*, so that the
@@ -97,6 +105,16 @@ options were weighed:
 
 **Decision: option D.** A least-privilege function, approved by the operator on
 10 September 2026:
+
+> **Correction (implementation review).** The draft below returned
+> `min(occurred_at), min(reason_code)` — two **independent** aggregates, which
+> pair a timestamp from one row with a reason from a **different** row.
+> Reproduced on PostgreSQL 16: with rows `2026-09-01 stop_keyword` and
+> `2026-09-05 natural_language`, it returned `2026-09-01 natural_language`.
+> **`db/002` as shipped returns `channel` and `suppressed_at` only** — the
+> sender decides from the *presence* of a suppression, and a column that is not
+> returned cannot be mis-paired. The snippet is left as drafted so the
+> correction is legible; `db/002_suppression_lookup.sql` is authoritative.
 
 ```sql
 CREATE FUNCTION get_suppression_state(p_phone text)
@@ -385,16 +403,28 @@ not escalate to global** — it says what it says.
 
 ### 2.8 Twilio webhook signature verification
 
-**Decision: verify `X-Twilio-Signature` before parsing anything. An unverified
-request is rejected with 403 and never reaches the ledger.**
+**Decision: verify `X-Twilio-Signature` before the body is INTERPRETED. An
+unverified request is rejected with 403 and never reaches the ledger.**
+
+> **Correction (implementation review).** This originally read "before parsing
+> anything", which is not achievable and not what the rule means. Twilio signs
+> the **form parameters**, not the raw byte stream, so the body must be
+> form-decoded *in order to* verify the signature at all. The real boundary is
+> between **decoding** and **interpreting**: form-decoding is mechanical and
+> assigns no meaning, and nothing that assigns meaning — classification,
+> keyword matching, the ledger, HubSpot — may run before the signature
+> verifies. The implementation reads the body, form-decodes it, verifies, and
+> only then classifies; a static guard enforces that the classification call
+> comes after the verification call.
 
 Twilio signs with HMAC-SHA1 over the full request URL concatenated with the POST
 parameters sorted by key, keyed by the account auth token.
 
 Non-negotiables for the implementation session:
 
-- **Verify before parse.** The body is attacker-controlled until the signature
-  says otherwise.
+- **Verify before INTERPRET.** The body is attacker-controlled until the
+  signature says otherwise. Form-decoding is required to verify at all and is
+  not interpretation; classification is, and must come after.
 - **Constant-time comparison.** A byte-by-byte `===` on a signature is a timing
   oracle.
 - **The URL must match exactly what Twilio signed**, including scheme and host.
@@ -412,16 +442,32 @@ Non-negotiables for the implementation session:
 **Decision: idempotency by `MessageSid` through the ledger's existing dedupe
 key. Retries are safe by construction.**
 
-Twilio retries on any non-2xx. The dedupe key becomes:
+> **Correction (implementation review).** This section originally asserted
+> "Twilio retries on any non-2xx". **That is not true under default incoming-
+> message webhook behaviour** — a 5xx does not by itself cause Twilio to
+> redeliver. **Retry must be explicitly configured**, and doing so is a
+> Messaging Service change: a **live-activation prerequisite**, frozen while the
+> TCR hold on error 30753 is open.
+>
+> The response policy below is unchanged and still correct: a 5xx on a ledger
+> failure is how the endpoint **refuses to claim a success it does not have**.
+> What changes is the consequence. Until retry is configured, a ledger outage
+> during a real STOP **loses the evidence permanently** — Twilio will still have
+> blocked the number, so the consumer is protected, but our record of why will
+> not exist. Idempotency below still holds; it makes a redelivery *safe*, it
+> does not make one *happen*.
+
+The dedupe key becomes:
 
 ```
 twilio:<MessageSid>:<channel>:<event_type>
 ```
 
-`MessageSid` is unique per inbound message, so a retried delivery of the same
-message produces the same key and the existing `ON CONFLICT DO NOTHING` makes it
-a no-op — **the property measured on live Neon on 10 September 2026**, not an
-assumption.
+`MessageSid` is unique per inbound message, so a redelivery of the same message
+produces the same key and the existing `ON CONFLICT DO NOTHING` makes it a
+no-op — **the property measured on live Neon on 10 September 2026**, not an
+assumption. That is idempotency *if* a redelivery arrives; it is not a claim
+that one will.
 
 Response policy, which is where the care is needed:
 
@@ -429,7 +475,7 @@ Response policy, which is where the care is needed:
 |---|---|---|
 | Signature invalid | **403**, nothing written | Not from Twilio |
 | Signature valid, ledger append **succeeds**, HubSpot write succeeds | **200** | Done |
-| Signature valid, ledger append **fails** | **5xx** | The evidence is not durable. Let Twilio retry — dedupe makes that safe. |
+| Signature valid, ledger append **fails** | **5xx** | The evidence is not durable, so the endpoint must not claim success. **Not a retry mechanism** — see the correction above. |
 | Signature valid, ledger append succeeds, **HubSpot write fails** | **200**, log loudly, reconcile later | The suppression **is** durable. Enforcement resolves by number (§2.1), so it is already effective. Returning 5xx would make Twilio retry forever against a HubSpot outage, and each retry would no-op the ledger anyway. |
 
 That last row only holds because of §2.1. **If enforcement read HubSpot as the
