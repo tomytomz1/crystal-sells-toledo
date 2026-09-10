@@ -57,6 +57,14 @@
     "api/lead.js": {
       "maxDuration": 30,
       "memory": 256
+    },
+    "api/twilio-inbound.js": {
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "api/operator-action.js": {
+      "maxDuration": 30,
+      "memory": 256
     }
   }
 }

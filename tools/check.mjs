@@ -187,6 +187,10 @@ const SECRET_NAMES = [
      opt-outs — and forged opt-in requests — indistinguishable from real
      ones. */
   "TWILIO_AUTH_TOKEN",
+  /* The operator action's sealing key. Whoever holds it can mint a link
+     that records a permanent, un-undoable opt-out against any number they
+     can name — so it must never appear in anything a browser receives. */
+  "OPERATOR_ACTION_SECRET",
 ];
 for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
   const text = readFileSync(join(ROOT, file), "utf8");
@@ -883,7 +887,12 @@ for (const file of pages) {
                           "source_event_id", "occurred_at"];
     for (const rel of ["api/lead.js", "api/_lib/consent.mjs", "api/_lib/hubspot.mjs",
                        "api/_lib/hubspot-consent-state.mjs", "api/_lib/description.mjs",
-                       "api/_lib/permission.mjs"]) {
+                       "api/_lib/permission.mjs",
+                       /* The second ledger writer and its token module. A new
+                          writer is exactly when a containment rule earns its
+                          keep, so it is added to the rule rather than exempted
+                          from it. */
+                       "api/operator-action.js", "api/_lib/operator-token.mjs"]) {
       const text = readFileSync(join(ROOT, "..", rel), "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
       const stray = LEDGER_NAMES.filter((n) => text.includes(n));
       if (stray.length)
@@ -1012,6 +1021,136 @@ for (const file of pages) {
                         "writeSuppressionProperties"])
       if (leadSuppression.includes(name))
         fail("api/lead.js", `calls ${name} - an ordinary form submission must never write a suppression`);
+  }
+
+  /* -------------------------------------------------------------------
+     GATE 7 — SURFACING, AND THE OPERATOR ACTION
+     -------------------------------------------------------------------
+     Each of these is an invariant a refactor could delete without
+     breaking a single visible behaviour, on code that is inert in
+     production and therefore has no live traffic to notice.
+     ------------------------------------------------------------------- */
+  {
+    /* 5. AN UNCLASSIFIED MESSAGE IS NEVER A SILENT 200. The whole reason
+          the surfacing path exists is that a log line is not an operator
+          workflow, so the branch must both notify and be able to fail
+          loudly. */
+    const inbound = readFileSync(webhookPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+    if (!inbound.includes("sendInboundNotification("))
+      fail(webhookRel, "does not send the operator notification - an unrecognised opt-out would reach nobody");
+    /* ANCHORED TO THE FUNCTION BODY, and that is the whole point.
+       This was an OR whose first alternative matched the CALL SITE in the
+       `!decision` branch, which happens to sit within 400 characters of
+       the unrelated `ledger_absent` 503. Proved by mutation on
+       10 September 2026: replacing EVERY `reply(res, 503)` inside
+       surfaceToOperator() with a 200 left check.mjs passing — the guard
+       was syntactically satisfied while the invariant it names was
+       destroyed. Now the body is extracted and counted on its own. */
+    const surfaceStart = inbound.indexOf("async function surfaceToOperator");
+    if (surfaceStart === -1)
+      fail(webhookRel, "has no surfaceToOperator - the unclassified branch surfaces nothing");
+    else {
+      /* To the next top-level function declaration, or end of file. */
+      const nextFn = inbound.indexOf("\nasync function ", surfaceStart + 1);
+      const surfaceBody = inbound.slice(surfaceStart, nextFn === -1 ? inbound.length : nextFn);
+      const failures = (surfaceBody.match(/reply\(res,\s*503\)/g) || []).length;
+      /* Four ways to fail to surface, and every one of them is a 503:
+         unconfigured, seal failure, send failure, and a send that
+         declined without throwing. Fewer than four means one of them
+         became a silent 200. */
+      if (failures < 4)
+        fail(webhookRel, `surfaceToOperator answers 503 on only ${failures} of its 4 failure paths - a failure to surface would be a silent 200`);
+      if (/reply\(res,\s*200/.test(surfaceBody.slice(0, surfaceBody.lastIndexOf("reply(res, 503)"))))
+        fail(webhookRel, "surfaceToOperator answers 200 before its last failure check - a failure would be reported as success");
+    }
+
+    const operatorRel = "api/operator-action.js";
+    const operatorPath = join(ROOT, "..", operatorRel);
+    if (!existsSync(operatorPath))
+      fail(operatorRel, "missing - the operator has no way to record an opt-out without a database credential");
+    else {
+      const raw = readFileSync(operatorPath, "utf8");
+      const src = raw.replace(/\/\*[\s\S]*?\*\//g, " ");
+
+      /* 6. THE GET WRITES NOTHING. Link scanners, mail-gateway antivirus
+            and prefetch all issue unattended GETs, and a suppression
+            cannot be undone. The write calls must not be reachable from
+            the GET path at all. */
+      const getStart = src.indexOf("async function handleGet(");
+      if (getStart === -1)
+        fail(operatorRel, "has no handleGet - the GET/POST split is the whole safety model");
+      else {
+        const getEnd = src.indexOf("async function handlePost(", getStart);
+        const getBody = src.slice(getStart, getEnd === -1 ? src.length : getEnd);
+        for (const call of ["appendSuppressionEvents", "buildSuppressionEvent",
+                            "writeSuppressionProperties", "projectToHubSpot"])
+          if (getBody.includes(call))
+            fail(operatorRel, `the GET path calls ${call} - a link scanner would suppress a number with no human involved`);
+      }
+
+      /* 7. ONLY `revoked` IS REACHABLE. `unsuppressed` from this endpoint
+            would be an unsuppression route, which this phase deliberately
+            does not have. */
+      if (!src.includes("EVENT_TYPE.REVOKED"))
+        fail(operatorRel, "does not emit EVENT_TYPE.REVOKED - the operator entry would record the wrong act");
+      for (const forbidden of ["EVENT_TYPE.UNSUPPRESSED", "EVENT_TYPE.SUPPRESSED",
+                               "EVENT_TYPE.CONSENT_SELECTED"])
+        if (src.includes(forbidden))
+          fail(operatorRel, `names ${forbidden} - this endpoint may emit only \`revoked\``);
+
+      /* 8. LEDGER BEFORE HUBSPOT, and the ledger's failure is never
+            swallowed. Reversed, the durable record would be the one whose
+            failure is ignored. */
+      const ledgerAt2 = src.indexOf("await appendSuppressionEvents(");
+      const projectAt2 = src.indexOf("await projectToHubSpot(");
+      if (ledgerAt2 === -1)
+        fail(operatorRel, "does not append to the ledger - the operator entry would leave no durable evidence");
+      if (projectAt2 !== -1 && ledgerAt2 !== -1 && ledgerAt2 > projectAt2)
+        fail(operatorRel, "writes to HubSpot before the ledger - the durable record would be the one whose failure is ignored");
+
+      /* 9. NEITHER THE NUMBER NOR THE WORDS REACH A LOG. The sealed token
+            exists so a URL carries ciphertext; logging the plaintext would
+            undo that in one line. */
+      for (const m of src.matchAll(/\blog\(([^;]*?)\);/gs))
+        if (/payload\.(phone|body)|\bparams\.t\b|\bpayload\.p\b|\bactionUrl\b|\bnote\b/.test(m[1]))
+          fail(operatorRel, "logs the consumer's number, words, note or the token - a log line is not access-controlled");
+
+      /* 10. NO SCOPE DEFAULT. "stop texting me" and "stop contacting me"
+             are different suppressions, and only the human reading the
+             message can choose. A default here is the endpoint making the
+             judgement the human is there to make. */
+      if (!/scope_missing/.test(src))
+        fail(operatorRel, "does not refuse a POST with no scope - a default scope would suppress more or less than was asked");
+
+      /* 11. THE CONFIRMATION PAGE LOADS NOTHING REMOTE. A third-party
+             asset on a page carrying a live capability and a consumer's
+             words is a referrer leak and a tracking surface. */
+      for (const m of src.matchAll(/(?:src|href)\s*=\s*["'`]?(https?:)?\/\//g))
+        fail(operatorRel, "the confirmation page references an off-site resource - it must load nothing remote");
+    }
+
+    /* 12. THE TOKEN MODULE BOUNDS ITS OWN OUTPUT. The URL size was an
+           arithmetic estimate in the design document; an estimate is
+           correct until a field is added. */
+    const tokenRel = "api/_lib/operator-token.mjs";
+    const tokenPath = join(ROOT, "..", tokenRel);
+    if (!existsSync(tokenPath))
+      fail(tokenRel, "missing - the operator action has no sealed token");
+    else {
+      const tok = readFileSync(tokenPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+      if (!/aes-256-gcm/.test(tok))
+        fail(tokenRel, "does not seal with aes-256-gcm - a signed plaintext token would put a phone number in a URL");
+      if (!/MAX_ACTION_URL_BYTES/.test(tok) || !/MAX_TOKEN_CHARS/.test(tok))
+        fail(tokenRel, "has no hard size bound - a URL over the header budget fails in production, not in a test");
+      /* 13. THE SECRET HAS AN ENTROPY FLOOR. This key mints bearer
+             capabilities and HKDF cannot make a guessable input
+             unguessable, so a short secret must read as "not configured"
+             rather than deriving a well-formed key from `hunter2`. */
+      if (!/MIN_SECRET_BYTES/.test(tok))
+        fail(tokenRel, "has no minimum length for the sealing secret - HKDF does not turn a weak secret into a strong key");
+      for (const m of tok.matchAll(/\blog\(/g))
+        fail(tokenRel, "logs - this module holds the plaintext number and message and must emit nothing");
+    }
   }
 
   /* The suppression lookup migration, and the two hardening steps that are

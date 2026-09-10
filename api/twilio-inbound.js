@@ -30,7 +30,11 @@
  * RESPONSE POLICY
  * ---------------------------------------------------------------------
  *   signature invalid                     403, nothing written
- *   nothing classified                    200, no ledger event, logged only
+ *   nothing classified, operator emailed  200, no ledger event
+ *   nothing classified, email failed      503 (fail closed — NEVER a
+ *                                         silent 200; an opt-out nobody
+ *                                         saw is the failure this path
+ *                                         exists to prevent)
  *   ledger append failed                  5xx (fail closed; see retry note)
  *   ledger appended, HubSpot failed       200, logged loudly
  *   everything succeeded                  200
@@ -59,9 +63,17 @@ import {
 } from "./_lib/twilio.mjs";
 import { classifyInbound, classificationLogShape } from "./_lib/optout.mjs";
 import {
-  buildSuppressionEvent, appendSuppressionEvents, ledgerLogShape,
+  buildSuppressionEvent, appendSuppressionEvents, ledgerLogShape, capEvidence,
   consentLedgerConfigured, CHANNEL, EVENT_TYPE, SOURCE_TWILIO,
 } from "./_lib/consent-ledger.mjs";
+import {
+  buildInboundNotification, sendInboundNotification, classifyMailError,
+  isMailConfigured,
+} from "./_lib/mail.mjs";
+import {
+  sealOperatorToken, operatorActionUrl, operatorActionConfigured, tokenLogShape,
+  OperatorTokenError,
+} from "./_lib/operator-token.mjs";
 import { SUPPRESSION_REASON } from "./_lib/consent.mjs";
 import { SUPPRESSION_SCOPE } from "./_lib/permission.mjs";
 import {
@@ -188,25 +200,20 @@ export default async function handler(req, res) {
   const shape = { message_sid: messageSid, ...classificationLogShape(decision) };
 
   if (!decision) {
-    /* Not an opt-out. NO ledger event and no evidence_text: this table is
-       a compliance record, not a message archive, and it cannot delete
-       what it is given.
+    /* Not an opt-out — OR an opt-out worded in a way ten deterministic
+       patterns do not match and Twilio does not block either, since
+       Twilio enforces only its own keyword list. AT ARRIVAL THE SYSTEM
+       CANNOT TELL WHICH, so a human is the classifier of last resort and
+       the message is emailed to her.
 
-       OPEN REQUIREMENT, DELIBERATELY NOT CLOSED HERE. The design says an
-       unclassified message must be SURFACED TO A HUMAN, and a log line is
-       not an operator workflow — nobody reads function logs hunting for a
-       missed opt-out. What is emitted below is a marker for whoever builds
-       that path, not a fulfilment of the requirement.
+       STILL NO LEDGER EVENT AND NO evidence_text. This table is a
+       compliance record, not a message archive, and it cannot delete what
+       it is given. Only the operator, having read the message and
+       classified it herself through api/operator-action.js, writes a row.
+       An ordinary message she reads and closes writes nothing, ever.
 
-       Left open rather than guessed at, because each obvious
-       implementation carries a decision that is not this code's to make:
-       forwarding the body to an operator inbox moves a consumer's message
-       into email, and writing it anywhere durable re-creates the
-       message-archive problem this endpoint exists to avoid. Nothing
-       accumulates meanwhile — no Twilio number points here.
-       See docs/updates/2026-09-10-stop-dnc-suppression.md. */
-    log("twilio.inbound.unclassified_not_surfaced", shape);
-    return reply(res, 200, EMPTY_TWIML);
+       See docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md §4. */
+    return surfaceToOperator({ params, from, messageSid, occurredAt, shape, res });
   }
 
   if (decision.kind === "help") {
@@ -275,6 +282,94 @@ export default async function handler(req, res) {
   /* ---- 4. THE PROJECTION, BEST-EFFORT ------------------------------- */
   await projectToHubSpot({ decision, from, occurredAt, shape });
 
+  return reply(res, 200, EMPTY_TWIML);
+}
+
+/* ---------------------------------------------------------------------
+   SURFACING AN UNCLASSIFIED MESSAGE — AND NEVER A SILENT 200
+   ---------------------------------------------------------------------
+   Until this existed the branch above answered 200 and wrote one log
+   line, and the event was named `unclassified_not_surfaced` to say out
+   loud that a log line is not an operator workflow. Nobody reads function
+   logs hunting for a missed opt-out.
+
+   Now the message is emailed to the operator with a sealed link that lets
+   her record an opt-out (api/operator-action.js), and a failure to send
+   it answers 503. THAT IS THE POINT: a failure to surface must be loud.
+   A 503 does not by itself make Twilio redeliver — retry is configured on
+   the Messaging Service and is a live-activation prerequisite — but a
+   loud failure reaches Twilio's Debugger, and a silent 200 reaches
+   nobody.
+
+   NOTHING DURABLE OF OURS IS WRITTEN HERE: no ledger row, no HubSpot
+   call, no store. Its failure domain is disjoint from Neon's and
+   HubSpot's, which is why a ledger outage cannot suppress operator
+   visibility.
+   --------------------------------------------------------------------- */
+async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, res }) {
+  if (!isMailConfigured() || !operatorActionConfigured()) {
+    /* The existing event name, now meaning SURFACING WAS IMPOSSIBLE
+       rather than surfacing was not attempted. 503, never 200. */
+    log("twilio.inbound.unclassified_not_surfaced", {
+      ...shape,
+      mail_configured: isMailConfigured(),
+      action_configured: operatorActionConfigured(),
+    });
+    return reply(res, 503);
+  }
+
+  /* The consumer's words are capped BEFORE they are sealed, by the
+     ledger's own rule, so the words the operator reads in the email are
+     byte-identical to the words that would be written as evidence. */
+  const cappedBody = capEvidence(params.Body);
+
+  let actionUrl;
+  try {
+    actionUrl = operatorActionUrl(sealOperatorToken({
+      sid: messageSid, phone: from, body: cappedBody,
+    }));
+  } catch (sealErr) {
+    /* An email without a working action link is half a workflow, so this
+       is a surfacing failure and not a degraded success. */
+    log("twilio.inbound.unclassified_notify_failed", {
+      ...shape, stage: "seal",
+      ...(sealErr instanceof OperatorTokenError ? tokenLogShape(sealErr) : { token_error: "unknown" }),
+    });
+    return reply(res, 503);
+  }
+
+  const started = Date.now();
+  let result;
+  try {
+    result = await sendInboundNotification(buildInboundNotification({
+      from, body: cappedBody, messageSid, receivedAt: occurredAt, actionUrl,
+    }));
+  } catch (mailErr) {
+    /* classifyMailError(), never logError(): a nodemailer error carries
+       the recipient, the envelope and the raw server response. */
+    log("twilio.inbound.unclassified_notify_failed", {
+      ...shape, stage: "send", mail_error: classifyMailError(mailErr),
+      ms: Date.now() - started,
+    });
+    return reply(res, 503);
+  }
+
+  /* NOT SENT IS NOT SENT, even when it did not throw. sendInboundNotification()
+     resolves `{ sent: false, reason }` for anything it declines to attempt —
+     today only "not_configured", which the guard above already caught, so this
+     branch is unreachable RIGHT NOW. It exists because 200-on-a-falsy-result is
+     precisely the silent-200 this whole path was built to delete, and the day
+     someone adds a second decline reason to that function (the acknowledgement
+     sender already has "no_recipient") the endpoint would start answering 200
+     for a notification nobody received. Read the answer rather than assuming it. */
+  if (!result || result.sent !== true) {
+    log("twilio.inbound.unclassified_not_surfaced", {
+      ...shape, reason: String(result?.reason || "not_sent"),
+    });
+    return reply(res, 503);
+  }
+
+  log("twilio.inbound.unclassified_notified", { ...shape, ms: Date.now() - started });
   return reply(res, 200, EMPTY_TWIML);
 }
 
