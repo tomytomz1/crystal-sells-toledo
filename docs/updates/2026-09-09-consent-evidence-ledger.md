@@ -592,12 +592,13 @@ insufficient privilege. The caveat this section used to carry — "not that the
 is fixed; see
 `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md`.
 
-**A successful append from this code is still unproven.** The corrected
-statement has been proven against a local Postgres 16 with `db/001` applied
-verbatim and an `INSERT`-only role, but no row written by `api/lead.js` has yet
-landed in the Neon ledger. Until a preview submission produces two rows there,
-the Vercel-to-Neon round trip over the driver's HTTP transport remains
-unexercised end to end.
+**A successful append from this code is proven.** On 10 September 2026 a Vercel
+Preview submission logged `lead.consent.ledger_appended` and produced two correct
+rows in the Neon ledger, with `event_id` and `recorded_at` database-generated and
+`phone_e164` in E.164 form. The driver's HTTP transport, the pooled host, the
+real conflict clause against the live grant and the Vercel runtime are all now
+exercised. What remains unproven is the replay behaviour **against Neon** — the
+per-row no-op and partial heal are measured against a local Postgres 16 only.
 
 **The application role's credential has been proven by direct login.** A
 Postgres client logged in as `consent_ledger_app` over TLS 1.3, appended a row,

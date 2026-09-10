@@ -148,27 +148,38 @@ rationale. It is a static assertion on the generated SQL: the suite still never
 reaches a database.
 
 **Tests passing does not mean this works in production.** The proof that it
-works is a preview submission producing two ledger rows, which had not happened
-when this was written.
+works is a preview submission producing two ledger rows — see the next section,
+which was added once that had actually happened.
 
-## What a human must still do
+## Confirmed in production-shaped conditions
 
-1. Redeploy the **preview** and submit the contact form once with the SMS box
-   ticked.
-2. Confirm the log shows `lead.consent.ledger_appended`, not
-   `lead.consent.ledger_failed`.
-3. Using the **owner** credential — never the application one, which cannot
-   read — confirm two rows for that `submission_id`, one `sms` and one
-   `ai_voice`, with `source = 'website'`, a database-generated `event_id` and
-   `recorded_at`, and `phone_e164` in E.164 form.
+All three verification steps were carried out on the Preview deployment the same
+day, and the fix holds:
+
+1. A contact form submitted with the SMS box ticked logged
+   **`lead.consent.ledger_appended`** 214 ms after `lead.consent.captured` —
+   where every previous attempt had logged `ledger_failed`.
+2. Read back with the **owner** credential, two rows for that `submission_id`:
+   `sms / consent_selected` and `ai_voice / consent_not_selected`, both
+   `source = 'website'`, `schema_version = 1`, correct copy versions.
+3. `event_id` and `recorded_at` database-generated, `phone_e164` matching
+   `^\+1[0-9]{10}$`, `occurred_at <= recorded_at`, and 335 / 330 characters of
+   disclosure text stored.
+
+Detail and the full table:
+`docs/updates/2026-09-09-consent-ledger-provisioning-verification.md` §10.
 
 ## What is explicitly not done
 
 - `COMMUNICATIONS_CONSENT_ENABLED` remains **absent from Vercel Production**.
   Production is unchanged and shows no consent tick boxes.
 - `CONSENT_LEDGER_URL` exists **in Preview only**.
-- No successful append from application code has yet been observed.
 - No `CONSENT LEDGER: RECORDED` row has been rendered in HubSpot, because the
-  preview has no HubSpot credential; the endpoint returns 503 after the append.
+  preview has no HubSpot credential; the endpoint returns 503 at
+  `lead.not_configured` after the append. No `cst_*` grant has been written by a
+  real submission. That is gate 4 Stage B.
+- The replay and partial-heal behaviour is measured against a local Postgres 16,
+  not against Neon: no submission has been replayed onto an existing dedupe key
+  in the live ledger.
 - No SMS has been sent and no call placed.
 - The owner/admin database credential has never been placed in Vercel.

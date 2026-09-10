@@ -265,28 +265,23 @@ The credential gap is **closed** (§4.6): the role can log in, append, and is
 refused a read over a real connection. What remains is narrower, and worth
 stating precisely rather than waving at.
 
-**No application code has ever touched this database.** §4.6 used an ordinary
-PostgreSQL client over TCP on port 5432. `api/_lib/consent-ledger.mjs` uses
-`@neondatabase/serverless`, whose **HTTP query path is a different transport
-entirely** — it does not open a Postgres TCP connection at all. So still unknown:
+**Superseded on 10 September 2026 by §10.** At the time of writing, no
+application code had touched this database: §4.6 used an ordinary PostgreSQL
+client over TCP on port 5432, while `api/_lib/consent-ledger.mjs` uses
+`@neondatabase/serverless`, whose HTTP query path is a different transport
+entirely. Four things were unknown — whether that driver's HTTP endpoint accepts
+this connection string, whether the pooled host was the right one for
+`CONSENT_LEDGER_URL`, whether the module's real multi-row
+`INSERT … ON CONFLICT` succeeds against this table, and whether any of it works
+from a Vercel function. **All four are now answered in §10, and the third one
+was a genuine defect.**
 
-- whether that driver's HTTP endpoint accepts this connection string;
-- whether the pooled host is the right one to put in `CONSENT_LEDGER_URL`, or
-  whether the direct host should be used instead;
-- whether the module's real multi-row
-  `INSERT … ON CONFLICT (dedupe_key) DO NOTHING` succeeds against this table —
-  §4.6 inserted a single row with hand-written SQL, so the `ON CONFLICT` clause
-  has never been matched against the real unique index;
-- whether any of it works from within a Vercel function, under that runtime's
-  network and timeout constraints.
+**§4 was never evidence that the application can write to this ledger.** It was
+evidence that a client can, and that whatever connects may only append. That
+distinction is not pedantry: the append the application actually sends was
+refused by this database for the first three sessions it was tried.
 
-**Do not read §4 as evidence that the application can write to this ledger.** It
-is evidence that a client can, and that whatever connects may only append.
-
-Those close at gate 4 — the controlled round-trip — which is also the first
-moment `CONSENT_LEDGER_URL` is exercised.
-
-Also unproven, unchanged: no `CONSENT LEDGER` row has ever been rendered in
+Still unproven, unchanged: no `CONSENT LEDGER` row has ever been rendered in
 HubSpot or seen by an operator, in either state.
 
 ---
@@ -332,10 +327,11 @@ Re-granting it is one statement if the checks ever need repeating.
 
 ## 8. What deliberately has NOT happened
 
-- **Nothing was added to Vercel.** `CONSENT_LEDGER_URL` is not set, in any
-  environment. The site has no connection to this database.
-- **`COMMUNICATIONS_CONSENT_ENABLED` remains OFF.** No consent evidence is built,
-  so the ledger is never called and the Neon driver is never loaded.
+- **Superseded in part by §10.** `CONSENT_LEDGER_URL` and
+  `COMMUNICATIONS_CONSENT_ENABLED=true` are now set in Vercel **Preview only**.
+- **`COMMUNICATIONS_CONSENT_ENABLED` remains absent from Vercel Production**, so
+  on the live site no consent evidence is built, the ledger is never called and
+  the Neon driver is never loaded.
 - **The owner credential has never been placed in Vercel** and never will be. It
   lives in the operator's password manager, and is used for migrations, for the
   verification read above, and for any legally required privacy deletion.
@@ -349,11 +345,75 @@ Re-granting it is one statement if the checks ever need repeating.
 | Gate | Status |
 |---|---|
 | **3** — append-only ledger implemented and tested | **Closed.** Code half merged; database half is this document |
-| **4** — controlled ledger round-trip | Open. Needs `CONSENT_LEDGER_URL` set and the feature enabled somewhere. The credential itself is now proven (§4.6); what gate 4 still proves is the `@neondatabase/serverless` HTTP path, the `ON CONFLICT` clause against the real index, and the Vercel runtime |
+| **4** — controlled ledger round-trip | **Stage A closed** (§10): a Vercel Preview submission appended two correct rows over the driver's HTTP path. Stage B — the same round trip with HubSpot credentials present, producing a `CONSENT LEDGER: RECORDED` row and a `cst_*` grant — is open |
 | **5** — HubSpot timeline display check | Open. Now against an eleven-row consent block — `docs/updates/2026-09-09-hubspot-consent-setup.md` §6a |
 | **6–10** | Open — `docs/updates/2026-09-09-consent-evidence-ledger-decision.md` §3 |
 
-Gate 4 requires a decision this document does not make: the round-trip needs
-`COMMUNICATIONS_CONSENT_ENABLED` on **somewhere**, since with it off nothing calls
-the ledger. Whether that may be a preview deployment is the operator's call, and
-Production is not a candidate.
+Gate 4's open question — the round-trip needs `COMMUNICATIONS_CONSENT_ENABLED`
+on **somewhere**, and Production is not a candidate — was answered by the
+operator on 9 September 2026: **a Vercel Preview deployment.** Both variables are
+scoped to Preview alone.
+
+---
+
+## 10. Gate 4 Stage A — the first successful append from application code
+
+**10 September 2026, 00:36:50 UTC.** A contact form submitted on a Vercel
+**Preview** deployment, SMS box ticked, AI voice box left unticked.
+
+It did not work first time. Three earlier attempts failed, and the failure is
+worth more than the success:
+
+| Attempt | Result |
+|---|---|
+| 9 Sep, three submissions | `CONSENT_LEDGER_APPEND_FAILED`, ~62 ms, cause unidentifiable from the log |
+| 10 Sep, after adding driver diagnostics | `NeonDbError` / **`42501`** — insufficient privilege |
+| 10 Sep, after dropping the conflict target | **`lead.consent.ledger_appended`**, 214 ms |
+
+The cause was the statement's own `ON CONFLICT (dedupe_key)` target: naming one
+makes Postgres require `SELECT`, which this role deliberately does not have. The
+database was correct throughout and **was not changed**. Full account:
+`docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md`.
+
+### What the append produced
+
+Two rows, one per channel, sharing submission `csv_2a5443258778b9e5876e067f`,
+read back with the **owner** credential:
+
+| Column | `sms` row | `ai_voice` row |
+|---|---|---|
+| `event_type` | `consent_selected` | `consent_not_selected` |
+| `source` | `website` | `website` |
+| `schema_version` | 1 | 1 |
+| `consent_copy_version` | `CST_SMS_CONSENT_2026_09_V1` | `CST_AI_VOICE_CONSENT_2026_09_V1` |
+| `event_id` database-generated | true | true |
+| `recorded_at` database-generated | true | true |
+| `phone_e164` matches `^\+1[0-9]{10}$` | true | true |
+| `occurred_at <= recorded_at` | true | true |
+| `length(consent_copy_text)` | 335 | 330 |
+
+The `consent_not_selected` row is intended. An unticked box records a decision
+that was made; reading it as a withdrawal would destroy lawful permissions.
+
+### What this closes
+
+- The `@neondatabase/serverless` HTTP path works from a Vercel function.
+- The **pooled** host in `CONSENT_LEDGER_URL` is correct; no direct host needed.
+- The real multi-row `INSERT … ON CONFLICT DO NOTHING` is accepted by this table
+  under the `INSERT`-only grant.
+- `event_id` and `recorded_at` are minted by the database, not the application.
+- The E.164 conversion, which exists for this column alone, is correct.
+- The full disclosure text is stored, so the ledger answers "what did they agree
+  to" from itself, without the deployed source of that day.
+
+### What it does not close
+
+- **HubSpot is absent from Preview.** The endpoint returned 503 at
+  `lead.not_configured` after the append. So no `CONSENT LEDGER: RECORDED` row
+  has been rendered and no `cst_*` grant has been written — the append happens
+  before the CRM write by design, which is why the evidence landed anyway. That
+  is Stage B.
+- Nothing about Production, which remains without either variable.
+- The idempotency behaviour was verified against a local Postgres 16, not
+  against Neon: no submission has yet been replayed onto an existing dedupe key
+  in this database.
