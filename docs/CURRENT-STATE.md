@@ -268,10 +268,17 @@ cleared automatically, Twilio as the STOP enforcement point with our records
 mirroring it, signature verification before parsing, idempotency by
 `MessageSid`, and why a later ticked box produces `reoptin_requested` instead of
 clearing a suppression. See
-`docs/updates/2026-09-10-stop-dnc-suppression-decision.md`. **Three decisions in
-it await the operator** — a second read-only database credential for send-time
-lookup, how aggressive natural-language opt-out matching should be, and storing
-the consumer's message verbatim as evidence.
+`docs/updates/2026-09-10-stop-dnc-suppression-decision.md`. **All three open
+questions were settled by the operator on 10 September 2026**: send-time lookup
+goes through `EXECUTE` on a `SECURITY DEFINER` function
+(`get_suppression_state(phone_e164)`) with **no table privileges** rather than a
+readable view; natural-language opt-out is aggressive but deterministic, with no
+AI classifier and no naive substring matching; and `evidence_text` stores the
+consumer's exact words **only** for opt-out-classified messages, never ordinary
+conversation. Where Twilio supplies `OptOutType`, that classification is
+preferred over our own. Nothing awaits a decision — only implementation, which
+has not begun. A migration `002` will add the function and the sender role;
+`db/001` is unchanged.
 
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested, but nothing sends or calls, so nothing calls it in production.

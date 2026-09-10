@@ -45,8 +45,11 @@ of them. Nothing below is proposed as new.
 | Ledger event types `revoked`, `suppressed`, `unsuppressed`, `reoptin_requested`; channel `all`; columns `reason_code`, `evidence_text`, `metadata` | `api/_lib/consent-ledger.mjs`, `db/001` |
 | `pending_reoptin` — a ticked box against a suppressed state does not clear it | `api/_lib/consent.mjs` |
 
-**No second migration is needed.** The ledger was built with these columns
-unused precisely so this phase would not have to alter an append-only table.
+**The ledger table needs no alteration.** It was built with these columns unused
+precisely so this phase would not have to change an append-only table. A
+migration `002` **is** needed, but only to *add* the suppression-lookup function
+and the sender role of §2.1 — `db/001` stays byte-identical to what was
+applied.
 
 What does **not** exist: any inbound endpoint, any writer of suppression, any
 caller of the permission resolver, and any read path for suppression state.
@@ -75,25 +78,95 @@ The ledger is already shaped for this: `phone_e164` is `NOT NULL` on every row,
 including `consent_not_selected`, precisely because an event that does not say
 which number it concerns proves nothing about that number.
 
-#### The tension this creates, stated plainly
+#### The tension this creates, and how it is resolved
 
 **The application role holds `INSERT` and nothing else — it cannot read the
 ledger.** That was a deliberate security decision (a leaked
 `CONSENT_LEDGER_URL` must not be able to enumerate numbers and consent
 decisions) and this design does not weaken it.
 
-The website path needs no read: it never sends. But a *sender* does. Three
-options, with a recommendation:
+The website path needs no read: it never sends. But a *sender* does. Four
+options were weighed:
 
-| Option | Trade-off |
+| Option | Verdict |
 |---|---|
-| **A. Search HubSpot by phone at send time** | No new credential. But HubSpot phone search is format-sensitive, contacts can be deleted (as gate 4B demonstrated), and it makes the mutable copy authoritative — the thing this architecture exists to avoid. **Rejected.** |
-| **B. Give the existing role `SELECT`** | Simplest, and destroys the property that a leaked URL cannot enumerate the table. **Rejected.** |
-| **C. A separate read-only role, restricted to a suppression view** — `SELECT` on a view exposing only `(phone_e164, channel, event_type, occurred_at)` for suppression-class events, held by the sender and never by the website | Needs migration `002` and a second credential. Keeps the website `INSERT`-only. Exposes numbers to the *sender*, which must know them anyway to send. **Recommended.** |
+| **A. Search HubSpot by phone at send time** | **Rejected.** HubSpot phone search is format-sensitive, contacts can be deleted — gate 4B demonstrated exactly that — and it makes the mutable copy authoritative, which is the thing this architecture exists to avoid. |
+| **B. Give the existing role `SELECT`** | **Rejected.** Destroys the property that a leaked URL cannot enumerate the table. |
+| **C. A second role with `SELECT` on a suppression view** | **Rejected.** Better than B, but a view the credential can `SELECT` is a view it can dump: one query returns every suppressed number in the system. |
+| **D. A second role with `EXECUTE` on a `SECURITY DEFINER` function and no table privileges at all** | **DECIDED.** The credential can ask "is this number suppressed?" and cannot ask "which numbers are suppressed?" |
 
-**Option C is the recommendation, and it is a real decision for the operator to
-confirm** — it introduces a second database credential, and the whole ledger
-design has so far turned on there being only one, with no read access.
+**Decision: option D.** A least-privilege function, approved by the operator on
+10 September 2026:
+
+```sql
+CREATE FUNCTION get_suppression_state(p_phone text)
+RETURNS TABLE (channel text, suppressed_at timestamptz, reason_code text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public      -- see hardening below
+AS $$
+  SELECT e.channel, min(e.occurred_at), min(e.reason_code)
+  FROM public.communication_consent_events e
+  WHERE e.phone_e164 = p_phone
+    AND e.event_type IN ('suppressed','revoked')
+  GROUP BY e.channel;
+$$;
+
+REVOKE EXECUTE ON FUNCTION get_suppression_state(text) FROM PUBLIC;
+GRANT  EXECUTE ON FUNCTION get_suppression_state(text) TO <sender_role>;
+```
+
+##### Is it actually safer? Measured, not asserted.
+
+Verified on a throwaway PostgreSQL 16 with `db/001` applied verbatim, a sender
+role holding **no table privileges whatsoever**, and the function above:
+
+| Check | Result |
+|---|---|
+| sender's privileges on `communication_consent_events` | **NONE** |
+| `SELECT * FROM get_suppression_state('<suppressed number>')` | returns the row |
+| same, for a number that is **not** suppressed | **0 rows** |
+| `SELECT count(*) FROM communication_consent_events` | **permission denied** |
+| `get_suppression_state(NULL)` — enumeration attempt | **0 rows** |
+| `INSERT` / `UPDATE` / `DELETE` on the table | **permission denied**, all three |
+| the **website's** `INSERT`-only role calling the function | **permission denied for function** |
+
+The last row matters as much as the first: the two credentials are genuinely
+separate. The website can write and not read; the sender can ask and not write.
+Neither can do the other's job.
+
+##### What it does *not* prevent, stated honestly
+
+**It is not a confidentiality boundary against a determined holder of the
+credential.** A caller who already has a list of phone numbers can test them one
+at a time. What option D removes is the *bulk dump* — there is no query that
+returns the set of suppressed numbers — and that is the realistic leak, not a
+patient enumeration of the NANP.
+
+The function's own source is readable from `pg_proc` by any role, as system
+catalogues are. That is fine: the schema is not the secret, the data is.
+
+##### Practical on Neon? Yes.
+
+Neon runs standard PostgreSQL 18 and `SECURITY DEFINER` functions behave
+normally. Three specifics for the implementation session:
+
+- **The function must be created by the table owner** (`neondb_owner`, the same
+  credential that applied `db/001`), so it executes with the owner's rights.
+- **`SET search_path` is mandatory, not decorative.** Without it, a caller can
+  shadow `communication_consent_events` with an object in a schema they control
+  and the definer's rights will happily read it. This is the classic
+  `SECURITY DEFINER` vulnerability.
+- **`REVOKE EXECUTE … FROM PUBLIC` is mandatory.** PostgreSQL grants `EXECUTE`
+  on new functions to `PUBLIC` by default, so creating the function without the
+  revoke hands it to every role including the website's.
+- Calling it needs no `SELECT` on anything: `SELECT get_suppression_state($1)`
+  with no `FROM` clause requires only `EXECUTE`. It works over
+  `@neondatabase/serverless`'s HTTP path like any other statement.
+
+This needs **migration `002`** — the function, the grants, and the sender role.
+`db/001` stays byte-identical to what was applied.
 
 ### 2.2 Multiple HubSpot contacts sharing one phone number
 
@@ -144,38 +217,80 @@ transition** writing an `unsuppressed` ledger event with its own evidence, and
 it is out of scope for gate 7. Reassignment-detection services exist and are
 explicitly **not** proposed here.
 
-### 2.4 STOP keyword handling
+### 2.4 STOP keyword handling — Twilio classifies, we mirror
 
-**Decision: Twilio is the enforcement point. We mirror its decision; we do not
-implement it.**
+**Decision: Twilio is the enforcement point, and where Twilio tells us what it
+classified, we use that rather than guessing at it ourselves.**
 
 Twilio intercepts the standard opt-out keywords — STOP, STOPALL, UNSUBSCRIBE,
 CANCEL, END, QUIT — at its own layer. It blocks further messages to that number
-from that sender and replies with the confirmation itself. **This happens
-whether or not our webhook succeeds.**
+from that sender and sends the confirmation itself. **This happens whether or
+not our webhook succeeds.**
 
-So our job on receiving the inbound webhook is to record it: append a
-`suppressed` ledger event with `reason_code = stop_keyword`, and set the HubSpot
-flags. Our records are a *copy* of a decision Twilio has already enforced.
+#### Prefer `OptOutType` when it is present
 
-Two consequences worth writing down:
+With **Advanced Opt-Out** enabled on a Messaging Service, Twilio includes an
+`OptOutType` parameter on the inbound webhook with one of three values:
 
-- **We cannot override it.** Nothing we write makes a Twilio-blocked number
+| `OptOutType` | Meaning | What we do |
+|---|---|---|
+| `STOP` | Twilio classified this as an opt-out and **has already blocked the number** | Append `suppressed`, `reason_code = stop_keyword`, set the HubSpot flags |
+| `START` | Twilio classified this as an opt-in and **has already unblocked the number** | Append `reoptin_requested` — **not** a grant. See below. |
+| `HELP` | Informational request; Twilio replied with the help text | **No ledger event.** Not a consent decision. Log only. |
+
+**Where `OptOutType` is present it is authoritative and our own keyword matching
+does not run.** Twilio's classification is a statement about what Twilio
+actually did to the number; re-deriving it from the message body risks
+disagreeing with the system that is doing the blocking, and disagreement here
+means our record does not describe reality.
+
+#### `OptOutType` will often be absent, and the design must not depend on it
+
+Advanced Opt-Out is a **Messaging Service configuration setting**, and
+**Twilio configuration must not be changed while the TCR/support hold on error
+30753 is active** (§5). So the implementation must work correctly with the
+parameter absent:
+
+- **`OptOutType` present** → use it, as above.
+- **`OptOutType` absent** → fall back to our own layer: exact keyword match
+  first (case-insensitive, whitespace-trimmed, the keyword being the *entire*
+  message body), then the deterministic phrase matching of §2.5.
+
+Our layer is therefore a **supplement, not a competitor**. It exists for the
+phrases Twilio does not classify, and for the period before Advanced Opt-Out is
+enabled.
+
+#### On `START`, and why it is still not a grant
+
+`START` is the strongest opt-in signal a consumer can send — same number, same
+channel, unprompted, and Twilio has already lifted its block. It is stronger
+evidence than a ticked web form box. **It still does not restore a consent
+grant**, for two reasons:
+
+1. **It may not be the same person** (§2.3, reassignment). Twilio unblocking the
+   handset does not tell us who is holding it.
+2. **A `START` carries no disclosure.** A consent grant in this system records
+   *what the person agreed to* — a version string and the full copy text. A
+   bare `START` has neither, and fabricating one would put words in their mouth
+   in the very record designed to prove we did not.
+
+So `START` is recorded as `reoptin_requested` and surfaced to the operator, who
+can obtain a fresh, evidenced consent. Twilio's block is lifted; ours is not
+cleared. That asymmetry is deliberate and follows directly from §2.3.
+
+#### Two consequences worth writing down
+
+- **We cannot override Twilio.** Nothing we write makes a Twilio-blocked number
   deliverable again.
 - **Our record can lag or fail without a message getting through.** That is a
-  genuine safety margin, and it is not an excuse to treat the webhook as
-  optional — the ledger is the evidence, and evidence that is missing is
-  evidence we cannot produce later.
-
-Matching should be **case-insensitive and whitespace-trimmed**, and should
-accept the keyword as the entire message body. A body that merely *contains*
-"stop" ("stop by the open house on Sunday") is not a keyword opt-out and is
-handled by §2.5, not here.
+  genuine safety margin, and not an excuse to treat the webhook as optional —
+  the ledger is the evidence, and evidence that is missing is evidence we cannot
+  produce later.
 
 ### 2.5 Natural-language opt-out
 
-**Decision: yes, handle it — with a narrow, deterministic, conservative
-allowlist, biased toward suppressing. Never toward un-suppressing.**
+**Decision: yes — aggressive, deterministic phrase matching, biased toward
+suppressing. No AI classifier. No naive substring matching.**
 
 Twilio does **not** auto-handle "please stop texting me", "remove me from your
 list", "no more messages". A system that ignores them is relying on the
@@ -189,21 +304,51 @@ The error costs are asymmetric again:
 - **False negative** (missing a real opt-out): continuing to message someone who
   asked us to stop.
 
-So the bias is toward suppressing. But the mechanism should be **deterministic
-phrase matching, not a language model** — at least initially. A classifier adds
-a network dependency, a latency budget and a failure mode to a path whose whole
-job is to be reliable, and its errors are unexplainable after the fact. A
-phrase list can be read, reviewed, tested and cited in a compliance
-conversation.
+So the bias is toward suppressing. Two things are ruled out explicitly:
 
-**Additionally: every inbound message that is neither a keyword nor a matched
-phrase should be surfaced to the operator**, not silently discarded. A human
-reading "who is this? don't contact me again" catches what a phrase list
-misses.
+**No AI classifier.** It adds a network dependency, a latency budget and a
+failure mode to a path whose whole job is to be reliable, and its errors cannot
+be explained after the fact. A phrase list can be read, reviewed, tested, and
+cited in a compliance conversation. That matters more here than accuracy at the
+margin.
 
-**This is the decision most in need of the operator's input** — specifically
-how aggressive the phrase list should be, since it trades leads against risk.
-The recommendation is: aggressive.
+**No naive substring matching.** `body.includes("stop")` classifies *"stop by
+the open house on Sunday"* as an opt-out, and *"can you stop by Sunday?"* too.
+That is not a conservative failure — it silently destroys a live lead and
+records a legal state that the consumer never asked for.
+
+#### The mechanism
+
+Normalise, then match **intent-bearing patterns anchored to word boundaries** —
+never a bare substring:
+
+1. **Normalise**: lowercase, strip punctuation, collapse whitespace, trim.
+2. **Exact keyword equality first** — the whole normalised body being `stop`,
+   `stopall`, `unsubscribe`, `cancel`, `end`, `quit`, `optout`, `opt out`.
+3. **Then phrase patterns**, each requiring the opt-out to be the *substance* of
+   the message, not a word inside it. The distinguishing feature is that a verb
+   of stopping is bound to an object of contacting:
+   - `stop` / `quit` / `cease` **+** `texting` / `messaging` / `calling` /
+     `contacting` / `emailing` — *"stop texting me"*, *"please stop messaging
+     me"*
+   - `remove` / `delete` / `take` **+** `me` **+** `from your list` / `off your
+     list` — *"remove me from your list"*
+   - `do not` / `don't` **+** `text` / `call` / `contact` / `message` **+** `me`
+     — *"don't contact me again"*
+   - `no more` **+** `texts` / `messages` / `calls`
+   - `not interested` **+** an explicit stop clause, **not** on its own —
+     *"not interested"* alone is a sales answer, not an opt-out
+4. **Anything else is not an opt-out.** *"stop by Sunday"* fails every pattern:
+   `stop` is followed by `by`, not by an object of contacting.
+
+**Every inbound message that matches nothing should be surfaced to the
+operator**, not silently discarded. A human reading *"who is this? never contact
+me again"* catches what a phrase list misses, and that human review is the
+safety net that lets the list stay deterministic instead of clever.
+
+The list is **data, not logic** — a reviewable table with a test per entry,
+including the near-miss cases (*"stop by Sunday"*, *"can you call me back?"*,
+*"cancel my appointment"* — which is about an appointment, not about messaging).
 
 ### 2.6 Voice DNC
 
@@ -305,7 +450,7 @@ consumer's own words as evidence.**
 | `dedupe_key` | `<source>:<source_event_id>:<channel>:<event_type>` |
 | `phone_e164` | the number that opted out — the key that matters |
 | `reason_code` | a `SUPPRESSION_REASON` value |
-| `evidence_text` | **the inbound message body, verbatim** |
+| `evidence_text` | **the inbound message body, verbatim — only for opt-out-classified messages.** See below. |
 | `metadata` | structural context — `MessageSid`, `AccountSid`, the matched rule |
 | `hubspot_contact_id` | `NULL` at write time, as with website events |
 
@@ -314,12 +459,40 @@ already in the code: `revoked` is the consumer withdrawing in words;
 `suppressed` is a STOP keyword or a carrier-level opt-out. Both deny sending.
 Recording them identically would lose the reason a future reader needs.
 
-**On `evidence_text` carrying the consumer's words**: that is a deliberate
-widening of what this table holds, and it is justified — the message *is* the
-evidence of the opt-out, and paraphrasing it would leave us unable to show what
-was actually said. It should be length-capped, and it must never reach a log
-line. It is the first consumer free text this system stores, and the
-implementation session should treat that as a Tier 4 concern.
+#### `evidence_text` — opt-out messages only
+
+**Decision: store the consumer's exact words only when the message is classified
+as opt-out or DNC evidence. Ordinary inbound conversation is never written to
+the consent ledger.**
+
+The justification for storing it at all is narrow and specific: **the message
+*is* the evidence of the opt-out.** Paraphrasing it, or storing only "matched
+rule 4", would leave us unable to show what the person actually said if it is
+ever questioned. That argument applies to an opt-out and to nothing else.
+
+It does **not** extend to *"what time is the showing?"*. Writing every inbound
+message into an append-only, effectively undeletable consent ledger would turn a
+compliance record into a message archive — more PII, held longer, in a table
+whose entire design premise is that the application cannot delete from it.
+
+So:
+
+- **Classified as opt-out / revocation / DNC** → a ledger event is written and
+  `evidence_text` carries the verbatim body.
+- **Anything else** → **no ledger event and no `evidence_text`.** The message is
+  surfaced to the operator through ordinary channels and is not consent
+  evidence.
+
+**Correlation evidence is preserved regardless of classification**:
+`source_event_id` holds the `MessageSid`, `metadata` holds the structural
+context (`MessageSid`, `AccountSid`, `OptOutType` when present, the matched
+rule identifier), and `occurred_at` holds Twilio's timestamp. So a written event
+can always be tied back to the exact Twilio message record, whether or not the
+body travelled with it.
+
+Constraints for the implementation session: **length-cap it**, and **never let
+it reach a log line**. It is the first consumer free text this system stores and
+is a Tier 4 concern.
 
 ### 2.11 HubSpot suppression state writes
 
@@ -397,8 +570,10 @@ resolved:
 - **Reassignment-detection services.** Not proposed.
 - **Unsuppression / re-opt-in flow.** Deliberately out of scope for gate 7; it
   needs its own design.
-- **Twilio Messaging Service configuration**, advanced opt-out keyword
-  customisation, and per-Messaging-Service opt-out lists.
+- **Twilio Messaging Service configuration** — including *enabling* Advanced
+  Opt-Out, custom keyword lists and per-Messaging-Service opt-out lists.
+  **Frozen while the TCR/support hold is active** (§5). The design works with
+  `OptOutType` absent, so this is not a dependency.
 - **Retell's specific webhook shape** for a spoken opt-out — the semantics are
   settled here, the transport is not.
 - **Rate limiting and abuse handling** on the inbound endpoint.
@@ -407,26 +582,37 @@ resolved:
 
 ---
 
-## 4. Decisions the operator must confirm before implementation
+## 4. Operator decisions — settled 10 September 2026
 
-1. **§2.1 Option C — a second, read-only database credential** restricted to a
-   suppression view, so that send-time enforcement can resolve by number without
-   giving the website role `SELECT`. This is a genuine change to a design that
-   has so far had exactly one credential with no read access.
-2. **§2.5 how aggressive the natural-language phrase list should be.** The
-   recommendation is aggressive, trading leads for risk.
-3. **§2.10 storing the consumer's message verbatim** in `evidence_text` — the
-   first consumer free text this system would hold.
+All three open questions were decided by the operator and are now final. They
+are recorded here as decisions, not proposals.
+
+| # | Decision |
+|---|---|
+| 1 | **A separate suppression-lookup credential is approved — but not with `SELECT`.** Least privilege via `EXECUTE` on `get_suppression_state(phone_e164)`, a `SECURITY DEFINER` function, with **no table privileges at all** on the ledger. The credential can ask about a number it already knows and cannot enumerate the table. Verified by measurement (§2.1). |
+| 2 | **Aggressive deterministic natural-language matching.** Bias toward suppression where the intent to stop is clear. **No AI classifier. No naive substring matching** — *"stop by Sunday"* must not be classified as an opt-out (§2.5). |
+| 3 | **`evidence_text` holds the consumer's exact words only for opt-out-classified messages.** Ordinary inbound conversation is never written to the consent ledger. `MessageSid` and the other correlation evidence are preserved regardless (§2.10). |
+
+Nothing in this document now awaits an operator decision. **What it awaits is
+implementation**, which has not begun.
 
 ---
 
-## 5. Status
+## 5. Status, and the Twilio freeze
 
-**Gate 6 is externally blocked**: an existing Twilio A2P Brand is in a
-support/TCR hold for error 30753 while Twilio works the email whitelist. No new
-Brand, profile or campaign is to be created and the registration is not to be
-changed while that case is open. Gate 7 can be designed and implemented
-independently, but **no live SMS test is possible until gate 6 clears.**
+**Gate 6 is externally blocked.** An existing Twilio A2P Brand is in a
+support/TCR hold for **error 30753** while Twilio works the email whitelist.
+
+**While that case is open:**
+
+- **Do not create another Brand, profile or campaign.**
+- **Do not change the registration.**
+- **Do not change Messaging Service configuration** — including enabling
+  Advanced Opt-Out. This is why §2.4 requires the design to work with
+  `OptOutType` absent rather than assuming it.
+
+Gate 7 can be designed and implemented independently of all of that, but **no
+live SMS test is possible until gate 6 clears.**
 
 **Nothing in this document is implemented.** No endpoint exists, nothing writes
 a suppression, and nothing calls the permission resolver.
