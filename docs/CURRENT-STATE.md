@@ -369,6 +369,17 @@ the endpoint, `TWILIO_AUTH_TOKEN` is set in no environment, and with it absent
 the endpoint answers 503 without reading the body. **No suppression row has ever
 been committed.**
 
+**`TWILIO_AUTH_TOKEN` is not the only thing gating it.** For a *classified*
+message the endpoint answers 503 a second time at `consentLedgerConfigured()`,
+which is exactly `CONSENT_LEDGER_URL` being non-empty — and that variable is
+**Preview-only and absent from Production**. So activating the webhook with only
+the token in Production would authenticate and classify a real STOP and then
+refuse it, writing nothing, on every message rather than during an outage. **Gate
+7 activation requires both `TWILIO_AUTH_TOKEN` and the `INSERT`-only
+`CONSENT_LEDGER_URL` in Production.** That credential is `consent_ledger_app`;
+it is **not** the `EXECUTE`-only `consent_ledger_sender` string, which stays in no
+environment until gate 8.
+
 **Not built — genuinely later phases:**
 
 - **Send-time enforcement.** Nothing in `api/` calls `get_suppression_state()`.
@@ -379,10 +390,13 @@ been committed.**
   and no operator workflow exists to clear one deliberately.
 - **Voice ingress.** Nothing receives a Retell webhook, so a *spoken*
   do-not-call reaches none of the above.
-- **Operator surfacing** of unclassified inbound messages. **The design is now
-  settled — an operator email over the existing Zoho Mail SMTP transport, with a
-  fail-closed 503 when it cannot be sent, no ledger row and no HubSpot call. Not
-  built.** See
+- **Operator surfacing** of unclassified inbound messages, **and the operator's
+  way of acting on one**. **Both designs are now settled and neither is built** —
+  an operator email over the existing Zoho Mail SMTP transport, fail-closed with
+  a 503 when it cannot be sent; and a sealed-token operator action where GET only
+  confirms and POST performs one `suppressed` ledger append on the existing
+  `INSERT`-only credential, so **no privileged database credential is ever handed
+  to the operator**. See
   `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md`.
 - **Webhook retry** on the Messaging Service — frozen under the TCR hold.
 
@@ -397,7 +411,9 @@ environment (with it absent the endpoint answers 503 and reads no request
 body). **The database half is now applied and verified** — see "The suppression
 lookup" above — but nothing calls it, so its existence changes no behaviour.
 
-**Three things keep gate 7 open**, and none is closed by the implementation:
+**Four things keep gate 7 open**, and none is closed by the implementation. Two
+of them — surfacing an unclassified message, and letting the operator act on
+one — are now **designed and still unbuilt**; the other two are unchanged:
 
 - **No voice ingress at all.** *"stop calling me"* arriving by SMS suppresses
   voice, but nothing receives a Retell webhook, so a **spoken** do-not-call
@@ -406,13 +422,24 @@ lookup" above — but nothing calls it, so its existence changes no behaviour.
   requires it; a log line is not a workflow, and the event is named
   `unclassified_not_surfaced` to say so. **The path is decided as of
   10 September 2026 and remains unbuilt** — an operator email, one per message,
-  carrying the number, the verbatim body capped at 1 KB and the `MessageSid`,
-  over the SMTP transport already used for the lead acknowledgement, answering
-  **503** rather than a silent 200 when it cannot be sent. It writes no ledger
-  row, makes no HubSpot call and needs no new credential or CRM scope, so it is
-  buildable under the TCR hold. **A dependency it exposes is also unbuilt:**
-  there is no operator-initiated way to record a suppression, which is tolerable
-  only while nothing sends. See
+  carrying the full E.164 number **in the body only** (the subject shows the last
+  four digits, because a subject is a lock-screen preview), the verbatim body
+  capped at 1 KB, the `MessageSid` and a deterministic `Message-ID` as
+  **best-effort** duplicate control that does **not** replace webhook
+  idempotency — over the SMTP transport already used for the lead
+  acknowledgement, answering **503** rather than a silent 200 when it cannot be
+  sent. It writes no ledger row, makes no HubSpot call and needs no new CRM
+  scope.
+- **The operator has no way to record a suppression by hand** — also **decided
+  and unbuilt**. The settled design is one endpoint where **GET renders a
+  confirmation page and writes nothing** (link scanners issue unattended GETs)
+  and **POST**, carrying an explicitly chosen scope, appends one `suppressed`
+  event through the existing `INSERT`-only `CONSENT_LEDGER_URL` credential.
+  Idempotent by the existing dedupe key `operator:<MessageSid>:<channel>:
+  suppressed`; **it cannot clear a suppression**, enforced both by the endpoint
+  and by a credential that holds no `UPDATE`, `DELETE` or `SELECT`; and **no Neon
+  owner credential is ever given to the operator.** It needs one new secret,
+  `OPERATOR_ACTION_SECRET`, **which is set in no environment.** See
   `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md`.
 - **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
   redeliver** an incoming-message webhook. Until retry is configured — a
@@ -468,7 +495,7 @@ Open one of these only when the task actually needs it.
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
 | Gate 7 as built — the endpoint, the classifier and its near-misses, the ledger event shape, the HubSpot projection, migration 002, the static guards | `docs/updates/2026-09-10-stop-dnc-suppression.md` |
-| Operator surfacing of unclassified inbound SMS — the options rejected and why, the chosen email path, its failure behaviour, and the operator-suppression gap it exposes | `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md` |
+| Operator surfacing of unclassified inbound SMS — the options rejected and why, the chosen email path and its failure behaviour, the sealed-token operator suppression action (GET confirms, POST writes), and the corrected gate 7 activation prerequisites | `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md` |
 | Migration 002 as applied — the owner credential, the sender role, the SECURITY DEFINER and search_path readings, the four refusals, the rolled-back mis-pairing regression | `docs/updates/2026-09-10-suppression-lookup-provisioning-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
