@@ -264,8 +264,9 @@ Stated plainly, because the rest of this section reads like everything works.
   path in `api/` resolves suppression at send time, and the sender connection
   string is in no environment. That is gate 8, and it has not begun.
 - **Gate 7's remaining halves.** No voice ingress exists; unclassified inbound
-  messages reach no operator; webhook retry is unconfigured. None of these is
-  a deployment step — each is unbuilt work.
+  messages reach no operator (the path is **decided but unbuilt** — see below);
+  webhook retry is unconfigured. None of these is a deployment step — each is
+  unbuilt work.
 
 Design, failure-semantics contract and the code:
 `docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
@@ -378,7 +379,11 @@ been committed.**
   and no operator workflow exists to clear one deliberately.
 - **Voice ingress.** Nothing receives a Retell webhook, so a *spoken*
   do-not-call reaches none of the above.
-- **Operator surfacing** of unclassified inbound messages.
+- **Operator surfacing** of unclassified inbound messages. **The design is now
+  settled — an operator email over the existing Zoho Mail SMTP transport, with a
+  fail-closed 503 when it cannot be sent, no ledger row and no HubSpot call. Not
+  built.** See
+  `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md`.
 - **Webhook retry** on the Messaging Service — frozen under the TCR hold.
 
 The last three are the three requirements that keep gate 7 open; see the
@@ -399,7 +404,16 @@ lookup" above — but nothing calls it, so its existence changes no behaviour.
   cannot reach any of it.
 - **Unclassified inbound messages are not surfaced to an operator.** The design
   requires it; a log line is not a workflow, and the event is named
-  `unclassified_not_surfaced` to say so.
+  `unclassified_not_surfaced` to say so. **The path is decided as of
+  10 September 2026 and remains unbuilt** — an operator email, one per message,
+  carrying the number, the verbatim body capped at 1 KB and the `MessageSid`,
+  over the SMTP transport already used for the lead acknowledgement, answering
+  **503** rather than a silent 200 when it cannot be sent. It writes no ledger
+  row, makes no HubSpot call and needs no new credential or CRM scope, so it is
+  buildable under the TCR hold. **A dependency it exposes is also unbuilt:**
+  there is no operator-initiated way to record a suppression, which is tolerable
+  only while nothing sends. See
+  `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md`.
 - **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
   redeliver** an incoming-message webhook. Until retry is configured — a
   Messaging Service change, frozen under the TCR hold — a ledger outage during a
@@ -454,6 +468,7 @@ Open one of these only when the task actually needs it.
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
 | Gate 7 as built — the endpoint, the classifier and its near-misses, the ledger event shape, the HubSpot projection, migration 002, the static guards | `docs/updates/2026-09-10-stop-dnc-suppression.md` |
+| Operator surfacing of unclassified inbound SMS — the options rejected and why, the chosen email path, its failure behaviour, and the operator-suppression gap it exposes | `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md` |
 | Migration 002 as applied — the owner credential, the sender role, the SECURITY DEFINER and search_path readings, the four refusals, the rolled-back mis-pairing regression | `docs/updates/2026-09-10-suppression-lookup-provisioning-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
