@@ -353,6 +353,46 @@ describe("PII containment", () => {
    6  THE STATEMENT — event_id is the database's
    ===================================================================== */
 describe("the INSERT statement", () => {
+  /* REGRESSION, 10 September 2026. This clause named its conflict target —
+     `ON CONFLICT (dedupe_key)` — and every preview submission failed with
+     NeonDbError 42501, permission denied, while a plain INSERT under the
+     same role succeeded. Naming a target, as a column list OR as
+     `ON CONSTRAINT <name>`, makes Postgres require SELECT on the table:
+     inferring the arbiter index is a read. The application role holds
+     INSERT and nothing else by design, so the target had to go, not the
+     grant.
+
+     Reproduced and fixed against Postgres 16 with db/001 applied verbatim
+     and a role granted INSERT only:
+
+       plain INSERT                              -> INSERT 0 2
+       ON CONFLICT (dedupe_key) DO NOTHING       -> ERROR 42501
+       ON CONFLICT ON CONSTRAINT <name> DO ...   -> ERROR 42501
+       ON CONFLICT DO NOTHING                    -> INSERT 0 2, replay 0,
+                                                    replay after one row
+                                                    deleted -> 1
+       SELECT / UPDATE / DELETE / TRUNCATE       -> still all refused
+
+     This test is what stops the clause being "tidied" back into the more
+     readable form, which would silently withhold every consent grant in
+     production while the lead itself still succeeded. */
+  test("the conflict clause names no target, so INSERT alone suffices", async () => {
+    const calls = captureExecutor();
+    await appendConsentEvents(evidenceFor({ sms_consent: true }), { env: ENV });
+    const { text } = calls[0];
+
+    assert.match(text, /ON CONFLICT DO NOTHING$/,
+      "the conflict clause is not the bare, INSERT-only form");
+    assert.ok(!/ON CONFLICT\s*\(/.test(text),
+      "a column conflict target is back — it requires SELECT, which the role lacks");
+    assert.ok(!/ON\s+CONSTRAINT/i.test(text),
+      "a named constraint target is back — it requires SELECT too");
+    /* DO UPDATE would need UPDATE, which no append-only role may hold. */
+    assert.ok(!/DO\s+UPDATE/i.test(text), "DO UPDATE would need UPDATE privilege");
+    /* RETURNING would need SELECT on the returned columns. */
+    assert.ok(!/RETURNING/i.test(text), "RETURNING would need SELECT privilege");
+  });
+
   test("one parameterised multi-row INSERT, with the conflict clause", async () => {
     const calls = captureExecutor();
     const res = await appendConsentEvents(evidenceFor({ sms_consent: true }), { env: ENV });
@@ -362,7 +402,7 @@ describe("the INSERT statement", () => {
     const { text, params } = calls[0];
     assert.equal((text.match(/INSERT INTO/g) || []).length, 1);
     assert.match(text, new RegExp("INSERT INTO " + LEDGER_TABLE));
-    assert.match(text, /ON CONFLICT \(dedupe_key\) DO NOTHING/);
+    assert.match(text, /ON CONFLICT DO NOTHING$/);
     assert.equal(params.length, LEDGER_COLUMNS.length * 2);
     /* Parameterised, not interpolated: no value appears in the statement. */
     for (const p of params)
@@ -604,24 +644,26 @@ describe("failure semantics", () => {
      ("both rows land together or neither does") is wrong about retries and
      the difference is a healed gap versus a permanent one.
 
-     ON CONFLICT (dedupe_key) DO NOTHING is evaluated per row. A retry
+     ON CONFLICT DO NOTHING is evaluated per row. A retry
      against a ledger that already holds ONE of the two rows no-ops that
      one and inserts the MISSING one, converging on the complete pair.
      All-or-nothing on retry would leave the gap forever.
 
      Asserted here on the statement, which is what this repository can
      honestly prove without a database: the same statement carries both
-     rows with independent dedupe keys and a per-row conflict target, so
-     the outcome for one row does not depend on the other. */
+     rows with independent dedupe keys, and DO NOTHING is per row, so the
+     outcome for one row does not depend on the other. Confirmed against a
+     real Postgres 16 with this migration and an INSERT-only role: the
+     first run inserted 2, a replay inserted 0, and a replay after one row
+     was deleted inserted exactly 1. */
   test("the statement lets a retry fill a missing row beside an existing one", async () => {
     const calls = captureExecutor();
     await appendConsentEvents(evidenceFor({ sms_consent: true }), { env: ENV });
     const { text, params } = calls[0];
 
-    /* The conflict target is the per-row unique key, not the statement. */
-    assert.match(text, /ON CONFLICT \(dedupe_key\) DO NOTHING/);
-    assert.ok(!/ON CONFLICT DO NOTHING\b/.test(text),
-      "a bare conflict clause would not name the per-row key");
+    /* Per row, and with NO conflict target — see the regression test below
+       for why naming one is not available to this role. */
+    assert.match(text, /ON CONFLICT DO NOTHING$/);
 
     /* Two rows, two DIFFERENT keys — so one can conflict while the other
        inserts. If both rows ever shared a key, the second would be

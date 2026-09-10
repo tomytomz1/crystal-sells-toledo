@@ -47,10 +47,10 @@ Schema in the production HubSpot portal:
   the published privacy policy carries no messaging section.
 - **No consumer SMS or AI voice traffic is active.** No Twilio SMS is sent and no
   Retell call is placed.
-- **The ledger database exists and is verified, and is connected to nothing.**
-  Provisioned and grant-verified on 9 September 2026 — see "The ledger" below.
-  `CONSENT_LEDGER_URL` is still **absent from Vercel in every environment**, so
-  the site has no connection to it.
+- **The ledger database exists and is verified. It is connected to Preview
+  only.** Provisioned and grant-verified on 9 September 2026 — see "The ledger"
+  below. `CONSENT_LEDGER_URL` is set in Vercel **Preview** and is **absent from
+  Production**, so the live site has no connection to it.
 - **§6a research is complete (9 September 2026).** The HubSpot form-submission
   timeline evidence is **useful operationally but is not sufficient as the sole
   durable consent ledger** — a submission can be permanently and irreversibly
@@ -61,9 +61,11 @@ Schema in the production HubSpot portal:
   done.
 - **Activation remains gated.** Gate 3 is now closed on **both** halves — code
   merged, database provisioned and verified. Gates 4–10 remain outstanding,
-  listed in the decision document below. Gate 4 needs a decision nobody has
-  made: a round-trip requires `COMMUNICATIONS_CONSENT_ENABLED` on *somewhere*,
-  and Production is not a candidate.
+  listed in the decision document below. Gate 4's open question — a round-trip
+  requires `COMMUNICATIONS_CONSENT_ENABLED` on *somewhere*, and Production is
+  not a candidate — is answered: **Preview is that somewhere.**
+  `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
+  Vercel **Preview only**, and gate 4 is in progress there.
 - **A2P/TCR readiness is a separate activation dependency.** This repository makes
   no claim about its status.
 
@@ -87,10 +89,10 @@ Decision, findings, sources and the full gate list:
 and the resolved gaps:
 `docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md`.
 
-### The ledger — built, provisioned, verified, and connected to nothing
+### The ledger — built, provisioned, verified, and wired to Preview only
 
 **Code, migration and tests are merged. The database exists and its append-only
-grant has been proven. Nothing in Vercel points at it.**
+grant has been proven. Vercel Preview points at it; Production does not.**
 
 - `api/_lib/consent-ledger.mjs` is the only module that names the table, its
   columns or `CONSENT_LEDGER_URL`. `tools/check.mjs` enforces that containment.
@@ -137,12 +139,25 @@ grant has been proven. Nothing in Vercel points at it.**
   credential — a property of the platform, recorded because an earlier revision
   of the provisioning document wrongly claimed the password existed only in a
   password manager.
-- **No application code has ever touched this database.** The credential was
-  proven with an ordinary Postgres client over TCP; `@neondatabase/serverless`
-  uses a different transport (HTTP), so the driver path, the real
-  `ON CONFLICT` clause against the live unique index, and the Vercel runtime are
-  all still unexercised. What the tests prove is the statement the code would
-  send and how it behaves when its executor fails, hangs or is absent.
+- **Application code has now reached this database, and was refused.** Preview
+  submissions on 9–10 September 2026 drove the append against the live Neon
+  project: the driver loaded, the HTTP endpoint was reached, the credential
+  authenticated, and Postgres rejected the statement with `42501`. The cause
+  was the statement's own conflict target — naming one requires `SELECT`, which
+  this role deliberately lacks. Fixed by dropping the target; **no database or
+  migration change was needed or made.** See
+  `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md`.
+- **A successful append from application code is still unproven.** The
+  corrected statement is verified against a local Postgres 16 with `db/001`
+  applied verbatim and an `INSERT`-only role, but no row written by
+  `api/lead.js` has yet landed in the Neon ledger. Until a preview submission
+  produces two rows there, the Vercel-to-Neon round trip is unexercised end to
+  end.
+- **A ledger failure now says why.** `lead.consent.ledger_failed` carries
+  `ledger_driver_error` (the error class) and `ledger_driver_code` (a symbolic
+  code or SQLSTATE), whitelisted to identifier characters so no message, host
+  or value can occupy them. Before this, every cause looked identical in the
+  log and the outage took three sessions to identify.
 
 Design, failure-semantics contract and the code:
 `docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
@@ -175,5 +190,6 @@ Open one of these only when the task actually needs it.
 | Ledger implementation plan — where it attaches in this codebase, the change set, testing, human steps | `docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md` |
 | Ledger as built — module contract, failure semantics, the CONSENT LEDGER row, the static guards, what a human must still do | `docs/updates/2026-09-09-consent-evidence-ledger.md` |
 | Ledger as provisioned — Neon project, role creation, grant verification, the Neon-specific traps, what is still unproven | `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md` |
+| Why the conflict target had to go — the 42501 outage, the privilege rule, the rejected `GRANT SELECT`, the measured semantics | `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
