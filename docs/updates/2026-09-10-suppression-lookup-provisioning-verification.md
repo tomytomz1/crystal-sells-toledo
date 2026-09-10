@@ -72,7 +72,7 @@ own two placeholders substituted:
 | Placeholder | Value used |
 |---|---|
 | `<sender_role>` | **`consent_ledger_sender`** |
-| `<sender_password>` | a freshly generated 32-character alphanumeric password, never recorded outside the operator's password manager |
+| `<sender_password>` | a freshly generated 32-character alphanumeric password — see the note below on where it actually lives |
 
 Nothing else in those statements was altered. Section 4 of the file is a comment
 block — guidance for the operator, not applied SQL — so it carries no
@@ -87,6 +87,17 @@ CREATE FUNCTION get_suppression_state(p_phone text) ... ;
 REVOKE EXECUTE ON FUNCTION get_suppression_state(text) FROM PUBLIC;
 GRANT  EXECUTE ON FUNCTION get_suppression_state(text) TO consent_ledger_sender;
 ```
+
+**Where the sender password actually lives.** The password was not recorded in
+chat, GitHub, repository files, or handoffs. The operator stored it in a
+password manager. **Neon also retains the credential in its platform vault and
+can display it through the Connect panel.** So the password manager is not the
+only copy, and **Neon console access to this project is equivalent to holding
+the sender credential** — exactly as it already is for `consent_ledger_app`.
+That belongs in the threat model rather than in a footnote. An earlier revision
+of this document said the password was *"never recorded outside the operator's
+password manager"*; that was false, and it is the same error an earlier revision
+of `db/001`'s provisioning record made about the application credential.
 
 **The role was created with SQL, not through Neon's "Roles" UI.** A role created
 in the Neon console is made a member of `neon_superuser`, which would grant it
@@ -293,8 +304,13 @@ done.
   Preview. It is **not** `CONSENT_LEDGER_URL`, which remains the website's
   `INSERT`-only credential, and the two must never converge. When gate 8 needs
   it, it gets its own variable name and its own scope decision.
-- **No suppression has ever been written.** The regression's rows were rolled
-  back and no Twilio request has ever reached the endpoint.
+- **No suppression row has ever been committed or persisted.** Two synthetic
+  suppression rows were inserted inside the verification transaction and rolled
+  back — `rows_before = 8`, `rows_after = 8`. Saying *"never written"* would be
+  imprecise: the rows existed inside an uncommitted transaction and the function
+  read them there, which is what made the regression a real measurement rather
+  than a simulation. Nothing survived the `ROLLBACK`, and no Twilio request has
+  ever reached the endpoint.
 - **`db/001` was not changed**, and `communication_consent_events` gained no
   privilege for anybody.
 - **No Twilio, Retell, HubSpot or Vercel change**, and no code change.

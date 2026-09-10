@@ -250,8 +250,9 @@ Stated plainly, because the rest of this section reads like everything works.
 - **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
   has been observed. Whether a permanent purge behaves the same is untested.
 - **Gate 7 in production.** The SMS half is built and tested and has never run.
-  No Twilio request has ever reached the endpoint, and no suppression has ever
-  been written. Signature verification uses the Twilio SDK, and the tests sign
+  No Twilio request has ever reached the endpoint, and **no suppression row has
+  ever been committed** — the only two ever inserted were synthetic, inside the
+  migration-002 verification transaction, and were rolled back. Signature verification uses the Twilio SDK, and the tests sign
   with an independent local HMAC — two implementations agreeing — but Twilio
   itself has never signed a request to this endpoint, and the URL
   reconstruction from forwarded headers has never met a real one.
