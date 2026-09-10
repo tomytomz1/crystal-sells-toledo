@@ -523,3 +523,131 @@ export function consentWriteLogShape(props) {
     reoptin_requested: names.includes(REOPTIN_PROPERTIES.channel),
   };
 }
+
+/* =====================================================================
+   SUPPRESSION WRITES — Gate 7
+   =====================================================================
+   The comment on HUBSPOT_SUPPRESSION_VOCABULARY says a future phase must
+   map internal classifications onto HubSpot's dropdowns EXPLICITLY and
+   never pass an internal constant straight through. This is that mapping,
+   and it lives here because this module owns the schema and the
+   vocabulary, not because it owns the decision.
+
+   Design: docs/updates/2026-09-10-stop-dnc-suppression-decision.md §2.11.
+
+   THE WRITE ONLY EVER SETS A FLAG TRUE. It never writes false, never
+   clears a timestamp, never clears a reason, and never touches a consent
+   property. A projection that could un-suppress would be worse than no
+   projection at all.
+   ===================================================================== */
+
+/** How a suppression came to be, in this system's terms. */
+export const SUPPRESSION_TRIGGER = Object.freeze({
+  /* A recognised keyword, or a carrier/Twilio opt-out. */
+  KEYWORD: "keyword",
+  /* Our own deterministic phrase matching. */
+  NATURAL_LANGUAGE: "natural_language",
+  /* A human entered it. */
+  MANUAL: "manual",
+});
+
+/* Internal trigger -> the value each HubSpot dropdown will actually
+   accept. Three separate maps because the three dropdowns have three
+   different vocabularies, which is exactly the trap the original comment
+   was warning about. */
+const SMS_REASON_BY_TRIGGER = Object.freeze({
+  [SUPPRESSION_TRIGGER.KEYWORD]: "stop_keyword",
+  [SUPPRESSION_TRIGGER.NATURAL_LANGUAGE]: "natural_language",
+  [SUPPRESSION_TRIGGER.MANUAL]: "manual",
+});
+const VOICE_REASON_BY_TRIGGER = Object.freeze({
+  [SUPPRESSION_TRIGGER.KEYWORD]: "voice_request",
+  [SUPPRESSION_TRIGGER.NATURAL_LANGUAGE]: "natural_language",
+  [SUPPRESSION_TRIGGER.MANUAL]: "manual",
+});
+const GLOBAL_REASON_BY_TRIGGER = Object.freeze({
+  [SUPPRESSION_TRIGGER.KEYWORD]: "consumer_request",
+  [SUPPRESSION_TRIGGER.NATURAL_LANGUAGE]: "consumer_request",
+  [SUPPRESSION_TRIGGER.MANUAL]: "manual",
+});
+
+/**
+ * The property patch for one suppression, folded onto what HubSpot already
+ * holds.
+ *
+ * `scope` is `sms`, `voice` or `global`. `current` is a parsed consent
+ * state from fromHubSpotConsentProperties(), or null when the contact's
+ * state was not readable — in which case the flag is still SET, because
+ * failing to read is never a reason to leave someone un-suppressed.
+ *
+ * Returns `{}` when there is nothing to write, which is the common case
+ * for a duplicate STOP.
+ */
+export function toHubSpotSuppressionProperties({
+  scope, trigger = SUPPRESSION_TRIGGER.KEYWORD, at, current = null,
+} = {}) {
+  const S = SUPPRESSION_PROPERTIES;
+  const props = {};
+  const held = current?.suppression || {};
+
+  /* THE EARLIEST REFUSAL IS THE ONE THAT MATTERS. A later duplicate STOP
+     does not restart the clock, so an existing timestamp is left exactly
+     as it stands and only a missing one is filled in. */
+  const setChannel = (flagProp, atProp, reasonProp, existing, reasonValue) => {
+    const alreadyFlagged = Boolean(existing);
+    const hasTimestamp = Boolean(existing && str(existing.at));
+    if (alreadyFlagged && hasTimestamp) return;      // nothing to add
+    if (!alreadyFlagged) props[flagProp] = "true";
+    if (!hasTimestamp) props[atProp] = toHubSpotDateTime(at, atProp);
+    if (!alreadyFlagged) {
+      props[reasonProp] = assertConsentEnum(
+        reasonProp, reasonValue, HUBSPOT_SUPPRESSION_VOCABULARY[reasonProp]);
+    }
+  };
+
+  if (scope === "global") {
+    setChannel(S.doNotContact, S.doNotContactAt, S.doNotContactReason,
+      held.global, GLOBAL_REASON_BY_TRIGGER[trigger]);
+    /* A global request cascades, matching applySuppression()'s GLOBAL
+       branch. Both channels become suppressed; neither is ever cleared. */
+    setChannel(S.smsSuppressed, S.smsSuppressedAt, S.smsSuppressionReason,
+      held.sms, SMS_REASON_BY_TRIGGER[trigger]);
+    setChannel(S.doNotCall, S.doNotCallAt, S.doNotCallReason,
+      held.voice, VOICE_REASON_BY_TRIGGER[trigger]);
+    return props;
+  }
+
+  if (scope === "sms") {
+    setChannel(S.smsSuppressed, S.smsSuppressedAt, S.smsSuppressionReason,
+      held.sms, SMS_REASON_BY_TRIGGER[trigger]);
+    return props;
+  }
+
+  if (scope === "voice") {
+    setChannel(S.doNotCall, S.doNotCallAt, S.doNotCallReason,
+      held.voice, VOICE_REASON_BY_TRIGGER[trigger]);
+    return props;
+  }
+
+  throw new Error("unknown suppression scope: " + String(scope));
+}
+
+/**
+ * The re-opt-in patch. Records that someone asked to come back and grants
+ * NOTHING: no status, no consent timestamp, no version. A START from the
+ * handset is stronger evidence than a ticked web box and is still not a
+ * grant, because it carries no disclosure to have agreed to.
+ */
+export function toHubSpotReoptinProperties({ channel, at } = {}) {
+  const value = channel === "ai_voice" ? "ai_voice" : channel === "both" ? "both" : "sms";
+  return {
+    [REOPTIN_PROPERTIES.channel]:
+      assertConsentEnum(REOPTIN_PROPERTIES.channel, value, REOPTIN_CHANNEL_VALUES),
+    [REOPTIN_PROPERTIES.at]: toHubSpotDateTime(at, REOPTIN_PROPERTIES.at),
+  };
+}
+
+/** A PII-free log line: which properties were written, never their values. */
+export function suppressionWriteLogShape(props) {
+  return { properties: Object.keys(props || {}).sort() };
+}

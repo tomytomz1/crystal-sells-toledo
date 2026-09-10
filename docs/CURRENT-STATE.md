@@ -249,6 +249,16 @@ Stated plainly, because the rest of this section reads like everything works.
 - **Production with the feature on.** Never enabled there, and not scheduled.
 - **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
   has been observed. Whether a permanent purge behaves the same is untested.
+- **Gate 7 in production.** The SMS half is built and tested and has never run.
+  No Twilio request has ever reached the endpoint, migration `002` has never
+  been applied, and no suppression has ever been written. Signature
+  verification uses the Twilio SDK, and the tests sign with an independent
+  local HMAC — two implementations agreeing — but Twilio itself has never
+  signed a request to this endpoint, and the URL reconstruction from forwarded
+  headers has never met a real one.
+- **Gate 7's remaining halves.** No voice ingress exists; unclassified inbound
+  messages reach no operator; webhook retry is unconfigured. None of these is
+  a deployment step — each is unbuilt work.
 
 Design, failure-semantics contract and the code:
 `docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
@@ -262,7 +272,37 @@ Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
 **later phases**. The ledger's `reason_code`, `evidence_text`, `metadata` and
 `all` channel exist and are unused, so that phase needs no second migration.
 
-**Gate 7 is designed but not implemented.** The decision document settles how
+**Gate 7 is implemented for SMS, inert, and NOT fully complete.** The endpoint,
+the classifier, the suppression ledger events, the HubSpot projection, migration
+`002` and six static guards are tested — and **nothing is live**: no Twilio
+number points at `POST /api/twilio-inbound`, `TWILIO_AUTH_TOKEN` is set in no
+environment (with it absent the endpoint answers 503 and reads no request body),
+and `db/002_suppression_lookup.sql` **has not been applied**. Migration `002`
+adds a `SECURITY DEFINER` lookup function returning `channel` and
+`suppressed_at` only, and a sender role holding `EXECUTE` and **no table
+privileges**; `db/001` is untouched.
+
+**Three things keep gate 7 open**, and none is closed by the implementation:
+
+- **No voice ingress at all.** *"stop calling me"* arriving by SMS suppresses
+  voice, but nothing receives a Retell webhook, so a **spoken** do-not-call
+  cannot reach any of it.
+- **Unclassified inbound messages are not surfaced to an operator.** The design
+  requires it; a log line is not a workflow, and the event is named
+  `unclassified_not_surfaced` to say so.
+- **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
+  redeliver** an incoming-message webhook. Until retry is configured — a
+  Messaging Service change, frozen under the TCR hold — a ledger outage during a
+  real STOP loses the evidence permanently. Twilio still blocks the number, so
+  the consumer is protected; our record of why would not exist.
+
+Signature verification uses the Twilio SDK's `validateRequest`, not a
+hand-rolled HMAC. `occurred_at` on a suppression row is **server receipt time**:
+the incoming-SMS webhook carries no message timestamp, and `MessageSid` remains
+the correlation key to Twilio's authoritative one. What a human must still do:
+`docs/updates/2026-09-10-stop-dnc-suppression.md`.
+
+The design document settles how
 suppression behaves — keyed to the phone number rather than the contact, never
 cleared automatically, Twilio as the STOP enforcement point with our records
 mirroring it, signature verification before parsing, idempotency by
@@ -303,5 +343,6 @@ Open one of these only when the task actually needs it.
 | Gate 4 Stage B and gate 5 — the full round trip, the 34-row rendering, the deletion-survival test, the Preview CRM exposure | `docs/updates/2026-09-10-consent-ledger-stage-b-verification.md` |
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
+| Gate 7 as built — the endpoint, the classifier and its near-misses, the ledger event shape, the HubSpot projection, migration 002, the static guards | `docs/updates/2026-09-10-stop-dnc-suppression.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |

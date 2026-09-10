@@ -26,7 +26,7 @@ import { buildDescription, buildSummary } from "./description.mjs";
 import { applySubmissionConsent } from "./consent.mjs";
 import {
   consentStateEnabled, consentPropertiesToRead, fromHubSpotConsentProperties,
-  toHubSpotConsentProperties, emptyConsentState,
+  toHubSpotConsentProperties, emptyConsentState, SMS_STATE_PROPERTIES,
 } from "./hubspot-consent-state.mjs";
 import { log, logError } from "./log.mjs";
 
@@ -566,4 +566,105 @@ export async function createLead(payload) {
     }
     throw err;
   }
+}
+
+/* =====================================================================
+   SUPPRESSION PROJECTION — Gate 7
+   =====================================================================
+   Design: docs/updates/2026-09-10-stop-dnc-suppression-decision.md §2.1, §2.11.
+
+   Suppression is keyed to the NUMBER. What is written here is a
+   projection for the operator's eyes, and enforcement does not depend on
+   it — which is why a failure in this file may be swallowed by the caller
+   while a ledger failure may not.
+
+   Every contact holding the number is flagged. If three contacts share a
+   handset and one replies STOP, there is no defensible version in which
+   two of them are still contactable on it.
+   ===================================================================== */
+
+/**
+ * The forms the same US number plausibly takes in a CRM.
+ *
+ * Contacts arrive from a form that stores the display form, from imports,
+ * and from manual entry, so an exact match on one representation would
+ * miss most of them. Matching is best-effort BY DESIGN: enforcement
+ * resolves by number against the ledger, so a contact missed here is still
+ * refused a send. Under-matching costs operator visibility, never
+ * compliance.
+ */
+export function phoneSearchVariants(e164) {
+  const value = String(e164 || "").trim();
+  const m = /^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/.exec(value);
+  if (!m) return value ? [value] : [];
+  const [, a, b, c] = m;
+  return [
+    value,                       // +14195551234
+    `1${a}${b}${c}`,             // 14195551234
+    `${a}${b}${c}`,              // 4195551234
+    `(${a}) ${b}-${c}`,          // (419) 555-1234
+    `${a}-${b}-${c}`,            // 419-555-1234
+    `${a}.${b}.${c}`,            // 419.555.1234
+  ];
+}
+
+/**
+ * Every contact carrying this number, with its parsed consent state.
+ *
+ * Searches the standard phone fields and the consent phone property, since
+ * a contact may have consented on a number that is not their primary one.
+ */
+export async function findContactsByPhone(e164) {
+  const variants = phoneSearchVariants(e164);
+  if (!variants.length) return [];
+
+  const consentProps = consentPropertiesToRead();
+  const properties = ["email", "phone", "mobilephone", ...consentProps];
+  /* Each filterGroup is OR'd against the others, so one group per property
+     keeps the request inside HubSpot's group limit while covering all the
+     representations through a single IN filter per group. */
+  const groups = [
+    { filters: [{ propertyName: "phone", operator: "IN", values: variants }] },
+    { filters: [{ propertyName: "mobilephone", operator: "IN", values: variants }] },
+  ];
+  /* The property NAME comes from the module that owns the schema — naming
+     it here would put the same string in two places, which is the drift
+     tools/check.mjs's containment rule exists to stop. */
+  const consentPhoneProp = SMS_STATE_PROPERTIES.phone;
+  if (consentProps.includes(consentPhoneProp))
+    groups.push({ filters: [{ propertyName: consentPhoneProp, operator: "IN", values: variants }] });
+
+  const res = await hubspotFetch("/crm/v3/objects/contacts/search", {
+    method: "POST",
+    body: JSON.stringify({ filterGroups: groups, properties, limit: 100 }),
+  });
+  const json = await readJson(res);
+  if (!res.ok) throw hubspotError("SUPPRESSION_SEARCH", res.status, json);
+  if (!json || !Array.isArray(json.results))
+    throw new Error("HUBSPOT_SEARCH_MALFORMED_RESPONSE");
+
+  return json.results.filter((hit) => hit && hit.id).map((hit) => ({
+    id: String(hit.id),
+    /* Parsed where possible. A contact whose stored state cannot be read
+       is NOT skipped: `consent: null` means "unreadable", and the caller
+       still writes the flag, because failing to read is never a reason to
+       leave someone un-suppressed. */
+    consent: (() => {
+      if (!consentProps.length) return null;
+      try { return fromHubSpotConsentProperties(hit.properties, "SUPPRESSION_SEARCH"); }
+      catch { return null; }
+    })(),
+  }));
+}
+
+/**
+ * Set suppression properties on one contact. Additive only — the patch is
+ * built by toHubSpotSuppressionProperties(), which can produce a flag
+ * being set true and can produce nothing, and has no branch that writes
+ * false or clears anything.
+ */
+export async function writeSuppressionProperties(contactId, props) {
+  if (!props || !Object.keys(props).length) return { written: false };
+  await updateContact(contactId, props);
+  return { written: true };
 }

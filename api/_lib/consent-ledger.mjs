@@ -85,6 +85,18 @@ export const EVENT_TYPE = Object.freeze({
 
 /** Every event this phase writes comes from a website form submission. */
 export const SOURCE_WEBSITE = "website";
+/* Inbound sources. A suppression NEVER carries SOURCE_WEBSITE: the website
+   path has no way to learn that someone opted out, and a suppression that
+   claimed to come from a form submission would misdescribe its own
+   provenance in the record that exists to prove provenance. */
+export const SOURCE_TWILIO = "twilio";
+export const SOURCE_RETELL = "retell";
+
+/* Consumer free text, capped. The only free text this table holds, and it
+   is stored ONLY for a message classified as an opt-out — the message IS
+   the evidence of the opt-out, which is not an argument that extends to
+   "what time is the showing?". See the Gate 7 decision document §2.10. */
+export const EVIDENCE_TEXT_MAX_BYTES = 1024;
 
 /* The columns this module writes, in order, and the ONLY ones it writes.
 
@@ -114,6 +126,18 @@ export const LEDGER_COLUMNS = Object.freeze([
   "consent_copy_version",
   "consent_copy_text",
   "schema_version",
+]);
+
+/* The columns a SUPPRESSION event writes. A superset of LEDGER_COLUMNS by
+   exactly three: the three db/001 created unused so this phase would need
+   no migration against an append-only table.
+
+   `event_id` and `recorded_at` stay absent for the same reason as above. */
+export const SUPPRESSION_COLUMNS = Object.freeze([
+  ...LEDGER_COLUMNS,
+  "reason_code",
+  "evidence_text",
+  "metadata",
 ]);
 
 /* ---------------------------------------------------------------------
@@ -387,13 +411,13 @@ export function buildLedgerEvents(evidence, { source = SOURCE_WEBSITE } = {}) {
    So: no half-write on failure; convergence, not refusal, on retry. Both
    follow from deterministic dedupe keys, and neither weakens the other.
    --------------------------------------------------------------------- */
-export function buildInsert(rows) {
+export function buildInsert(rows, { columns = LEDGER_COLUMNS } = {}) {
   if (!Array.isArray(rows) || !rows.length)
     throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "rows");
 
   const params = [];
   const tuples = rows.map((r) => {
-    const placeholders = LEDGER_COLUMNS.map((col) => {
+    const placeholders = columns.map((col) => {
       params.push(r[col]);
       return "$" + params.length;
     });
@@ -401,7 +425,7 @@ export function buildInsert(rows) {
   });
 
   const text =
-    "INSERT INTO " + LEDGER_TABLE + " (" + LEDGER_COLUMNS.join(", ") + ")\n" +
+    "INSERT INTO " + LEDGER_TABLE + " (" + columns.join(", ") + ")\n" +
     "VALUES " + tuples.join(", ") + "\n" +
     /* A conflict is SUCCESS, per row. It means that exact event is already
        in the ledger, which is the answer a retry wants; any sibling row
@@ -460,6 +484,38 @@ export function _setExecutor(fn) { executor = fn; }
 export function _resetExecutor() { executor = neonExecutor; }
 
 /**
+ * Send one statement, bounded. Shared by every append in this module so
+ * that the timeout, the abort and the error containment cannot drift apart
+ * between the consent path and the suppression path.
+ */
+async function runStatement(text, params, { url, timeoutMs }) {
+  const ctrl = new AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      ctrl.abort();
+      reject(new ConsentLedgerError(LEDGER_TIMEOUT, String(timeoutMs) + "ms"));
+    }, timeoutMs);
+  });
+
+  try {
+    /* The race is the guarantee, not the signal: a driver that ignores an
+       abort must still not be able to hold a request open. */
+    await Promise.race([
+      executor(text, params, { url, signal: ctrl.signal }),
+      deadline,
+    ]);
+  } catch (err) {
+    if (err?.ledgerFailed) throw err;
+    /* Nothing of the driver's error TEXT survives — only the class name
+       and symbolic code, whitelisted by driverShape(). */
+    throw new ConsentLedgerError(LEDGER_APPEND_FAILED, "", driverShape(err));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Append this submission's consent events. Resolves `{ appended: true }`
  * or THROWS — there is no third answer, and no partial one.
  *
@@ -478,34 +534,113 @@ export async function appendConsentEvents(evidence, {
 
   const rows = buildLedgerEvents(evidence, { source });
   const { text, params } = buildInsert(rows);
-
-  const ctrl = new AbortController();
-  let timer;
-  const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      ctrl.abort();
-      reject(new ConsentLedgerError(LEDGER_TIMEOUT, String(timeoutMs) + "ms"));
-    }, timeoutMs);
-  });
-
-  try {
-    /* The race is the guarantee, not the signal: a driver that ignores an
-       abort must still not be able to hold a lead open. */
-    await Promise.race([
-      executor(text, params, { url, signal: ctrl.signal }),
-      deadline,
-    ]);
-  } catch (err) {
-    if (err?.ledgerFailed) throw err;
-    /* Nothing of the driver's error TEXT survives — only the class name
-       and symbolic code, whitelisted by driverShape(). */
-    throw new ConsentLedgerError(LEDGER_APPEND_FAILED, "", driverShape(err));
-  } finally {
-    clearTimeout(timer);
-  }
+  await runStatement(text, params, { url, timeoutMs });
 
   /* Deliberately silent on success. api/lead.js logs the append against
      the submission it belongs to; a second line here would say the same
      thing about the same event from a module that knows less about it. */
   return { appended: true, events: rows.length };
+}
+
+/* =====================================================================
+   SUPPRESSION EVENTS — Gate 7
+   =====================================================================
+   A STOP, a spoken do-not-call, or a natural-language opt-out. These
+   arrive from a provider webhook, never from the website, and they are the
+   only events in this table that carry consumer free text.
+
+   Design: docs/updates/2026-09-10-stop-dnc-suppression-decision.md.
+
+   Two things differ from a consent event and both are deliberate:
+
+   * `submission_id` is NULL. A suppression is not about a form submission;
+     it is about a NUMBER. Correlation is by phone_e164 and by
+     source_event_id (the provider's message or call id).
+
+   * `evidence_text` carries the consumer's exact words — but ONLY for a
+     message classified as an opt-out. Ordinary inbound conversation
+     produces no row at all. The message IS the evidence of the opt-out,
+     which is why it is stored; that argument does not extend to a question
+     about a showing, and this table cannot delete what it is given.
+   ===================================================================== */
+
+/** Cap the consumer's words without silently losing that they were cut. */
+function capEvidence(text) {
+  const value = String(text == null ? "" : text);
+  if (Buffer.byteLength(value, "utf8") <= EVIDENCE_TEXT_MAX_BYTES) return value;
+  /* Byte-safe truncation: slice on bytes, then drop any partial trailing
+     character rather than writing a broken one into the evidence. */
+  const cut = Buffer.from(value, "utf8")
+    .subarray(0, EVIDENCE_TEXT_MAX_BYTES - 16)
+    .toString("utf8")
+    .replace(/�+$/, "");
+  return cut + "…[truncated]";
+}
+
+/**
+ * One suppression-class row.
+ *
+ * `channel` is `sms`, `ai_voice` or `all`; `eventType` is `suppressed`,
+ * `revoked` or `reoptin_requested`. The caller has already classified —
+ * this function records, it does not decide.
+ */
+export function buildSuppressionEvent({
+  occurredAt, channel, eventType, phone, source, sourceEventId,
+  reasonCode = null, evidenceText = null, metadata = null,
+} = {}) {
+  const at = requireInstant(occurredAt, "occurred_at");
+  const ch = requireText(channel, "channel");
+  const type = requireText(eventType, "event_type");
+  const src = requireText(source, "source");
+  const eventId = requireText(sourceEventId, "source_event_id");
+  /* Fails closed exactly as the consent path does: a suppression whose
+     number cannot be normalised is not written at all, because a row that
+     does not say which line it concerns proves nothing about that line. */
+  const phoneE164 = toE164(phone);
+
+  if (src === SOURCE_WEBSITE)
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "source:website");
+
+  return {
+    occurred_at: at,
+    channel: ch,
+    event_type: type,
+    phone_e164: phoneE164,
+    source: src,
+    source_event_id: eventId,
+    dedupe_key: dedupeKey({ source: src, sourceEventId: eventId, channel: ch, eventType: type }),
+    /* NULL, deliberately — see the block comment above. */
+    submission_id: null,
+    form_type: null,
+    page_path: null,
+    consent_copy_version: null,
+    consent_copy_text: null,
+    schema_version: SCHEMA_VERSION,
+    reason_code: reasonCode === null ? null : String(reasonCode),
+    evidence_text: evidenceText === null ? null : capEvidence(evidenceText),
+    metadata: JSON.stringify(metadata && typeof metadata === "object" ? metadata : {}),
+  };
+}
+
+/**
+ * Append suppression-class events. Resolves `{ appended: true, events }`
+ * or THROWS, exactly like the consent path.
+ *
+ * The webhook that calls this returns 5xx when it throws, so Twilio
+ * retries — and the retry is safe because the dedupe key is derived from
+ * the provider's own message id. That no-op behaviour was measured against
+ * the live database on 10 September 2026, not assumed.
+ */
+export async function appendSuppressionEvents(events, {
+  env = process.env, timeoutMs = LEDGER_TIMEOUT_MS,
+} = {}) {
+  if (!Array.isArray(events) || !events.length)
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "events");
+
+  const url = String(env[LEDGER_URL_VAR] || "").trim();
+  if (!url) throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, LEDGER_URL_VAR);
+
+  const { text, params } = buildInsert(events, { columns: SUPPRESSION_COLUMNS });
+  await runStatement(text, params, { url, timeoutMs });
+  return { appended: true, events: events.length };
 }
