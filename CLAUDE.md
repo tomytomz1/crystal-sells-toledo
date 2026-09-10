@@ -89,6 +89,56 @@ gate. Do not run a successful full suite locally *and* again in CI. Read CI logs
 only on failure. Budget for ordinary Tier 1/2 work: targeted runs after real code
 changes, **zero** local full-suite runs, **zero** mutation runs, one CI run.
 
+## Pre-handoff adversarial review
+
+**Tier 3 and Tier 4 work — and any change involving security, authentication,
+secrets, PII, consent, suppression, CRM writes, external side effects, or money
+or lead-loss risk — gets one adversarial review after implementation and after
+the targeted tests pass, and before the pull request is presented as ready.**
+
+Stop implementing. Re-read the complete diff cold. Assume at least one defect is
+still there, and do not defend the implementation merely because Claude wrote
+it. Check the changed behaviour against the written contracts — `CLAUDE.md`,
+`docs/CURRENT-STATE.md`, `docs/WORKFLOW.md`, the task or design document, and
+the modules the diff actually touches — and fix material findings before
+presenting.
+
+**One pass is the requirement.** A second review is required *only* if that pass
+found and fixed a material defect, and then it covers **the correction delta
+only**. There is no third pass. A review that finds nothing material ends with
+**no commit** — do not manufacture one to show for it.
+
+The lesson from [#24](https://github.com/tomytomz1/crystal-sells-toledo/pull/24),
+in one line: **passing tests are evidence, not proof that the tested invariant is
+the right invariant.** Every round there found something the prose promised that
+the code did not deliver — a deadline that stopped at the response headers, a
+tally that lost a contact, a static guard satisfied while its invariant was
+broken — and the tests covering each of them were passing.
+
+This is a **reading** pass, not a testing tier. It adds no local full-suite run
+and no mutation run; the risk-based table above still decides what is executed.
+
+The attack list, the two questions that must be asked in words, and the proof
+rules: `docs/WORKFLOW.md` § Pre-handoff adversarial review.
+
+## CI is read, never waited on
+
+**Never create a background task whose purpose is waiting or polling for GitHub
+CI.** No background sleep loop, no "wait for CI" / "keep waiting for CI" /
+"final wait" shell, no concurrent pollers, and **no sleep process left alive
+when the session ends.**
+
+Push, let CI run, and read it directly when a result is actually needed. If the
+run is complete, record its real `status` and `conclusion`. If it is still
+pending at the allowed final check, **report it as pending and stop** — a later
+pulse verifies completion independently. **Never infer elapsed CI time from how
+long the session feels.**
+
+This is not a licence to poll by hand instead. Replacing a background waiter
+with an invented re-check cadence is the same mistake in a different shape.
+
+Procedure, and how to read a run whose status is stale: `docs/WORKFLOW.md` § CI.
+
 ## Write-ups — proportionate
 
 A `docs/updates/YYYY-MM-DD-<slug>.md` is required only when work changes
