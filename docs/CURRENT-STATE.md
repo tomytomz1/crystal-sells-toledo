@@ -65,7 +65,8 @@ Schema in the production HubSpot portal:
   requires `COMMUNICATIONS_CONSENT_ENABLED` on *somewhere*, and Production is
   not a candidate — is answered: **Preview is that somewhere.**
   `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
-  Vercel **Preview only**, and gate 4 is in progress there.
+  Vercel **Preview only**. **Gate 4 Stage A closed on 10 September 2026**;
+  Stage B (the same round trip with HubSpot credentials) and gates 5–10 remain.
 - **A2P/TCR readiness is a separate activation dependency.** This repository makes
   no claim about its status.
 
@@ -147,12 +148,20 @@ grant has been proven. Vercel Preview points at it; Production does not.**
   this role deliberately lacks. Fixed by dropping the target; **no database or
   migration change was needed or made.** See
   `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md`.
-- **A successful append from application code is still unproven.** The
-  corrected statement is verified against a local Postgres 16 with `db/001`
-  applied verbatim and an `INSERT`-only role, but no row written by
-  `api/lead.js` has yet landed in the Neon ledger. Until a preview submission
-  produces two rows there, the Vercel-to-Neon round trip is unexercised end to
-  end.
+- **The application can write to the ledger — proven, 10 September 2026.** A
+  Vercel Preview submission logged `lead.consent.ledger_appended` in 214 ms and
+  produced two correct rows: one `sms / consent_selected`, one
+  `ai_voice / consent_not_selected`, same `submission_id`, `source = website`,
+  `event_id` and `recorded_at` database-generated, `phone_e164` in E.164, the
+  full disclosure text stored. The driver's HTTP path, the pooled host, the real
+  `ON CONFLICT` clause against the live grant and the Vercel runtime are all now
+  exercised. **Gate 4 Stage A is closed.**
+- **Stage B is open.** Preview has no HubSpot credential, so the endpoint stops
+  at `lead.not_configured` after the append: no `CONSENT LEDGER: RECORDED` row
+  has been rendered and no `cst_*` grant has been written by a real submission.
+- **Idempotency against Neon is unverified.** The replay and partial-heal
+  behaviour is measured against a local Postgres 16; no submission has been
+  replayed onto an existing dedupe key in the Neon ledger.
 - **A ledger failure now says why.** `lead.consent.ledger_failed` carries
   `ledger_driver_error` (the error class) and `ledger_driver_code` (a symbolic
   code or SQLSTATE), whitelisted to identifier characters so no message, host
