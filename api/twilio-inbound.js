@@ -3,6 +3,11 @@
  * The only job of this endpoint is to record that someone told us to stop.
  * It sends nothing, replies with nothing, and grants nothing.
  *
+ * SMS ONLY. There is no voice ingress: the classifier and the ledger both
+ * handle `ai_voice` and `voice_dnc`, and a spoken "do not call me again"
+ * can be recorded — but nothing receives a Retell webhook, so no spoken
+ * opt-out can reach any of it. Gate 7 is closed for SMS and open for voice.
+ *
  * Gate 7 design: docs/updates/2026-09-10-stop-dnc-suppression-decision.md
  *
  * ---------------------------------------------------------------------
@@ -25,14 +30,19 @@
  * RESPONSE POLICY
  * ---------------------------------------------------------------------
  *   signature invalid                     403, nothing written
- *   nothing classified                    200, no ledger event, surfaced
- *   ledger append failed                  5xx, so Twilio retries
+ *   nothing classified                    200, no ledger event, logged only
+ *   ledger append failed                  5xx (fail closed; see retry note)
  *   ledger appended, HubSpot failed       200, logged loudly
  *   everything succeeded                  200
  *
- * A retry is safe by construction: the dedupe key is derived from Twilio's
- * own MessageSid, and the replay no-op was measured against the live
- * database on 10 September 2026 rather than assumed.
+ * A redelivery, IF ONE ARRIVES, is safe by construction: the dedupe key is
+ * derived from Twilio's own MessageSid, and the replay no-op was measured
+ * against the live database on 10 September 2026 rather than assumed.
+ *
+ * It is not assumed that one WILL arrive. Twilio does not redeliver a
+ * failed incoming-message webhook by default; retry must be configured
+ * explicitly, and that configuration is a live-activation prerequisite
+ * rather than something this code can rely on.
  *
  * ---------------------------------------------------------------------
  * WHAT NEVER REACHES A LOG
@@ -157,6 +167,13 @@ export default async function handler(req, res) {
 
   const messageSid = String(params.MessageSid || params.SmsMessageSid || "").trim();
   const from = String(params.From || "").trim();
+  /* SERVER RECEIPT TIME, and it is worth being exact about that. The
+     ordinary incoming-SMS webhook carries no message timestamp — there is
+     no `DateCreated` on this payload — so `occurred_at` is when THIS
+     function received the request, not when Twilio created the message.
+     The two are normally milliseconds apart and can diverge under retry or
+     queueing. `MessageSid` in `source_event_id` remains the correlation
+     key to Twilio's own record, which holds the authoritative timestamp. */
   const occurredAt = new Date().toISOString();
 
   if (!messageSid || !from) {
@@ -173,8 +190,22 @@ export default async function handler(req, res) {
   if (!decision) {
     /* Not an opt-out. NO ledger event and no evidence_text: this table is
        a compliance record, not a message archive, and it cannot delete
-       what it is given. A human should read this one. */
-    log("twilio.inbound.unclassified", shape);
+       what it is given.
+
+       OPEN REQUIREMENT, DELIBERATELY NOT CLOSED HERE. The design says an
+       unclassified message must be SURFACED TO A HUMAN, and a log line is
+       not an operator workflow — nobody reads function logs hunting for a
+       missed opt-out. What is emitted below is a marker for whoever builds
+       that path, not a fulfilment of the requirement.
+
+       Left open rather than guessed at, because each obvious
+       implementation carries a decision that is not this code's to make:
+       forwarding the body to an operator inbox moves a consumer's message
+       into email, and writing it anywhere durable re-creates the
+       message-archive problem this endpoint exists to avoid. Nothing
+       accumulates meanwhile — no Twilio number points here.
+       See docs/updates/2026-09-10-stop-dnc-suppression.md. */
+    log("twilio.inbound.unclassified_not_surfaced", shape);
     return reply(res, 200, EMPTY_TWIML);
   }
 
@@ -227,9 +258,16 @@ export default async function handler(req, res) {
     await appendSuppressionEvents([event]);
     log("twilio.inbound.ledger_appended", shape);
   } catch (ledgerErr) {
-    /* THE EVIDENCE IS NOT DURABLE. 5xx so Twilio retries; the retry is a
-       no-op if this one did in fact land, because the dedupe key is
-       Twilio's own MessageSid. */
+    /* THE EVIDENCE IS NOT DURABLE, so this must not answer 200.
+       5xx is the fail-closed answer, NOT a retry mechanism: a 5xx on an
+       incoming-message webhook does not by itself make Twilio redeliver
+       under default behaviour. Retry has to be configured explicitly, and
+       doing so is a Messaging Service change — frozen while the TCR hold
+       on error 30753 is open, and listed as a live-activation prerequisite
+       in docs/updates/2026-09-10-stop-dnc-suppression.md.
+       IF a redelivery does arrive it is safe, because the dedupe key is
+       Twilio's own MessageSid. That is idempotency, not a guarantee that a
+       retry happens. */
     log("twilio.inbound.ledger_failed", { ...shape, ...ledgerLogShape(ledgerErr) });
     return reply(res, 503);
   }

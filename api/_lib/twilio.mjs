@@ -12,7 +12,12 @@
  * credential; the caller logs a classification and never a value.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+/* The cryptography is Twilio's own. `validateRequest` is the function the
+   Twilio Node SDK ships for exactly this, and using it means the signature
+   algorithm cannot drift from whatever Twilio actually does — including if
+   Twilio ever changes it. What stays ours is the URL, below, because only
+   this deployment knows what public URL Twilio addressed. */
+import twilio from "twilio";
 
 export const TWILIO_TOKEN_VAR = "TWILIO_AUTH_TOKEN";
 
@@ -65,37 +70,22 @@ export function requestUrl(req) {
 /* ---------------------------------------------------------------------
    THE SIGNATURE
    ---------------------------------------------------------------------
-   Twilio's scheme: take the full URL, then for every POST parameter in
-   ASCII order by key, append the key immediately followed by its value.
-   HMAC-SHA1 that string with the account auth token, base64 the digest.
+   Delegated to `twilio.validateRequest(token, signature, url, params)`,
+   which is the SDK's implementation of the scheme Twilio signs with:
+   the full URL, then every POST parameter in ASCII order by key with the
+   key immediately followed by its value and no separator, HMAC-SHA1 with
+   the account auth token, base64.
 
-   Sorting is by KEY over the raw key strings. Values are appended with no
-   separator at all — a detail that looks like a bug and is not.
+   This was hand-rolled once and matched. It is delegated anyway: a
+   signature check that is subtly wrong fails closed and is therefore
+   invisible until every real webhook is refused, and there is no upside
+   to owning that arithmetic. The SDK also does the constant-time compare.
+
+   ALL RECEIVED PARAMETERS PARTICIPATE. `params` is whatever the form body
+   decoded to, entire — nothing is filtered, whitelisted or dropped before
+   validation, so an injected extra field invalidates the signature rather
+   than sailing past a filter.
    --------------------------------------------------------------------- */
-export function signatureBase(url, params) {
-  let data = String(url);
-  for (const key of Object.keys(params || {}).sort())
-    data += key + String(params[key] == null ? "" : params[key]);
-  return data;
-}
-
-export function computeSignature(url, params, token) {
-  return createHmac("sha1", String(token))
-    .update(Buffer.from(signatureBase(url, params), "utf8"))
-    .digest("base64");
-}
-
-/** Constant-time compare. A `===` on a signature is a timing oracle. */
-function sameSignature(a, b) {
-  const left = Buffer.from(String(a), "utf8");
-  const right = Buffer.from(String(b), "utf8");
-  /* timingSafeEqual throws on a length mismatch, which would itself leak
-     length through the exception path, so length is checked first and the
-     comparison is still run against a same-length buffer to keep the work
-     constant for any input that reaches here. */
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
 
 /**
  * Verify an inbound Twilio request.
@@ -103,7 +93,7 @@ function sameSignature(a, b) {
  * Returns `{ ok: true }` or `{ ok: false, reason }` — it never throws, so
  * a caller cannot accidentally treat an exception path as success.
  *
- * `params` must be the parsed form parameters. Twilio signs the
+ * `params` must be the parsed form parameters, complete. Twilio signs the
  * parameters, not the raw byte stream, which is why the caller may parse
  * the form encoding first: form-decoding is not interpretation, and the
  * classification that IS interpretation happens only after this returns.
@@ -119,9 +109,16 @@ export function verifyTwilioSignature(req, params, { env = process.env } = {}) {
   const url = requestUrl(req);
   if (!url) return { ok: false, reason: TWILIO_URL_UNRESOLVABLE };
 
-  const expected = computeSignature(url, params, token);
-  if (!sameSignature(provided, expected))
-    return { ok: false, reason: TWILIO_SIGNATURE_INVALID };
+  /* Wrapped: the SDK throwing must not become an exception path a caller
+     could mistake for success. Anything other than an explicit `true` is
+     a refusal. */
+  let valid = false;
+  try {
+    valid = twilio.validateRequest(token, provided, url, params || {}) === true;
+  } catch {
+    valid = false;
+  }
+  if (!valid) return { ok: false, reason: TWILIO_SIGNATURE_INVALID };
 
   return { ok: true };
 }

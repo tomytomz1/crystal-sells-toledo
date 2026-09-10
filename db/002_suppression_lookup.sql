@@ -70,10 +70,29 @@ CREATE ROLE <sender_role> LOGIN PASSWORD '<sender_password>';
 -- in words, the other a keyword or carrier action, and both deny sending.
 -- Reading only one of them would let a withdrawal through.
 --
+-- NO reason_code IN THE RESULT, and that is a correction rather than an
+-- omission. The design document's draft returned
+-- `min(occurred_at), min(reason_code)` — two INDEPENDENT aggregates, which
+-- pair a timestamp from one row with a reason from a different row.
+-- Measured on PostgreSQL 16, two suppressions on one number:
+--
+--   rows        2026-09-01 stop_keyword        2026-09-05 natural_language
+--   buggy       2026-09-01 natural_language    <- wrong pairing
+--   truth       2026-09-01 stop_keyword
+--
+-- The sender does not need the reason: send-time enforcement decides
+-- allow/deny from the PRESENCE of a suppression, and the permission
+-- resolver derives its own denial reason. So the narrowest contract is the
+-- right fix — a column that is not returned cannot be mis-paired.
+--
+-- If a future caller genuinely needs the reason, do NOT add
+-- `min(reason_code)`. Take the reason from the earliest row itself, e.g.
+-- DISTINCT ON (channel) ... ORDER BY channel, occurred_at.
+--
 -- STABLE, not IMMUTABLE: the answer changes as rows are appended.
 
 CREATE FUNCTION get_suppression_state(p_phone text)
-RETURNS TABLE (channel text, suppressed_at timestamptz, reason_code text)
+RETURNS TABLE (channel text, suppressed_at timestamptz)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
@@ -85,8 +104,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
   SELECT e.channel,
-         min(e.occurred_at)  AS suppressed_at,
-         min(e.reason_code)  AS reason_code
+         min(e.occurred_at) AS suppressed_at
   FROM public.communication_consent_events e
   WHERE e.phone_e164 = p_phone
     AND e.event_type IN ('suppressed', 'revoked')
@@ -115,8 +133,27 @@ GRANT  EXECUTE ON FUNCTION get_suppression_state(text) TO <sender_role>;
 -- SET ROLE — and if you use SET ROLE, remember RESET ROLE afterwards or
 -- every later statement in that session silently runs as the wrong role.
 --
---   As the SENDER role — expect SUCCESS:
+--   As the SENDER role — expect SUCCESS, and exactly two columns:
 --     SELECT * FROM get_suppression_state('+15555550100');
+--
+--   THE MIS-PAIRING REGRESSION. As the OWNER, insert two suppressions on
+--   one number whose timestamp order is the OPPOSITE of their lexical
+--   reason order, then call the function:
+--
+--     INSERT INTO communication_consent_events
+--       (occurred_at, channel, event_type, phone_e164, source,
+--        source_event_id, dedupe_key, reason_code)
+--     VALUES
+--       ('2026-09-01T00:00:00Z','sms','suppressed','+15555550199','manual',
+--        'chk_a','manual:chk_a:sms:suppressed','stop_keyword'),
+--       ('2026-09-05T00:00:00Z','sms','revoked','+15555550199','manual',
+--        'chk_b','manual:chk_b:sms:revoked','natural_language');
+--
+--     SELECT * FROM get_suppression_state('+15555550199');
+--
+--   Expect ONE row: sms, 2026-09-01 — the earliest — and NO reason column.
+--   If a reason column appears at all, this file has been edited back to
+--   the mis-pairing form and must be corrected before use.
 --
 --   As the SENDER role — expect PERMISSION DENIED, all four:
 --     SELECT count(*) FROM communication_consent_events;

@@ -1035,6 +1035,17 @@ for (const file of pages) {
     const migCode = mig.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     if (/GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)[\s\S]*?ON\s+(?:TABLE\s+)?communication_consent_events/i.test(migCode))
       fail(migRel, "grants a table privilege - the sender role must hold EXECUTE on the function and nothing else");
+    /* THE MIS-PAIRING. `min(occurred_at), min(reason_code)` are two
+       INDEPENDENT aggregates: they return a timestamp from one row and a
+       reason from a different one. Measured on PostgreSQL 16 with two
+       suppressions on one number, the buggy form paired 2026-09-01 with the
+       2026-09-05 row's reason. The sender does not need the reason at all,
+       so the function returns only channel and timestamp — and a column
+       that is not returned cannot be mis-paired. */
+    if (/min\s*\(\s*[a-z_.]*reason_code\s*\)/i.test(migCode))
+      fail(migRel, "aggregates reason_code independently of occurred_at - it would return a reason belonging to a different row than the timestamp");
+    if (/RETURNS\s+TABLE\s*\([^)]*reason_code/i.test(migCode))
+      fail(migRel, "returns reason_code - the sender decides from the PRESENCE of a suppression, and returning it invites the independent-aggregate mis-pairing");
   }
 }
 

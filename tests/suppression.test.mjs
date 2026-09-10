@@ -5,10 +5,13 @@
  * lawful permission.
  *
  * NOTHING HERE REACHES A DATABASE, TWILIO, OR HUBSPOT. The ledger's
- * executor seam is injected, the HubSpot layer is stubbed at
- * `globalThis.fetch`, and no Twilio credential is involved — the signature
- * scheme is verified against a locally computed HMAC, which is the same
- * arithmetic Twilio performs.
+ * executor seam is injected and no Twilio credential is involved.
+ *
+ * The production verifier delegates the cryptography to the Twilio SDK's
+ * `validateRequest`. These tests SIGN with an independent local HMAC —
+ * standing in for Twilio — so a passing test means two separate
+ * implementations of the scheme agree, rather than one implementation
+ * agreeing with itself.
  *
  * The invariants worth the most, in order:
  *   1. an unverified request is never interpreted
@@ -28,7 +31,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import {
-  verifyTwilioSignature, computeSignature, signatureBase, requestUrl,
+  verifyTwilioSignature, requestUrl,
   parseFormParams, optOutType, twilioConfigured,
   TWILIO_TOKEN_VAR, TWILIO_NOT_CONFIGURED, TWILIO_SIGNATURE_MISSING,
   TWILIO_SIGNATURE_INVALID, TWILIO_URL_UNRESOLVABLE,
@@ -76,6 +79,15 @@ describe("twilio signature verification", () => {
   const url = "https://crystalsellstoledo.com/api/twilio-inbound";
   const params = { From: PHONE, Body: "STOP", MessageSid: "SM1", AccountSid: "AC1" };
 
+  /* Stands in for Twilio. Deliberately NOT imported from the module under
+     test: the whole value of this file is that the signer and the verifier
+     are independent implementations. */
+  const sign = (target, fields) => {
+    let data = String(target);
+    for (const key of Object.keys(fields).sort()) data += key + String(fields[key]);
+    return createHmac("sha1", TOKEN).update(Buffer.from(data, "utf8")).digest("base64");
+  };
+
   const reqFor = (signature, over = {}) => ({
     url: "/api/twilio-inbound",
     headers: {
@@ -87,24 +99,56 @@ describe("twilio signature verification", () => {
   });
 
   test("a correctly signed request verifies", () => {
-    const sig = computeSignature(url, params, TOKEN);
     assert.deepEqual(
-      verifyTwilioSignature(reqFor(sig), params, { env: { [TWILIO_TOKEN_VAR]: TOKEN } }),
+      verifyTwilioSignature(reqFor(sign(url, params)), params,
+        { env: { [TWILIO_TOKEN_VAR]: TOKEN } }),
       { ok: true });
   });
 
-  /* The scheme, restated independently of the implementation: URL, then
-     each key immediately followed by its value, in ASCII key order, with
-     no separator anywhere. If this ever drifts, every real webhook is
-     refused — loudly, which is the right direction, but it is worth
-     pinning the arithmetic rather than the function. */
-  test("the signature base is the URL then sorted key+value pairs, unseparated", () => {
+  /* The SDK is the implementation; this asserts it agrees with the scheme
+     Twilio documents, computed here independently. If the two ever
+     disagree, this fails rather than every real webhook being refused. */
+  test("the SDK accepts a signature built from the documented scheme", () => {
+    const base = "https://x/ya1b2c3";
+    const sig = createHmac("sha1", TOKEN).update(Buffer.from(base, "utf8")).digest("base64");
+    const req = {
+      url: "/y",
+      headers: { "x-forwarded-proto": "https", "x-forwarded-host": "x",
+                 "x-twilio-signature": sig },
+    };
     assert.equal(
-      signatureBase("https://x/y", { b: "2", a: "1", c: "3" }),
-      "https://x/ya1b2c3");
-    const expected = createHmac("sha1", TOKEN)
-      .update(Buffer.from("https://x/ya1b2c3", "utf8")).digest("base64");
-    assert.equal(computeSignature("https://x/y", { b: "2", a: "1", c: "3" }, TOKEN), expected);
+      verifyTwilioSignature(req, { b: "2", a: "1", c: "3" },
+        { env: { [TWILIO_TOKEN_VAR]: TOKEN } }).ok,
+      true, "the SDK disagreed with the documented URL + sorted key/value scheme");
+  });
+
+  /* EVERY received parameter participates. Nothing is filtered, dropped or
+     whitelisted before validation, so an injected field invalidates the
+     signature instead of sailing past a filter. */
+  test("an added parameter invalidates the signature", () => {
+    const sig = sign(url, params);
+    const injected = { ...params, Injected: "anything" };
+    assert.equal(
+      verifyTwilioSignature(reqFor(sig), injected, { env: { [TWILIO_TOKEN_VAR]: TOKEN } }).reason,
+      TWILIO_SIGNATURE_INVALID);
+  });
+
+  test("a removed parameter invalidates the signature", () => {
+    const sig = sign(url, params);
+    const { AccountSid, ...fewer } = params;
+    assert.equal(
+      verifyTwilioSignature(reqFor(sig), fewer, { env: { [TWILIO_TOKEN_VAR]: TOKEN } }).reason,
+      TWILIO_SIGNATURE_INVALID);
+  });
+
+  test("production holds no hand-rolled signature arithmetic", () => {
+    /* The point of delegating: a subtly wrong HMAC fails closed and is
+       therefore invisible until every real webhook is refused. */
+    const src = readFileSync(join(REPO, "api/_lib/twilio.mjs"), "utf8");
+    assert.match(src, /twilio\.validateRequest\(/);
+    for (const banned of ["createHmac", "timingSafeEqual"])
+      assert.ok(!src.includes(banned),
+        `api/_lib/twilio.mjs still computes its own signature (${banned})`);
   });
 
   test("a wrong signature, a missing one, and a missing token are each refused", () => {
@@ -120,7 +164,7 @@ describe("twilio signature verification", () => {
   /* The attack the signature exists to stop: a forged opt-out, and — far
      worse — a forged re-opt-in against someone who really did say stop. */
   test("a tampered parameter invalidates a signature computed over the original", () => {
-    const sig = computeSignature(url, params, TOKEN);
+    const sig = sign(url, params);
     const tampered = { ...params, Body: "START" };
     assert.equal(
       verifyTwilioSignature(reqFor(sig), tampered, { env: { [TWILIO_TOKEN_VAR]: TOKEN } }).reason,
@@ -128,7 +172,7 @@ describe("twilio signature verification", () => {
   });
 
   test("a signature for a different URL does not verify", () => {
-    const sig = computeSignature("https://evil.example/api/twilio-inbound", params, TOKEN);
+    const sig = sign("https://evil.example/api/twilio-inbound", params);
     assert.equal(
       verifyTwilioSignature(reqFor(sig), params, { env: { [TWILIO_TOKEN_VAR]: TOKEN } }).reason,
       TWILIO_SIGNATURE_INVALID);
@@ -161,7 +205,7 @@ describe("twilio signature verification", () => {
     const withQuery = "https://crystalsellstoledo.com/api/twilio-inbound?x=1";
     assert.equal(requestUrl({ url: "/api/twilio-inbound?x=1", headers: {
       "x-forwarded-proto": "https", "x-forwarded-host": "crystalsellstoledo.com" } }), withQuery);
-    assert.notEqual(computeSignature(withQuery, params, TOKEN), computeSignature(url, params, TOKEN));
+    assert.notEqual(sign(withQuery, params), sign(url, params));
   });
 
   test("verification never throws, whatever it is handed", () => {
@@ -195,6 +239,26 @@ describe("opt-out classification", () => {
       assert.equal(kindOf(kw), "suppress/sms", `${kw} was not treated as an opt-out`);
     assert.equal(kindOf("STOP"), "suppress/sms");
     assert.equal(kindOf("  Stop.  "), "suppress/sms");
+  });
+
+  /* Twilio's default English long-code list, in full. REVOKE was missing
+     from the fallback set until an independent review caught it: Twilio
+     would have opted the consumer out while our layer classified nothing,
+     leaving no evidence of an opt-out Twilio had already enforced. */
+  test("every Twilio default English opt-out keyword is covered", () => {
+    for (const kw of ["STOP", "UNSUBSCRIBE", "END", "QUIT", "STOPALL",
+                      "REVOKE", "OPTOUT", "CANCEL"]) {
+      assert.ok(STOP_KEYWORDS.includes(kw.toLowerCase()),
+        `${kw} is not in STOP_KEYWORDS - Twilio would block the number and we would record nothing`);
+      assert.equal(kindOf(kw), "suppress/sms", `${kw} did not classify as an opt-out`);
+    }
+  });
+
+  test("REVOKE is a keyword, not a substring", () => {
+    assert.equal(kindOf("REVOKE"), "suppress/sms");
+    /* Ordinary language using the word must not suppress. */
+    assert.equal(kindOf("revoke my offer please"), "null");
+    assert.equal(kindOf("did they revoke the listing?"), "null");
   });
 
   test("natural-language opt-outs are caught, per channel", () => {
@@ -597,8 +661,8 @@ describe("the gate 7 static guards", () => {
 
   test("logging the consumer's message body is refused", () => {
     writeFileSync(WEBHOOK(),
-      pristineWebhook().replace('log("twilio.inbound.unclassified", shape);',
-        'log("twilio.inbound.unclassified", { ...shape, body: params.Body });'));
+      pristineWebhook().replace('log("twilio.inbound.unclassified_not_surfaced", shape);',
+        'log("twilio.inbound.unclassified_not_surfaced", { ...shape, body: params.Body });'));
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a webhook that logs the message body");
     assert.match(output, /logs the inbound message body/);
@@ -626,6 +690,44 @@ describe("the gate 7 static guards", () => {
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a table grant to the sender role");
     assert.match(output, /table privilege/);
+  });
+
+  /* THE MIS-PAIRING REGRESSION.
+     `min(occurred_at), min(reason_code)` are two INDEPENDENT aggregates and
+     return values from DIFFERENT rows. Measured on PostgreSQL 16 with two
+     suppressions on one number, the timestamp order the opposite of the
+     lexical reason order:
+
+       rows    2026-09-01 stop_keyword      2026-09-05 natural_language
+       buggy   2026-09-01 natural_language  <- the wrong pairing
+       truth   2026-09-01 stop_keyword
+
+     The fix is the narrowest contract: the sender decides from the
+     PRESENCE of a suppression, so the function returns no reason at all
+     and a column that is not returned cannot be mis-paired. This test is
+     structural — the SQL-level proof is section 4 of the migration, run by
+     the operator against the real database. */
+  test("the lookup function cannot return a mis-paired reason", () => {
+    const mig = pristineMigration();
+    const code = mig.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    assert.ok(!/min\s*\(\s*[a-z_.]*reason_code\s*\)/i.test(code),
+      "reason_code is aggregated independently of occurred_at - they would come from different rows");
+    assert.match(code, /RETURNS\s+TABLE\s*\(\s*channel\s+text\s*,\s*suppressed_at\s+timestamptz\s*\)/,
+      "the function's result shape changed - it must return channel and suppressed_at only");
+    /* And the operator's own SQL-level check must stay in the file. */
+    assert.match(mig, /THE MIS-PAIRING REGRESSION/,
+      "the migration no longer tells the operator how to prove this against the real database");
+  });
+
+  test("reintroducing min(reason_code) is refused", () => {
+    writeFileSync(MIGRATION(), pristineMigration()
+      .replace("min(e.occurred_at) AS suppressed_at",
+        "min(e.occurred_at) AS suppressed_at, min(e.reason_code) AS reason_code")
+      .replace("RETURNS TABLE (channel text, suppressed_at timestamptz)",
+        "RETURNS TABLE (channel text, suppressed_at timestamptz, reason_code text)"));
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted independently aggregated reason_code");
+    assert.match(output, /different row|mis-pairing/);
   });
 
   test("the guard pins the call sites this test depends on", () => {

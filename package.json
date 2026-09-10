@@ -2,7 +2,7 @@
   "name": "crystal-sells-toledo",
   "version": "1.0.0",
   "private": true,
-  "description": "Marketing site for Crystal Sells Toledo \u2014 Perrysburg / 43551 real estate, Key Realty.",
+  "description": "Marketing site for Crystal Sells Toledo — Perrysburg / 43551 real estate, Key Realty.",
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "1.1.0",
-    "nodemailer": "^10.0.1"
+    "nodemailer": "^10.0.1",
+    "twilio": "^6.1.0"
   }
 }

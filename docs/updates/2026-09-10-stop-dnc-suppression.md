@@ -1,4 +1,11 @@
-# Gate 7 — STOP / DNC suppression, as built
+# Gate 7 — STOP suppression over SMS, as built
+
+**Gate 7 is NOT fully complete.** This implements the SMS half. Two named
+requirements remain open and are listed under "What is explicitly not done":
+**no voice/Retell ingress exists**, so no spoken do-not-call can reach any of
+this; and **unclassified inbound messages are not surfaced to an operator** in
+any workflow a human would actually see. Read the gate as *closed for SMS
+suppression ingress, open for voice and for operator review*.
 
 **10 September 2026.** Implementation of the design settled in
 `docs/updates/2026-09-10-stop-dnc-suppression-decision.md`.
@@ -15,14 +22,14 @@ endpoint answers 503 to everything and reads no request body at all.
 | Piece | Where |
 |---|---|
 | Inbound webhook | `api/twilio-inbound.js` |
-| Signature verification, URL reconstruction, form decoding | `api/_lib/twilio.mjs` |
+| Signature verification (Twilio SDK `validateRequest`), URL reconstruction, form decoding | `api/_lib/twilio.mjs` |
 | Deterministic opt-out classification | `api/_lib/optout.mjs` |
 | Suppression ledger events | `api/_lib/consent-ledger.mjs` (extended) |
 | HubSpot projection — schema mapping | `api/_lib/hubspot-consent-state.mjs` (extended) |
 | HubSpot projection — I/O | `api/_lib/hubspot.mjs` (extended) |
 | Lookup function and sender role | `db/002_suppression_lookup.sql` |
 | Static guards | `tools/check.mjs` |
-| Tests | `tests/suppression.test.mjs` — 50 |
+| Tests | `tests/suppression.test.mjs` — 57 |
 
 `db/001_communication_consent_events.sql` is **untouched**. The three columns
 this phase writes — `reason_code`, `evidence_text`, `metadata` — were created
@@ -54,17 +61,33 @@ broken copy of the tree, not merely written.
 | Body oversize or unreadable | **400** |
 | Signature missing, wrong, or URL unresolvable | **403**, nothing written |
 | No `MessageSid` or no `From` | **400** — no idempotency key, or no number to suppress |
-| Classified as nothing | **200**, no ledger event, logged for a human |
+| Classified as nothing | **200**, no ledger event, **logged only — not surfaced** |
 | `HELP` | **200**, no ledger event |
 | Ledger not configured | **503** |
 | Number will not normalise | **400** — no retry fixes it |
-| Ledger append failed | **503**, so Twilio retries |
+| Ledger append failed | **503** — fail closed; see the retry note below |
 | Ledger appended, HubSpot failed | **200**, logged loudly |
 | Everything succeeded | **200** |
 
-A retry is safe by construction: the dedupe key is
+**A 5xx is a fail-closed answer, not a retry mechanism.** Twilio does **not**
+redeliver a failed incoming-message webhook under default delivery behaviour;
+retry has to be configured explicitly. So the endpoint returning 503 on a ledger
+failure guarantees only that it does not *claim* success — it does not guarantee
+the message comes back.
+
+**Configuring webhook retry is a live-activation prerequisite** (see below). It
+is a Messaging Service change and is therefore **frozen while the TCR hold on
+error 30753 is open**.
+
+*If* a redelivery arrives it is safe by construction: the dedupe key is
 `twilio:<MessageSid>:<channel>:<event_type>`, and the replay no-op was measured
-against the live database earlier the same day rather than assumed.
+against the live database earlier the same day. That is idempotency, not a
+promise that a retry happens.
+
+**Until retry is configured, a ledger outage during an inbound STOP means the
+evidence is lost** — Twilio will still have blocked the number, so the consumer
+is protected, but our record of why will not exist. That is the residual risk
+this response policy leaves open, and it is not closed by anything in this PR.
 
 ## Classification
 
@@ -83,12 +106,19 @@ whenever the parameter is missing, and the endpoint is correct either way.
 
 Normalise (lowercase, NFKC, strip apostrophes, punctuation to spaces), then:
 
-1. **whole-message keyword equality** — `stop`, `stopall`, `unsubscribe`,
-   `cancel`, `end`, `quit`, `optout`, `opt out`; separately `start`/`unstop`/
-   `yes` and `help`/`info`;
+1. **whole-message keyword equality** — Twilio's default English long-code
+   list in full: `stop`, `unsubscribe`, `end`, `quit`, `stopall`, **`revoke`**,
+   `optout`, `cancel`, plus `opt out` as the spaced variant; separately
+   `start`/`unstop`/`yes` and `help`/`info`;
 2. **ten intent-bearing patterns**, each binding a verb of stopping to an
    object of contacting, anchored at word boundaries;
-3. **anything else is not an opt-out** and is logged for a human to read.
+3. **anything else is not an opt-out** and is logged — see the open
+   operator-surfacing requirement below.
+
+`REVOKE` was missing from this list until an independent review caught it.
+Twilio would have blocked the number while our layer classified nothing, so the
+ledger would have held no evidence of an opt-out Twilio had already enforced —
+a silent gap in exactly the record this system exists to keep.
 
 **No AI classifier**, so the behaviour can be read, tested and cited. **No
 substring matching**, because `includes("stop")` classifies *"stop by the open
@@ -128,6 +158,19 @@ character, and it never reaches a log line — a static guard fails the build if
 
 `source` is `twilio`, never `website`; `buildSuppressionEvent()` throws if asked
 to write a suppression claiming to come from the website path.
+
+### `occurred_at` is server receipt time, not Twilio's timestamp
+
+Worth stating exactly, because the column name invites the other reading. The
+ordinary incoming-SMS webhook **carries no message timestamp** — there is no
+`DateCreated` on that payload — so `occurred_at` is when this function received
+the request. The two are normally milliseconds apart and can diverge under
+queueing or redelivery.
+
+**`MessageSid`, in `source_event_id`, remains the correlation key** to Twilio's
+own message record, which holds the authoritative timestamp. Anyone
+reconstructing a timeline from the ledger should treat `occurred_at` as "not
+later than the opt-out" and resolve the exact moment through Twilio.
 
 ## The HubSpot projection
 
@@ -181,7 +224,38 @@ both are silent when missing:
   function to `PUBLIC` by default, so omitting it hands the function to every
   role, including the website's.
 
-A third guard refuses any `GRANT` of a table privilege in that file.
+A third guard refuses any `GRANT` of a table privilege in that file, and two
+more refuse the mis-pairing described next.
+
+### The function returns no reason, and that is a correction
+
+The design document's draft returned `min(occurred_at), min(reason_code)`. Those
+are **two independent aggregates**: they return a timestamp from one row and a
+reason from a **different** row. Measured on PostgreSQL 16 with two suppressions
+on one number whose timestamp order is the opposite of their lexical reason
+order:
+
+| | `channel` | `suppressed_at` | `reason_code` |
+|---|---|---|---|
+| rows present | `sms` | 2026-09-01 | `stop_keyword` |
+| | `sms` | 2026-09-05 | `natural_language` |
+| **buggy form** | `sms` | 2026-09-01 | **`natural_language`** ← wrong row |
+| truth | `sms` | 2026-09-01 | `stop_keyword` |
+
+**The sender does not need the reason.** Send-time enforcement decides
+allow/deny from the *presence* of a suppression, and the permission resolver
+derives its own denial reason. So the fix is the narrowest contract: the
+function returns `channel` and `suppressed_at` only — **a column that is not
+returned cannot be mis-paired.**
+
+Two guards enforce it: no `min(reason_code)`, and no `reason_code` in the
+`RETURNS TABLE` shape. A test breaks the migration back to the buggy form and
+confirms `check.mjs` refuses it. The SQL-level proof against a real database is
+section 4 of the migration, for the operator to run.
+
+If a future caller genuinely needs the reason, it must come from the earliest
+row itself — `DISTINCT ON (channel) … ORDER BY channel, occurred_at` — never
+from a second `min()`.
 
 The privilege behaviour was measured on a throwaway PostgreSQL 16 with `db/001`
 applied verbatim, before the file was written: sender has no table privileges;
@@ -200,7 +274,9 @@ without breaking any visible behaviour:
 4. `api/lead.js` never calls a suppression writer — the website path and the
    suppression path stay separate;
 5. migration `002` keeps `SECURITY DEFINER`, the fixed `search_path`, the
-   `REVOKE`, and grants the sender no table privilege.
+   `REVOKE`, and grants the sender no table privilege;
+6. migration `002` does not aggregate `reason_code` independently and does not
+   return it at all.
 
 `TWILIO_AUTH_TOKEN` joins the secret-name list checked against
 client-delivered output.
@@ -217,14 +293,21 @@ now matches `= classify(params)`, and a test asserts the bare form is not used.
 
 ## Tests
 
-`tests/suppression.test.mjs` — **50 tests**, all passing. Nothing reaches a
-database, Twilio or HubSpot: the ledger executor is injected and the signature
-scheme is checked against a locally computed HMAC, which is the same arithmetic
-Twilio performs.
+`tests/suppression.test.mjs` — **57 tests**, all passing. Nothing reaches a
+database, Twilio or HubSpot: the ledger executor is injected, and the tests
+**sign** with an independent local HMAC standing in for Twilio while the
+production code **verifies** with the Twilio SDK. A passing signature test
+therefore means two separate implementations of the scheme agree, rather than
+one implementation agreeing with itself.
+
+A test also asserts `api/_lib/twilio.mjs` contains no `createHmac` and no
+`timingSafeEqual` — the signature arithmetic is Twilio's, not ours. It was
+hand-rolled first and matched; it is delegated anyway, because a subtly wrong
+HMAC fails closed and is therefore invisible until every real webhook is
+refused, and there is no upside to owning that.
 
 Also passing, unchanged: `consent-ledger` (34), `consent`, `consent-state`,
-`api`, `hubspot`, `mail` — **445 across the affected suites**, plus
-`npm run check`.
+`api`, `hubspot`, `mail` — plus `npm run check`.
 
 `tests/consent-ledger.test.mjs` gained `db` to the list of directories its
 throwaway tree copies, since `check.mjs` now reads `db/002`.
@@ -242,13 +325,36 @@ ever reached this endpoint. See below.
 3. **Point a Twilio number's inbound webhook** at `POST /api/twilio-inbound` —
    **only once the TCR hold on error 30753 is resolved.** This is a Twilio
    configuration change and is frozen until then.
-4. **Send a real STOP** from a number under your control and confirm: a
+4. **Configure webhook retry**, at the same time and under the same freeze. A
+   5xx does **not** by itself cause Twilio to redeliver an incoming-message
+   webhook. Without retry configured, a ledger outage during a real STOP loses
+   the evidence permanently — Twilio still blocks the number, so the consumer is
+   protected, but the record of why will not exist. **This is a live-activation
+   prerequisite, not an optimisation.**
+5. **Decide the operator-surfacing path** for unclassified inbound messages
+   (see below). Until then, a message that is a real opt-out our rules did not
+   recognise reaches nobody.
+6. **Send a real STOP** from a number under your control and confirm: a
    `suppressed` row in the ledger with the right `phone_e164` and
    `evidence_text`, the `cst_sms_*` flags set on every matching contact, and a
    200 response.
 
 ## What is explicitly not done
 
+- **Gate 7 is not fully complete.** It is closed for **SMS suppression
+  ingress** and open for voice and for operator review. Do not read it as the
+  whole STOP/DNC gate.
+- **Unclassified messages are not surfaced to an operator.** The design requires
+  it; a log line is not a workflow, and `twilio.inbound.unclassified_not_surfaced`
+  is named to say so rather than to imply otherwise. It was left open rather
+  than guessed at because each obvious implementation carries a decision that is
+  not the code's to make — forwarding the body to an operator inbox moves a
+  consumer's message into email, and writing it anywhere durable re-creates the
+  message-archive problem this endpoint exists to avoid. **Nothing accumulates
+  meanwhile: no Twilio number points here.** An SMS notification was explicitly
+  not built, since Twilio is the thing that is blocked.
+- **Webhook retry is unconfigured**, and a 5xx alone does not cause Twilio to
+  redeliver. See the response-policy note.
 - **Nothing is live.** No Twilio number points here; no token is set; migration
   `002` is not applied.
 - **The sender does not exist.** Migration `002` creates the function and the
@@ -256,9 +362,11 @@ ever reached this endpoint. See below.
 - **No unsuppression flow.** Clearing a suppression is a deliberate,
   human-initiated, auditable transition and is out of scope. A `START` records
   `reoptin_requested` and clears nothing.
-- **No voice/Retell endpoint.** The classifier and the ledger handle
-  `ai_voice` and `reason_code = voice_dnc`, but nothing receives a Retell
-  webhook. The semantics are settled; the transport is not built.
+- **No voice/Retell ingress, at all.** The classifier and the ledger handle
+  `ai_voice` and `reason_code = voice_dnc`, and *"stop calling me"* arriving by
+  **SMS** does suppress voice — but nothing receives a Retell webhook, so a
+  **spoken** do-not-call cannot reach any of it. This is the main reason gate 7
+  is not complete.
 - **No National DNC registry handling.** A separate obligation with its own
   exemptions; this repository makes no claim about it.
 - **No rate limiting on the inbound endpoint.** Signature verification is the

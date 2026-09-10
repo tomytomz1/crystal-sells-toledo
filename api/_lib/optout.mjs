@@ -62,9 +62,16 @@ export function normalise(text) {
    already acts on these itself; we match them for the case where
    Advanced Opt-Out is not enabled and no OptOutType arrives.
    --------------------------------------------------------------------- */
+/* Twilio's default English long-code opt-out list, in full:
+     STOP  UNSUBSCRIBE  END  QUIT  STOPALL  REVOKE  OPTOUT  CANCEL
+   `REVOKE` was missing until an independent review caught it — a consumer
+   who replied REVOKE would have been opted out by Twilio while our own
+   fallback layer classified nothing, so the ledger would have held no
+   evidence of an opt-out Twilio had already enforced. `opt out` is kept
+   as a spaced variant of OPTOUT, which normalisation would otherwise split. */
 export const STOP_KEYWORDS = Object.freeze([
-  "stop", "stopall", "unsubscribe", "cancel", "end", "quit",
-  "optout", "opt out",
+  "stop", "unsubscribe", "end", "quit", "stopall", "revoke", "optout", "cancel",
+  "opt out",
 ]);
 
 export const START_KEYWORDS = Object.freeze(["start", "unstop", "yes", "optin", "opt in"]);
