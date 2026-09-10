@@ -43,7 +43,116 @@ Rules that hold at every tier:
 - Feature-gated work: verify **both** states — flag off must stay
   production-equivalent, flag on must behave as designed.
 
+## Pre-handoff adversarial review
+
+**When it is required.** Tier 3 and Tier 4 work, and any change involving
+security, authentication, secrets, PII, consent, suppression, CRM writes,
+external side effects, or money or lead-loss risk. Below that it is not
+required, and it should not be performed for its own sake.
+
+**When it happens.** After implementation, and after the targeted tests for the
+tier have passed — and *before* the pull request is described to the operator as
+ready. Not during implementation: the pass is worth something only because it is
+separate, and because its posture is different.
+
+**How many passes.** **One.** If that pass finds and fixes a material defect,
+re-review **the correction delta only**, once. That is the end of it. Do not
+re-read the whole diff again, do not loop, and do not keep going until nothing
+can be found. A pass that finds nothing material ends with **no commit**.
+
+### The pass
+
+1. **Stop implementing.** Re-read the complete diff cold, top to bottom.
+2. **Assume at least one defect is still there.** "This is probably fine" is not
+   the starting prior.
+3. **Do not defend the implementation merely because Claude wrote it.** Authorship
+   is not evidence.
+4. **Check the changed behaviour against the written contracts, not against
+   memory** — `CLAUDE.md`, `docs/CURRENT-STATE.md`, `docs/WORKFLOW.md`, the task
+   or design document, and the contracts of the modules the diff directly
+   affects.
+5. **Attack it**, using the list below.
+6. **Ask both questions in words**, and answer them in writing.
+7. **Where a critical regression genuinely warrants a mutation proof**, prove it
+   against the pre-fix code or a throwaway worktree. **Never against the
+   deployment candidate**, and never by breaking the working tree and restoring
+   it — `CLAUDE.md`, Testing.
+8. **Fix material findings before presenting the pull request.**
+9. **A new material defect gets the smallest strong regression test that
+   reproduces its actual failure mode**, and its correction delta gets the one
+   delta review from above.
+10. **Nothing material found → no commit.** Record that the review ran and found
+    nothing. An empty finding is a legitimate outcome.
+
+### What to attack
+
+- **Fail-open behaviour.** What does this do when its dependency is absent,
+  slow, or refusing? Does a failure cost the thing it should cost, and nothing
+  more?
+- **Timeout boundaries** — setup and transport creation, the **response
+  headers**, *and* the **response body**. `fetch()` resolves when the headers
+  arrive; a server that answers and then stalls the body runs on with the abort
+  already disarmed.
+- **Late async work** — anything still running after the response was sent.
+- **Race conditions**, **retries**, **idempotency** — and whether the
+  idempotency *key* is exactly as narrow or as broad as the prose says it is.
+- **Partial-success truthfulness.** Is something partly done reported as done?
+- **Accounting and tally invariants.** Do the buckets sum to the population?
+  Can a case fall into none of them, or into two?
+- **Silent truncation or coercion.** Rule 11 is reject, never truncate.
+- **Malformed, empty and oversized inputs.**
+- **Weak configuration checks** — a present-but-useless value read as
+  configured.
+- **Secret and PII exposure** — logs, error text, mail headers, subjects, URLs.
+- **GET and scanner side effects.** Safe Links, mail-gateway antivirus and
+  preview fetchers issue unattended GETs.
+- **Accidental unsuppression.** Anything that could clear a suppression.
+- **Stale documentation** — a sentence elsewhere in the repository that this
+  diff has just made false.
+- **Tests that pass vacuously** — a mutation whose `replace()` no longer
+  matches, an assertion satisfied by a page that omits the claim, a bound
+  satisfied by a run twice as slow as the budget.
+- **Static guards that are syntactically satisfied without protecting the
+  invariant they are named for.**
+
+### The two questions
+
+> **"If an independent security or compliance reviewer wanted to block this pull
+> request, what would they point to?"**
+
+> **"What guarantee does the prose claim that the code itself does not actually
+> guarantee?"**
+
+The second is the one this repository keeps failing. Answer both in the pull
+request, not only in the session.
+
+### Why this exists
+
+PR [#24](https://github.com/tomytomz1/crystal-sells-toledo/pull/24) passed its
+targeted tests at every head it had, and four review rounds each still found a
+real defect in its own work: a deadline that did not cover transport creation, a
+projection bound checked only between requests, a bound that stopped at the
+response headers, a static guard that passed while its invariant was broken, and
+a tally that lost an already-marked contact. There were passing tests over all of
+them.
+
+**Passing tests are evidence, not proof that the tested invariant is the right
+invariant.** They prove the code does what the test asserts. They do not prove
+the assertion is the thing that had to be true.
+
+### What this does not change
+
+The risk-based tiers in `CLAUDE.md` stand exactly as written. This is a reading
+pass, not a test tier: it authorises **no** local full-suite run, **no** routine
+mutation run, and **no** test the tier table did not already call for. The only
+test it may add is the single regression for a material defect it actually
+found.
+
 ## Delivery
+
+Where the section above applies, the adversarial review comes first — before
+step 3's description of the pull request, and before the operator is told it is
+ready.
 
 1. **Commit** with a message explaining *why* — the failure or the risk the change
    addresses, not a restatement of the diff.
@@ -51,7 +160,8 @@ Rules that hold at every tier:
    backoff; never switch branches to get a push through.
 3. **Open a pull request** describing what changed, what was verified, and what is
    explicitly still unproven.
-4. **Let CI run.** Fix only genuine failures.
+4. **Let CI run.** Fix only genuine failures. Read it, never wait on it — see
+   § CI below.
 5. **Do not merge unless explicitly instructed.**
 6. **No follow-up SHA-only documentation commit.** Nothing in `docs/` pins a
    commit SHA, so nothing needs pinning after the fact. Give the SHA in the
@@ -59,6 +169,67 @@ Rules that hold at every tier:
 
 Write a `docs/updates/` file only when `CLAUDE.md` says one is warranted. Update
 `docs/CURRENT-STATE.md` only when material current state changed.
+
+## CI — read it, never wait on it
+
+**Never create a background Bash task whose purpose is waiting or polling for
+GitHub CI.** Specifically prohibited:
+
+- a background `sleep` loop, of any length or nesting;
+- a task conceived as "wait for CI", "keep waiting for CI" or a "final wait";
+- more than one polling shell at a time;
+- **any sleep or waiter process still alive when the session ends.**
+
+CI runs whether or not anything is watching it. A waiter buys no information; it
+only consumes the session and can outlive it.
+
+### The procedure
+
+1. **Push** normally.
+2. **Let GitHub CI run.**
+3. **Read CI directly when a result is actually needed** — the workflow run
+   *and* its job. That is `status` and `conclusion`, not the logs: the existing
+   rule stands, **complete logs are inspected only on failure.**
+4. **Create no background waiter process.** None.
+5. **If the run is complete, record the actual `status` and `conclusion`** — the
+   reading taken, not the result expected.
+6. **If it is still pending at the last check before the final response, report
+   it honestly as pending, and stop.** Pending is a publishable result. Saying so costs
+   nothing; implying green costs the record its credibility.
+7. **A later pulse verifies completion independently.** That is exactly what the
+   Pulse protocol is for, and a correction comment on the pull request is the
+   normal way it lands — see rule 5 of the Pulse rules and the correction
+   comments on [#24](https://github.com/tomytomz1/crystal-sells-toledo/pull/24).
+8. **Never infer elapsed CI time from how long the session feels.** A session's
+   sense of duration is not a clock. Use the run's own `run_started_at`,
+   `completed_at` and step timestamps, or claim nothing.
+9. **Before the final chat response, confirm that no CI-wait, polling or sleep
+   process under Claude's control is left running in the current environment.**
+   That covers **leftovers discovered from earlier work**, not only tasks this
+   session created — waiters have been found alive from a previous round. It is
+   scoped to CI-wait tasks Claude created: **never kill an unrelated user or
+   system process.**
+
+**Do not replace the waiters with polling.** No invented re-check cadence, no
+"check every N minutes" rule. Read CI when a result is needed, and otherwise
+leave it alone.
+
+### Reading a run whose status is stale
+
+**A reported status can be stale.** This environment has repeatedly returned
+`in_progress` for tens of minutes after a job had actually finished, and has
+repeatedly returned the same stale-looking CI state across the run, job, check
+and usage surfaces. **Their agreement therefore must not be treated as
+independent corroboration.**
+
+That is the whole of what has been observed. **Do not record a mechanism for
+it** — nothing here has established where the staleness comes from, and this
+project has already been hurt by a plausible diagnosis written down as a fact.
+
+So: read `completed_at` and `conclusion` when they are available, prefer the
+**job** as well as the run, and give the observed timestamps rather than a
+duration you inferred. When they are not available, **report pending honestly**
+and let a later pulse verify.
 
 ## The Pulse Handoff Protocol
 
