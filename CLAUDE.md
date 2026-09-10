@@ -125,8 +125,11 @@ rules: `docs/WORKFLOW.md` § Pre-handoff adversarial review.
 
 **Never create a background task whose purpose is waiting or polling for GitHub
 CI.** No background sleep loop, no "wait for CI" / "keep waiting for CI" /
-"final wait" shell, no concurrent pollers, and **no sleep process left alive
-when the session ends.**
+"final wait" shell, no concurrent pollers, and **no CI-wait, polling or sleep
+process under Claude's control left running at the end of the session** —
+including leftovers found from earlier work, not only what this session started.
+Scoped to CI-wait tasks Claude created; never an unrelated user or system
+process.
 
 Push, let CI run, and read it directly when a result is actually needed —
 `status` and `conclusion`, which is not the same as reading logs: **logs are
@@ -139,7 +142,13 @@ long the session feels.**
 This is not a licence to poll by hand instead. Replacing a background waiter
 with an invented re-check cadence is the same mistake in a different shape.
 
-Procedure, and how to read a run whose status is stale: `docs/WORKFLOW.md` § CI.
+**A reported status can be stale**, and this environment has repeatedly returned
+the same stale-looking state across the run, job, check and usage surfaces — so
+**their agreement is not independent corroboration.** Claim no mechanism for
+that; only the behaviour is observed. Use `completed_at` and `conclusion` when
+they are available, and otherwise report pending.
+
+Procedure: `docs/WORKFLOW.md` § CI.
 
 ## Write-ups — proportionate
 

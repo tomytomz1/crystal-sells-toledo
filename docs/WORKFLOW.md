@@ -203,8 +203,12 @@ only consumes the session and can outlive it.
 8. **Never infer elapsed CI time from how long the session feels.** A session's
    sense of duration is not a clock. Use the run's own `run_started_at`,
    `completed_at` and step timestamps, or claim nothing.
-9. **Before the final chat response, confirm that no CI-wait background task
-   this session created is still running.**
+9. **Before the final chat response, confirm that no CI-wait, polling or sleep
+   process under Claude's control is left running in the current environment.**
+   That covers **leftovers discovered from earlier work**, not only tasks this
+   session created — waiters have been found alive from a previous round. It is
+   scoped to CI-wait tasks Claude created: **never kill an unrelated user or
+   system process.**
 
 **Do not replace the waiters with polling.** No invented re-check cadence, no
 "check every N minutes" rule. Read CI when a result is needed, and otherwise
@@ -212,11 +216,20 @@ leave it alone.
 
 ### Reading a run whose status is stale
 
-This repository has repeatedly seen the runs API report `in_progress` for tens
-of minutes after a job had actually finished. The run, job, check and usage
-endpoints share one cache, so several of them agreeing corroborates nothing.
-Read `completed_at` and `conclusion` on the **job** as well as the run, and give
-the observed timestamps rather than a duration you inferred.
+**A reported status can be stale.** This environment has repeatedly returned
+`in_progress` for tens of minutes after a job had actually finished, and has
+repeatedly returned the same stale-looking CI state across the run, job, check
+and usage surfaces. **Their agreement therefore must not be treated as
+independent corroboration.**
+
+That is the whole of what has been observed. **Do not record a mechanism for
+it** — nothing here has established where the staleness comes from, and this
+project has already been hurt by a plausible diagnosis written down as a fact.
+
+So: read `completed_at` and `conclusion` when they are available, prefer the
+**job** as well as the run, and give the observed timestamps rather than a
+duration you inferred. When they are not available, **report pending honestly**
+and let a later pulse verify.
 
 ## The Pulse Handoff Protocol
 
