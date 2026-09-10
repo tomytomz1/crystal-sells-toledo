@@ -128,10 +128,12 @@ CI.** No background sleep loop, no "wait for CI" / "keep waiting for CI" /
 "final wait" shell, no concurrent pollers, and **no sleep process left alive
 when the session ends.**
 
-Push, let CI run, and read it directly when a result is actually needed. If the
-run is complete, record its real `status` and `conclusion`. If it is still
-pending at the allowed final check, **report it as pending and stop** — a later
-pulse verifies completion independently. **Never infer elapsed CI time from how
+Push, let CI run, and read it directly when a result is actually needed —
+`status` and `conclusion`, which is not the same as reading logs: **logs are
+still read only on failure.** If the run is complete, record its real `status`
+and `conclusion`. If it is still pending at the last check before the final
+response, **report it as pending and stop** — a later pulse verifies completion
+independently. **Never infer elapsed CI time from how
 long the session feels.**
 
 This is not a licence to poll by hand instead. Replacing a background waiter

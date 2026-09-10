@@ -188,12 +188,13 @@ only consumes the session and can outlive it.
 1. **Push** normally.
 2. **Let GitHub CI run.**
 3. **Read CI directly when a result is actually needed** — the workflow run
-   *and* its job.
+   *and* its job. That is `status` and `conclusion`, not the logs: the existing
+   rule stands, **complete logs are inspected only on failure.**
 4. **Create no background waiter process.** None.
 5. **If the run is complete, record the actual `status` and `conclusion`** — the
    reading taken, not the result expected.
-6. **If it is still pending at the allowed final check, report it honestly as
-   pending, and stop.** Pending is a publishable result. Saying so costs
+6. **If it is still pending at the last check before the final response, report
+   it honestly as pending, and stop.** Pending is a publishable result. Saying so costs
    nothing; implying green costs the record its credibility.
 7. **A later pulse verifies completion independently.** That is exactly what the
    Pulse protocol is for, and a correction comment on the pull request is the
