@@ -91,6 +91,14 @@ export const SOURCE_WEBSITE = "website";
    provenance in the record that exists to prove provenance. */
 export const SOURCE_TWILIO = "twilio";
 export const SOURCE_RETELL = "retell";
+/* A HUMAN entered it — the operator recognising an opt-out the
+   deterministic classifier did not, through api/operator-action.js. It is
+   a separate SOURCE and not a separate event type: `revoked` still says
+   what the consumer did, and `reason_code = manual` says who recognised
+   it, so the act and its recogniser sit in separate columns and neither
+   is distorted to carry the other. See
+   docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md §6.4. */
+export const SOURCE_OPERATOR = "operator";
 
 /* Consumer free text, capped. The only free text this table holds, and it
    is stored ONLY for a message classified as an opt-out — the message IS
@@ -564,8 +572,13 @@ export async function appendConsentEvents(evidence, {
      about a showing, and this table cannot delete what it is given.
    ===================================================================== */
 
+/* Exported because the operator action must cap the consumer's words
+   BEFORE sealing them into its token — the words written to the ledger
+   have to be byte-identical to the words the operator read in the
+   notification email, so exactly one function may decide where they are
+   cut. A second implementation of this rule is a second answer. */
 /** Cap the consumer's words without silently losing that they were cut. */
-function capEvidence(text) {
+export function capEvidence(text) {
   const value = String(text == null ? "" : text);
   if (Buffer.byteLength(value, "utf8") <= EVIDENCE_TEXT_MAX_BYTES) return value;
   /* Byte-safe truncation: slice on bytes, then drop any partial trailing
@@ -626,10 +639,20 @@ export function buildSuppressionEvent({
  * Append suppression-class events. Resolves `{ appended: true, events }`
  * or THROWS, exactly like the consent path.
  *
- * The webhook that calls this returns 5xx when it throws, so Twilio
- * retries — and the retry is safe because the dedupe key is derived from
- * the provider's own message id. That no-op behaviour was measured against
- * the live database on 10 September 2026, not assumed.
+ * The webhook that calls this returns 5xx when it throws. THAT IS THE
+ * FAIL-CLOSED ANSWER AND NOT A RETRY MECHANISM: Twilio does not redeliver
+ * a failed incoming-message webhook by default, and retry must be
+ * configured explicitly on the Messaging Service — a change frozen under
+ * the TCR hold on error 30753 and listed as a live-activation
+ * prerequisite. api/twilio-inbound.js states this correctly; this comment
+ * previously said "so Twilio retries", which contradicted its own caller
+ * and invited a reader to treat redelivery as a property they already
+ * have. Corrected 10 September 2026.
+ *
+ * IF a redelivery does arrive it is safe, because the dedupe key is
+ * derived from the provider's own message id. That no-op behaviour was
+ * measured against the live database on 10 September 2026, not assumed.
+ * It is idempotency, not a guarantee that a retry happens.
  */
 export async function appendSuppressionEvents(events, {
   env = process.env, timeoutMs = LEDGER_TIMEOUT_MS,

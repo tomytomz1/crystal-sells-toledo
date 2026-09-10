@@ -435,7 +435,7 @@ designed wrongly.
 
 | Method | What it does |
 |---|---|
-| **GET** `/api/operator-action?t=<sealed token>` | Renders a **confirmation page**. Reads nothing, writes nothing, records nothing. Safe for a link scanner, a prefetch, a forwarded email or a curious click. |
+| **GET** `/api/operator-action?t=<sealed token>` | Renders a **confirmation page**. **Reads no database state and writes nothing** — it decrypts its own input, the sealed token, and that is all it reads; no request state changes. Safe for a link scanner, a prefetch, a forwarded email or a curious click. |
 | **POST** `/api/operator-action` | **The only writer.** Requires the token in the form body, an explicitly chosen scope, and a confirmation field. Appends one `revoked` ledger event and renders the result. |
 
 **GET can never write, and that is not a stylistic preference.** Outlook Safe
@@ -838,3 +838,15 @@ already have.
 file under `api/`. **It must be fixed in the next implementation pull request
 that touches this module** — which, if this decision is accepted, is the one that
 adds `SOURCE_OPERATOR` to it.
+
+> **CLOSED, 10 September 2026.** The implementation pull request added
+> `SOURCE_OPERATOR` to `api/_lib/consent-ledger.mjs` and corrected that comment in
+> the same change. It now states that a 5xx is the fail-closed answer and **not** a
+> retry mechanism, that incoming-webhook retry must be configured explicitly on the
+> Messaging Service, and that the dedupe key makes a redelivery safe **if** one
+> arrives — idempotency, not a guarantee that a retry happens. §6.1's GET wording
+> was clarified in the same pull request, from *"Reads nothing"* to *"reads no
+> database state and writes nothing"*: the GET must decrypt the sealed token to
+> render the page, so it does read something — its own input — and the guarantee
+> that carries the weight is that **no request state changes on a GET.** What was
+> built, and what is still unproven: `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing.md`.

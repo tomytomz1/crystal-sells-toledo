@@ -687,9 +687,21 @@ describe("the gate 7 static guards", () => {
   });
 
   test("logging the consumer's message body is refused", () => {
-    writeFileSync(WEBHOOK(),
-      pristineWebhook().replace('log("twilio.inbound.unclassified_not_surfaced", shape);',
-        'log("twilio.inbound.unclassified_not_surfaced", { ...shape, body: params.Body });'));
+    /* Retargeted 10 September 2026. This mutation used to rewrite the
+       `unclassified_not_surfaced` line, which the operator-surfacing
+       implementation moved into surfaceToOperator() and reshaped — so the
+       replace silently matched nothing and the test passed while proving
+       NOTHING. The assertion below is the fix for the class of defect,
+       not just for this instance: a mutation test that does not mutate is
+       worse than no test, because it reports green. */
+    const target = 'log("twilio.inbound.unclassified_notified", { ...shape, ms: Date.now() - started });';
+    const pristine = pristineWebhook();
+    assert.ok(pristine.includes(target),
+      "the mutation target moved - this test would prove nothing");
+    const mutated = pristine.replace(target,
+      'log("twilio.inbound.unclassified_notified", { ...shape, body: params.Body });');
+    assert.notEqual(mutated, pristine, "the mutation changed nothing");
+    writeFileSync(WEBHOOK(), mutated);
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a webhook that logs the message body");
     assert.match(output, /logs the inbound message body/);
