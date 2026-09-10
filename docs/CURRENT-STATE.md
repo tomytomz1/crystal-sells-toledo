@@ -51,16 +51,21 @@ Schema in the production HubSpot portal:
   only.** Provisioned and grant-verified on 9 September 2026 — see "The ledger"
   below. `CONSENT_LEDGER_URL` is set in Vercel **Preview** and is **absent from
   Production**, so the live site has no connection to it.
-- **Preview can write to the live HubSpot portal.** `HUBSPOT_ACCESS_TOKEN`,
-  `HUBSPOT_PORTAL_ID` and `HUBSPOT_FORM_GUID` were scoped to **Production and
-  Preview** on 10 September 2026 for the gate 4 Stage B round trip, and were
-  left that way. There is no HubSpot sandbox, so **any Preview deployment of
-  any branch can now create real contacts and real timeline activities in
-  Crystal's production CRM**, and HubSpot will email its own form notification
-  to the form owner. This is a standing exposure that did not exist before that
-  date; removing the three variables from Preview returns it to a 503 at
-  delivery. `ZOHO_SMTP_*` was deliberately **not** given to Preview, so a
-  preview submission sends no acknowledgement email.
+- **Preview has no standing live-CRM write access.** `HUBSPOT_ACCESS_TOKEN`,
+  `HUBSPOT_PORTAL_ID` and `HUBSPOT_FORM_GUID` were scoped to Production **and
+  Preview** on 10 September 2026 for the gate 4 Stage B round trip, and the
+  Preview scope was **removed the same day** once it was no longer needed.
+  **Production scope is unchanged.** Future Preview deployments return a 503 at
+  delivery, exactly as before Stage B; the ledger append still runs.
+  - There is **no HubSpot sandbox**. While those variables were on Preview, a
+    preview submission created a real contact and a real timeline activity in
+    the production CRM and HubSpot emailed its own form notification to the form
+    owner. Anyone restoring that scoping should expect the same.
+  - **Environment variables bind at deploy time**, so the Preview deployment
+    built while they were scoped still holds them until it is redeployed or
+    superseded. Nothing submits to it.
+  - `ZOHO_SMTP_*` was deliberately never given to Preview, so a preview
+    submission sends no acknowledgement email.
 - **§6a research is complete (9 September 2026).** The HubSpot form-submission
   timeline evidence is **useful operationally but is not sufficient as the sole
   durable consent ledger** — a submission can be permanently and irreversibly
@@ -187,27 +192,51 @@ grant has been proven. Vercel Preview points at it; Production does not.**
   The Neon rows were unchanged: both present, disclosure texts intact at 335 and
   330 characters, `website_rows` still 4. This is the reason the ledger exists,
   and it is now an observation rather than a design argument.
-- **Idempotency against Neon is unverified.** The replay and partial-heal
-  behaviour is measured against a local Postgres 16; no submission has been
-  replayed onto an existing dedupe key in the Neon ledger.
+- **Idempotency is verified against live Neon — 10 September 2026.** Four
+  measurements, all matching the documented contract:
+  - **Full replay of the real submission** `csv_5845df0fd70f7f9991e179a5`,
+    re-inserted by selecting the rows *from the table itself* so the dedupe keys
+    were identical by construction: **2 rows before, 2 after, nothing
+    inserted.**
+  - **Partial heal, under `consent_ledger_app` itself.** One half of a synthetic
+    pair inserted (`INSERT 0 1`), then the whole pair replayed: **`INSERT 0 1`**
+    — the existing row no-opped and the missing one landed. `DO NOTHING` is per
+    row, not per statement, so a retry against a half-written pair converges
+    instead of leaving a permanent hole.
+  - **Replay of the complete pair: `INSERT 0 0`.** A fully duplicated retry
+    inserts nothing and still succeeds.
+  - **No real evidence was modified.** The partial state was built from
+    synthetic rows under `source = 'manual'`, never by deleting a real row.
+    `website_rows` stayed **4**; `all_rows` went 6 → **8**, by exactly the two
+    synthetic rows, out of five row-values offered across three statements.
+- **The residue is the transport, not the semantics.** Both tests reached Neon
+  over TCP — the Neon SQL Editor and a Postgres client. `appendConsentEvents()`
+  sends the same statement through `@neondatabase/serverless`'s **HTTP** path,
+  which is proven to insert but has never hit a conflict. The clause has been
+  tested against the same index and under the same role; what is untested is
+  that transport under a conflict.
 - **A ledger failure now says why.** `lead.consent.ledger_failed` carries
   `ledger_driver_error` (the error class) and `ledger_driver_code` (a symbolic
   code or SQLSTATE), whitelisted to identifier characters so no message, host
   or value can occupy them. Before this, every cause looked identical in the
   log and the outage took three sessions to identify.
-- **The ledger holds six rows**, all synthetic: two provisioning rows
-  (`form_type = setup_verification`, 9 September) and four website rows from the
-  two Preview submissions on 10 September. All are retained deliberately as
-  evidence. No real visitor's consent is in this table.
+- **The ledger holds eight rows**, all synthetic: two provisioning rows
+  (`form_type = setup_verification`, 9 September), four website rows from the
+  two Preview submissions, and two replay rows
+  (`form_type = replay_verification`, `source = 'manual'`, phone in the
+  unroutable `+1555555xxxx` range, with `consent_copy_text` stating outright
+  that they are not consent records). **All are intentionally retained** — they
+  document how each property was proven, and cannot be mistaken for consent. No
+  real visitor's consent is in this table.
 
 ### What is still unproven
 
 Stated plainly, because the rest of this section reads like everything works.
 
-- **Replay against Neon.** The per-row no-op and the partial heal are measured
-  against a local Postgres 16 with `db/001` applied verbatim. **No submission
-  has ever been replayed onto an existing dedupe key in the live ledger.** This
-  is the oldest outstanding gap in the phase.
+- **The driver's HTTP transport under a conflict.** Replay and partial heal are
+  now measured on live Neon (see above), but over TCP. The application's own
+  path through `@neondatabase/serverless` has inserted successfully and has
+  never met a conflict. Semantics proven; transport not.
 - **The failure path under live conditions.** `CONSENT LEDGER: NOT CONFIRMED`
   and a withheld `cst_*` grant have never been observed together in a real
   submission — both preview failures happened while HubSpot was absent, so the
@@ -250,5 +279,6 @@ Open one of these only when the task actually needs it.
 | Ledger as provisioned — Neon project, role creation, grant verification, the Neon-specific traps, what is still unproven | `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md` |
 | Why the conflict target had to go — the 42501 outage, the privilege rule, the rejected `GRANT SELECT`, the measured semantics | `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md` |
 | Gate 4 Stage B and gate 5 — the full round trip, the 34-row rendering, the deletion-survival test, the Preview CRM exposure | `docs/updates/2026-09-10-consent-ledger-stage-b-verification.md` |
+| Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
