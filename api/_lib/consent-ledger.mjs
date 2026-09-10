@@ -259,7 +259,9 @@ export function toE164(phone) {
 /* ---------------------------------------------------------------------
    IDEMPOTENCY
    ---------------------------------------------------------------------
-   The deterministic key behind `ON CONFLICT (dedupe_key) DO NOTHING`. A
+   The deterministic key behind `ON CONFLICT DO NOTHING` — the unique index
+   on dedupe_key is what that clause lands on, even though the statement
+   does not name it (see buildInsert). A
    retry that finds its own earlier row is a success, which is exactly what
    deterministic keys are for.
 
@@ -370,7 +372,7 @@ export function buildLedgerEvents(evidence, { source = SOURCE_WEBSITE } = {}) {
      That is the guarantee, and it is the one that stops an SMS grant being
      recorded with no trace of the voice decision beside it.
 
-   * ON CONFLICT (dedupe_key) DO NOTHING is evaluated PER ROW, not for the
+   * ON CONFLICT DO NOTHING is evaluated PER ROW, not for the
      statement. So on a retry where one dedupe key already exists and the
      other does not, the existing row no-ops and the MISSING ONE IS
      INSERTED. That is not a hole — it is the behaviour that HEALS a
@@ -403,8 +405,30 @@ export function buildInsert(rows) {
     "VALUES " + tuples.join(", ") + "\n" +
     /* A conflict is SUCCESS, per row. It means that exact event is already
        in the ledger, which is the answer a retry wants; any sibling row
-       that is NOT already there is still inserted. */
-    "ON CONFLICT (dedupe_key) DO NOTHING";
+       that is NOT already there is still inserted.
+
+       NO CONFLICT TARGET, DELIBERATELY. `ON CONFLICT (dedupe_key)` reads
+       better and was what this module sent until 10 September 2026, when
+       every preview submission failed with SQLSTATE 42501. Naming a
+       conflict target — a column list OR `ON CONSTRAINT <name>` — makes
+       Postgres require SELECT on the table, because inferring the arbiter
+       index is a read. The application role holds INSERT and nothing else,
+       on purpose: a leaked CONSENT_LEDGER_URL must not be able to
+       enumerate the numbers and consent decisions this table holds.
+
+       The bare clause needs no SELECT and is per-row all the same, so
+       every property documented below survives: a replay no-ops, and a
+       replay against a ledger holding one of the two rows inserts the
+       other. Verified against Postgres 16 with this migration and a role
+       granted INSERT only.
+
+       What it costs: the clause now also absorbs a PRIMARY KEY collision
+       instead of raising. `event_id` is a server-generated v4 UUID, so
+       that is not a practical concern, but it is a real difference — such
+       a row would be dropped and reported as already recorded rather than
+       failing closed. There is no INSERT-only form that keeps the target,
+       so this is the trade that buys the grant. */
+    "ON CONFLICT DO NOTHING";
 
   return { text, params };
 }

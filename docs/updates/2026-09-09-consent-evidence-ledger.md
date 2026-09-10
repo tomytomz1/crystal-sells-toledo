@@ -70,7 +70,10 @@ database.
   as a withdrawal would silently destroy a lawful permission. The website path
   emits no `revoked`, `suppressed` or `unsuppressed` event in any circumstance.
 - `appendConsentEvents()` issues **one parameterised multi-row
-  `INSERT … ON CONFLICT (dedupe_key) DO NOTHING`**, in a single statement. What
+  `INSERT … ON CONFLICT DO NOTHING`**, in a single statement. The conflict
+  clause names **no target**, and must not: naming one requires `SELECT`, which
+  the application role does not have. See
+  `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md`. What
   that does and does not guarantee is set out precisely below — it is not
   "both rows land together or neither does".
 - Dedupe keys are `website:<submission_id>:<channel>:<event_type>`. **Every
@@ -101,7 +104,7 @@ healed gap versus a permanent one. Precisely:
   two new rows.** Either both commit or neither does. That is the guarantee
   worth having: a failed append can never leave an SMS grant recorded with no
   trace of the voice decision beside it.
-- **`ON CONFLICT (dedupe_key) DO NOTHING` is evaluated per row, not per
+- **`ON CONFLICT DO NOTHING` is evaluated per row, not per
   statement.** On a retry against a ledger that already holds one of the two
   rows, the existing row no-ops and **the missing one is inserted**. That is not
   a hole in the model — it is what makes a retry *converge* on the complete
@@ -110,6 +113,17 @@ healed gap versus a permanent one. Precisely:
 - **A fully duplicated retry inserts nothing and succeeds.** Postgres answers it
   with no rows; nothing was written and nothing needed to be, because the events
   are already there.
+- **The clause lands on the unique index over `dedupe_key` without naming it.**
+  That index is the only unique constraint on the table besides the
+  server-generated `event_id` primary key. The cost of not naming it: the clause
+  would also absorb a primary-key collision rather than raising. `event_id` is a
+  v4 UUID minted by Postgres, so that is not a practical concern, but it is a
+  real difference and there is no `INSERT`-only form that avoids it.
+
+All four bullets were verified against a real Postgres 16 with `db/001` applied
+verbatim and a role granted `INSERT` and nothing else — first run inserted two
+rows, a replay inserted none, a replay after one row was deleted inserted
+exactly one, and `SELECT`, `UPDATE`, `DELETE` and `TRUNCATE` stayed refused.
 
 No half-write on failure; convergence rather than refusal on retry. Both follow
 from deterministic dedupe keys, and neither weakens the other. Idempotency is
@@ -569,19 +583,27 @@ database half closed on 9 September 2026 in the document named above.
 
 ## 8. What is unproven
 
-**No append has ever reached a database *from this code*.** That remains true
-after provisioning, and it is the sentence to keep hold of. A Neon project now
-exists, the migration has been applied, the role has been created and the
-`gen_random_uuid()` default has been executed — all by a human typing SQL into a
-console. The executor seam is still injected in every test, so what this
-repository proves is the statement the code *would* send, the parameters it would
-bind, and what it does when an executor fails, hangs or is absent — not that a
-real Postgres accepts that statement, that the `ON CONFLICT` clause matches the
-real unique index, or that a connection succeeds from a Vercel function.
+**An append has now reached a real database from this code, and was refused.**
+On 9–10 September 2026 preview submissions drove `appendConsentEvents()` against
+the live Neon project: the driver loaded, the HTTP endpoint was reached, the
+credential authenticated, and Postgres rejected the statement with `42501`,
+insufficient privilege. The caveat this section used to carry — "not that the
+`ON CONFLICT` clause matches the real unique index" — was the exact defect. It
+is fixed; see
+`docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md`.
 
-**Nor has any client logged in as the application role.** The provisioning checks
-ran inside the owner's session using `SET ROLE`, which proves the grants and not
-the credential.
+**A successful append from this code is still unproven.** The corrected
+statement has been proven against a local Postgres 16 with `db/001` applied
+verbatim and an `INSERT`-only role, but no row written by `api/lead.js` has yet
+landed in the Neon ledger. Until a preview submission produces two rows there,
+the Vercel-to-Neon round trip over the driver's HTTP transport remains
+unexercised end to end.
+
+**The application role's credential has been proven by direct login.** A
+Postgres client logged in as `consent_ledger_app` over TLS 1.3, appended a row,
+and was refused `SELECT`. The earlier provisioning checks used `SET ROLE` inside
+the owner's session, which proved the grants and not the credential; that gap is
+closed.
 
 **No `CONSENT LEDGER` row has ever been rendered in HubSpot or seen by an
 operator**, in either state. The E.164 refusal has never been observed against a
