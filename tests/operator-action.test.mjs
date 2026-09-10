@@ -684,14 +684,22 @@ describe("POST /api/operator-action — the durable record", () => {
   });
 
   test("the dedupe key converges as operator:<MessageSid>:<channel>:revoked", async () => {
+    const keys = [];
     for (const [scope, channel] of [["sms", "sms"], ["ai_voice", "ai_voice"], ["all", "all"]]) {
       const calls = captureLedger();
       const res = await callOperator(validPost({ scope }));
       assert.equal(res.statusCode, 200);
       assert.equal(column(calls, "dedupe_key"), `operator:${SID}:${channel}:revoked`);
       assert.equal(column(calls, "channel"), channel);
+      keys.push(column(calls, "dedupe_key"));
       _resetExecutor();
     }
+    /* THE KEY IS PER CHANNEL, NOT PER LINK. The same sealed token used
+       with a different scope produces a DIFFERENT key and therefore a
+       SECOND, separate suppression row — which is why the page may not
+       claim link-wide idempotency. */
+    assert.equal(new Set(keys).size, 3,
+      "two scopes share a dedupe key - a second scope would be silently discarded");
   });
 
   test("a duplicate POST produces the identical dedupe key — the second is a no-op at the database", async () => {
@@ -709,6 +717,46 @@ describe("POST /api/operator-action — the durable record", () => {
     assert.equal(res.statusCode, 200);
     assert.equal(column(second, "dedupe_key"), one);
     assert.match(calls0Text(second), /ON CONFLICT DO NOTHING/i);
+  });
+
+  /* The page used to say "a second click on the same link records nothing
+     further", which is only true for the SAME scope. The link binds one
+     MessageSid, not one channel, and Crystal picks the channel on the
+     confirmation page — so a second click with a different choice writes
+     a second, permanent row. */
+  test("the page never claims link-wide idempotency", async () => {
+    const calls = captureLedger();
+    const res = await callOperator(validPost({ scope: "sms" }));
+    assert.equal(res.statusCode, 200);
+
+    assert.ok(!/second click on the same link/i.test(res.body),
+      "the page claims the LINK is idempotent - only the same scope is");
+    assert.ok(!/the link records nothing further/i.test(res.body));
+
+    /* It must name the scope it is talking about... */
+    assert.match(res.body, /again from this email changes nothing/i);
+    assert.ok(res.body.includes("text messages only"),
+      "the page does not say WHICH choice is the idempotent one");
+    /* ...and warn that a different one is a separate permanent action. */
+    assert.match(res.body, /different<\/strong> option records a <strong>separate/i);
+    assert.match(res.body, /also permanent/i);
+    assert.equal(calls.length, 1);
+  });
+
+  test("a different scope on the same link really does write a second row", async () => {
+    /* The page's warning is only worth making if it is true. */
+    const first = captureLedger();
+    const t = tokenFor();
+    await callOperator(validPost({ t, scope: "sms" }));
+    const smsKey = column(first, "dedupe_key");
+    _resetExecutor();
+
+    const second = captureLedger();
+    const res = await callOperator(validPost({ t, scope: "all" }));
+    assert.equal(res.statusCode, 200);
+    assert.notEqual(column(second, "dedupe_key"), smsKey,
+      "the same link with a different scope produced the same key - the page's warning is false");
+    assert.equal(column(second, "event_type"), EVENT_TYPE.REVOKED);
   });
 
   test("the statement is an INSERT with ON CONFLICT DO NOTHING and no conflict target", async () => {
@@ -883,7 +931,7 @@ describe("the HubSpot projection after an operator entry", () => {
        `.*` across a whole HTML page will match almost anything, which is
        how an assertion passes while proving nothing. */
     assert.ok(res.body.includes(
-      "1 of 2 CRM contacts holding this number was marked; 1 could not be updated."),
+      "Of 2 CRM contacts holding this number: 1 was marked; 1 could not be updated."),
       "the partial outcome is not stated exactly");
     assert.match(res.body, /the record above is the one that counts/i);
     assert.ok(!/2 CRM contacts holding this number were marked as well/.test(res.body),
@@ -976,7 +1024,7 @@ describe("the HubSpot projection after an operator entry", () => {
     assert.equal(patches, MAX_PROJECTION_CONTACTS,
       `the loop ran ${patches} times against a cap of ${MAX_PROJECTION_CONTACTS}`);
     assert.ok(res.body.includes(
-      `${MAX_PROJECTION_CONTACTS} of ${total} CRM contacts holding this number were marked; ` +
+      `Of ${total} CRM contacts holding this number: ${MAX_PROJECTION_CONTACTS} were marked; ` +
       "3 were not reached before the time limit."),
       "the page does not say the remaining contacts were skipped");
     assert.match(res.body, /the record above is the one that counts/i);
@@ -1048,9 +1096,75 @@ describe("the HubSpot projection after an operator entry", () => {
 
     /* And the page tells the truth about the contact it could not reach. */
     assert.ok(res.body.includes(
-      "None of 1 CRM contact holding this number could be marked; " +
-      "1 was not reached before the time limit."),
+      "Of 1 CRM contact holding this number: 1 was not reached before the time limit."),
       "the page does not say the contact went unreached");
+    assert.match(res.body, /the record above is the one that counts/i);
+  });
+
+  /* fetch() resolves as soon as the response HEADERS arrive; the body may
+     still be streaming. Clearing the abort timer at that point left every
+     later `res.text()` unbounded, so a server answering 200 promptly and
+     then stalling the body ran past the deadline with the controller
+     already disarmed. The bound has to cover the body too. */
+  test("a stalled response BODY is aborted at the deadline, not merely the headers", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    const searchMs = PROJECTION_BUDGET_MS - 2000;
+    let bodyAborted = false;
+    let headersAt = 0;
+
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url).includes("/objects/contacts/search")) {
+        await new Promise((r) => setTimeout(r, searchMs));
+        return new Response(JSON.stringify({ results: [{ id: "1", properties: {} }] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      /* HEADERS IMMEDIATELY, BODY NEVER. The stream only ends when the
+         signal fires — which is exactly the shape that used to escape. */
+      headersAt = Date.now();
+      const signal = options.signal;
+      assert.ok(signal, "no AbortSignal reached the HubSpot write");
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"id":'));
+          const onAbort = () => {
+            bodyAborted = true;
+            controller.error(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          };
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        },
+      });
+      return new Response(stream, {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    };
+
+    const calls = captureLedger();
+    const started = Date.now();
+    const res = await callOperator(validPost());
+    const elapsed = Date.now() - started;
+
+    assert.ok(bodyAborted, "the stalled response body was never aborted");
+    assert.ok(headersAt > 0, "the write never started");
+
+    /* The ledger already succeeded, so the operator still gets her page. */
+    assert.equal(res.statusCode, 200, "a stalled body changed the response");
+    assert.equal(calls.length, 1, "the ledger row was not written");
+    assert.equal(column(calls, "event_type"), EVENT_TYPE.REVOKED);
+
+    /* Inside the real budget — not the budget plus another 8 s of body. */
+    assert.ok(elapsed < PROJECTION_BUDGET_MS + 1500,
+      `the projection took ${elapsed}ms against a ${PROJECTION_BUDGET_MS}ms hard budget`);
+    assert.ok(Date.now() - headersAt < 3500,
+      "the body read was given the default timeout, not the remaining budget");
+
+    /* And the outcome is stated truthfully. */
+    assert.ok(res.body.includes(
+      "Of 1 CRM contact holding this number: 1 was not reached before the time limit."),
+      "the page does not report the stalled contact truthfully");
     assert.match(res.body, /the record above is the one that counts/i);
   });
 
@@ -1121,8 +1235,7 @@ describe("the HubSpot projection after an operator entry", () => {
     assert.equal(res.statusCode, 200);
     /* 0 written + 0 failed + 3 unreached = the 3 that were found. */
     assert.ok(res.body.includes(
-      "None of 3 CRM contacts holding this number could be marked; " +
-      "3 were not reached before the time limit."),
+      "Of 3 CRM contacts holding this number: 3 were not reached before the time limit."),
       "the counts do not sum to the contacts found - one was lost from the tally");
   });
 
@@ -1152,7 +1265,8 @@ describe("the HubSpot projection after an operator entry", () => {
     assert.equal(res.statusCode, 200);
     assert.equal(writes, 0, "a write was started with no budget left to finish it");
     assert.ok(Date.now() - started < PROJECTION_BUDGET_MS + 1500);
-    assert.ok(res.body.includes("1 was not reached before the time limit"));
+    assert.ok(res.body.includes(
+      "Of 1 CRM contact holding this number: 1 was not reached before the time limit."));
   });
 
   /* The override must be exactly that — an override. Every existing
@@ -1162,31 +1276,39 @@ describe("the HubSpot projection after an operator entry", () => {
       [FEATURE_FLAG]: "true",
       HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
     });
-    const { writeSuppressionProperties, findContactsByPhone, HUBSPOT_TIMEOUT_MS } =
+    const { writeSuppressionProperties, HUBSPOT_TIMEOUT_MS } =
       await import("../api/_lib/hubspot.mjs");
     assert.equal(HUBSPOT_TIMEOUT_MS, 8000);
 
-    /* Measure the abort deadline the signal actually carries, without
-       waiting 8 s for it: the timer is read, not awaited. */
-    const observed = [];
-    globalThis.fetch = async (url, options = {}) => {
-      const at = Date.now();
-      await new Promise((resolve) => {
-        options.signal.addEventListener("abort", () => resolve(), { once: true });
-        /* Sample the signal shortly after; if it has not aborted by
-           1 s the timeout is clearly longer than any short override. */
-        setTimeout(() => { observed.push({ aborted: options.signal.aborted, ms: Date.now() - at }); resolve(); }, 60);
-      });
-      return new Response(JSON.stringify({ id: "1", results: [] }),
-        { status: 200, headers: { "content-type": "application/json" } });
+    /* Two calls through the SAME path, one with a short override and one
+       with none, so the comparison proves the default is not merely
+       "longer than the sample" but longer than an override that demonstrably
+       works. Sampling alone would pass for a 100 ms default. */
+    const abortedAfter = async (opts) => {
+      let ms = null;
+      globalThis.fetch = async (url, options = {}) => {
+        const at = Date.now();
+        return new Promise((_, reject) => {
+          options.signal.addEventListener("abort", () => {
+            ms = Date.now() - at;
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }, { once: true });
+          /* Give up sampling well before the default would fire. */
+          setTimeout(() => reject(Object.assign(new Error("sampled"), { sampled: true })), 1200);
+        });
+      };
+      try { await writeSuppressionProperties("101", { cst_sms_suppressed: "true" }, opts); }
+      catch (err) { if (!err.sampled) return ms; return "still-running"; }
+      return "resolved";
     };
 
-    await writeSuppressionProperties("101", { cst_sms_suppressed: "true" });
-    await findContactsByPhone("+14195550123");
-    assert.equal(observed.length, 2);
-    for (const o of observed)
-      assert.equal(o.aborted, false,
-        "a caller that passed no override was aborted early - the default changed");
+    const short = await abortedAfter({ timeoutMs: 300 });
+    assert.ok(typeof short === "number" && short < 900,
+      `an explicit 300 ms override aborted after ${short} - the override does not work`);
+
+    const dflt = await abortedAfter({});
+    assert.equal(dflt, "still-running",
+      "a caller passing no override was aborted inside 1.2 s - the default changed");
   });
 
   test("an exhausted budget never silently becomes the 8-second default", async () => {
@@ -1212,6 +1334,150 @@ describe("the HubSpot projection after an operator entry", () => {
       writeSuppressionProperties("101", { cst_sms_suppressed: "true" }, { timeoutMs: -50 }));
     assert.ok(ranFor < 1000,
       `an exhausted budget ran for ${ranFor}ms - it fell back to the default`);
+  });
+
+  /* MIXED STATES. An already-marked contact produces an empty patch and no
+     request, so nothing counted it until now — `written + failed + skipped`
+     did not sum to the contacts found and one contact simply vanished from
+     the page. Each of these asserts the exact sentence AND the invariant
+     the sentence depends on. */
+  describe("every contact found lands in exactly one bucket", () => {
+    const withContacts = (rows, handler) => {
+      setEnv({
+        [FEATURE_FLAG]: "true",
+        HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+      });
+      globalThis.fetch = async (url, options = {}) => {
+        if (String(url).includes("/objects/contacts/search"))
+          return new Response(JSON.stringify({ results: rows }),
+            { status: 200, headers: { "content-type": "application/json" } });
+        return handler(String(url), options);
+      };
+    };
+    /* An already-suppressed contact: toHubSpotSuppressionProperties()
+       returns {} for it, so writeSuppressionProperties() never calls out. */
+    const marked = (id) => ({
+      id,
+      properties: { cst_sms_suppressed: "true", cst_sms_suppressed_at: "2026-09-01T00:00:00Z" },
+    });
+    const fresh = (id) => ({ id, properties: {} });
+
+    test("updated + already marked", async () => {
+      withContacts([fresh("1"), marked("2")], async () =>
+        new Response(JSON.stringify({ id: "1" }),
+          { status: 200, headers: { "content-type": "application/json" } }));
+      const calls = captureLedger();
+      const res = await callOperator(validPost());
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.ok(res.body.includes(
+        "Of 2 CRM contacts holding this number: 1 was marked; 1 was already marked."),
+        "an already-marked contact was lost from the accounting");
+      /* Nothing went wrong, so the page must NOT apologise. */
+      assert.ok(!/display problem only/.test(res.body),
+        "an already-marked contact was dressed up as a problem");
+    });
+
+    test("already marked + failed", async () => {
+      withContacts([marked("1"), fresh("2")], async () =>
+        new Response(JSON.stringify({ message: "nope" }), { status: 500 }));
+      const calls = captureLedger();
+      const res = await callOperator(validPost());
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.ok(res.body.includes(
+        "Of 2 CRM contacts holding this number: 1 was already marked; 1 could not be updated."),
+        "the mixed already-marked/failed outcome is not stated exactly");
+      assert.match(res.body, /the record above is the one that counts/i);
+      assert.ok(!/1 was marked;/.test(res.body),
+        "an already-marked contact was described as newly written");
+    });
+
+    test("already marked + unreached", async () => {
+      /* The search eats the budget, so the one contact needing a write is
+         never reached — while the already-marked one still counts. */
+      setEnv({
+        [FEATURE_FLAG]: "true",
+        HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+      });
+      globalThis.fetch = async (url) => {
+        if (String(url).includes("/objects/contacts/search")) {
+          await new Promise((r) => setTimeout(r, PROJECTION_BUDGET_MS - Math.floor(MIN_WRITE_MS / 2)));
+          return new Response(JSON.stringify({ results: [marked("1"), fresh("2")] }),
+            { status: 200, headers: { "content-type": "application/json" } });
+        }
+        throw new Error("no write should have been attempted");
+      };
+      const calls = captureLedger();
+      const res = await callOperator(validPost());
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.ok(res.body.includes(
+        "Of 2 CRM contacts holding this number: 1 was already marked; " +
+        "1 was not reached before the time limit."),
+        "the mixed already-marked/unreached outcome is not stated exactly");
+    });
+
+    test("updated + already marked + failed", async () => {
+      withContacts([fresh("1"), marked("2"), fresh("3")], async (url) =>
+        url.includes("/3")
+          ? new Response(JSON.stringify({ message: "nope" }), { status: 500 })
+          : new Response(JSON.stringify({ id: "1" }),
+            { status: 200, headers: { "content-type": "application/json" } }));
+      const calls = captureLedger();
+      const res = await callOperator(validPost());
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.ok(res.body.includes(
+        "Of 3 CRM contacts holding this number: 1 was marked; 1 was already marked; " +
+        "1 could not be updated."),
+        "the three-way outcome is not stated exactly");
+    });
+
+    /* The invariant itself, read off the projection_done log line rather
+       than inferred from prose — so it holds for combinations no sentence
+       test happens to cover. */
+    test("written + unchanged + failed + skipped === contacts, in every mix", async () => {
+      const mixes = [
+        { rows: [fresh("1"), marked("2")], fail: [] },
+        { rows: [marked("1"), fresh("2")], fail: ["2"] },
+        { rows: [fresh("1"), fresh("2"), marked("3")], fail: ["2"] },
+        { rows: [marked("1"), marked("2"), marked("3")], fail: [] },
+        { rows: [fresh("1")], fail: ["1"] },
+      ];
+      for (const mix of mixes) {
+        withContacts(mix.rows, async (url) =>
+          mix.fail.some((id) => url.endsWith("/" + id))
+            ? new Response(JSON.stringify({ message: "nope" }), { status: 500 })
+            : new Response(JSON.stringify({ id: "x" }),
+              { status: 200, headers: { "content-type": "application/json" } }));
+
+        captureLedger();
+        const { text } = await capturingLogs(() => callOperator(validPost()));
+        const line = text.split("\n")
+          .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+          .find((o) => o && o.event === "operator.action.projection_done");
+        assert.ok(line, "no projection_done line was logged for this mix");
+
+        const sum = line.written + line.unchanged + line.failed + line.skipped;
+        assert.equal(sum, line.contacts,
+          `counts ${JSON.stringify(line)} do not sum to the ${line.contacts} contacts found`);
+        assert.equal(line.contacts, mix.rows.length);
+        _resetExecutor();
+      }
+    });
+
+    test("all already marked still reads as already marked, not as marked now", async () => {
+      withContacts([marked("1"), marked("2")], async () => {
+        throw new Error("no contact should have been patched");
+      });
+      captureLedger();
+      const res = await callOperator(validPost());
+      assert.ok(res.body.includes(
+        "2 CRM contacts holding this number were already marked, so nothing needed changing there."),
+        "the all-already-marked outcome is not stated exactly");
+      assert.ok(!/were marked as well/.test(res.body));
+    });
   });
 
   test("nobody in the CRM holding the number is not a failure", async () => {

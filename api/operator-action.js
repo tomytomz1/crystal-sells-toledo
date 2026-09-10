@@ -464,8 +464,10 @@ async function handlePost(req, res) {
   return page(res, 200, shell("Recorded", `
     <div class="ok">
       <p><strong>Recorded.</strong> ${escapeHtml(scope.detail)}</p>
-      <p class="meta">A second click on the same link records nothing further —
-         it is the same entry, not a second one.</p>
+      <p class="meta">Recording <strong>${escapeHtml(scope.label.toLowerCase())}</strong>
+         again from this email changes nothing — it is the same entry, not a second one.
+         Choosing a <strong>different</strong> option records a <strong>separate</strong>
+         opt-out, which is also permanent.</p>
     </div>
     <p>${escapeHtml(projectionSentence(projection))}</p>
     <p class="meta">MessageSid ${escapeHtml(payload.sid)}</p>`));
@@ -482,12 +484,14 @@ async function handlePost(req, res) {
  */
 function projectionSentence(projection) {
   const written = projection.written || 0;
+  const unchanged = projection.unchanged || 0;
   const failed = projection.failed || 0;
   const skipped = projection.skipped || 0;
   const contacts = projection.contacts || 0;
   const stands = "That is a display problem only — the record above is the one that " +
     "counts, and it was written.";
   const n = (k, noun) => `${k} ${noun}${k === 1 ? "" : "s"}`;
+  const be = (k) => (k === 1 ? "was" : "were");
 
   if (projection.reason === "consent_state_disabled")
     return "The CRM copy was not updated, because CRM consent tracking is switched " +
@@ -501,29 +505,35 @@ function projectionSentence(projection) {
   if (projection.reason === "failed")
     return "The CRM could not be searched, so no contact was marked there. " + stands;
 
-  /* Contacts were found and each was attempted individually. */
-  if (failed === 0 && skipped === 0) {
-    if (written === 0)
-      return `${n(contacts, "CRM contact")} holding this number ` +
-        `${contacts === 1 ? "was" : "were"} already marked, so nothing needed changing there.`;
-    return `${n(written, "CRM contact")} holding this number ` +
-      `${written === 1 ? "was" : "were"} marked as well.`;
-  }
-  if (written === 0 && skipped === 0)
+  /* Contacts were found. Each one landed in exactly one bucket, and each
+     bucket has its own words: an already-marked contact is NOT a written
+     one, NOT a failure and NOT something we failed to reach. */
+
+  /* The three unmixed cases, which are the common ones, read naturally. */
+  if (written === contacts && contacts > 0)
+    return `${n(written, "CRM contact")} holding this number ${be(written)} marked as well.`;
+  if (unchanged === contacts && contacts > 0)
+    return `${n(unchanged, "CRM contact")} holding this number ${be(unchanged)} ` +
+      "already marked, so nothing needed changing there.";
+  if (failed === contacts && contacts > 0)
     return "The CRM copy could not be updated for any of the " +
       `${n(failed, "contact")} holding this number. ` + stands;
 
-  /* Something was left undone. Say which, and how much — composed rather
-     than enumerated, so a new outcome cannot fall through to a sentence
-     written for a different one. */
-  const parts = [written > 0
-    ? `${written} of ${n(contacts, "CRM contact")} holding this number ` +
-      `${written === 1 ? "was" : "were"} marked`
-    : `None of ${n(contacts, "CRM contact")} holding this number could be marked`];
-  if (failed > 0) parts.push(`${failed} could not be updated`);
-  if (skipped > 0)
-    parts.push(`${skipped} ${skipped === 1 ? "was" : "were"} not reached before the time limit`);
-  return parts.join("; ") + ". " + stands;
+  /* Anything mixed is ENUMERATED rather than summarised. A summary is
+     what let an already-marked contact disappear; a list cannot lose one,
+     and every clause below is a count of a distinct bucket. */
+  const parts = [];
+  if (written) parts.push(`${written} ${be(written)} marked`);
+  if (unchanged) parts.push(`${unchanged} ${be(unchanged)} already marked`);
+  if (failed) parts.push(`${failed} could not be updated`);
+  if (skipped) parts.push(`${skipped} ${be(skipped)} not reached before the time limit`);
+
+  const listed = `Of ${n(contacts, "CRM contact")} holding this number: ` +
+    parts.join("; ") + ".";
+  /* The reassurance belongs only where something actually went undone.
+     "Some were already marked" is not a problem and must not be dressed
+     as one. */
+  return failed || skipped ? listed + " " + stands : listed;
 }
 
 /**
@@ -557,32 +567,64 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
     }
 
     let written = 0;
+    /* ALREADY-MARKED CONTACTS NEED THEIR OWN BUCKET. An already-suppressed
+       contact produces an empty patch, writeSuppressionProperties() answers
+       `{ written: false }` without making a request, and until now nothing
+       counted it — so `written + failed + skipped` did NOT sum to the
+       contacts found, and one contact simply vanished from the operator's
+       page. It is not written (nothing changed), not failed (nothing went
+       wrong) and not skipped (it WAS reached). It is unchanged. */
+    let unchanged = 0;
     let failed = 0;
     let skipped = 0;
 
-    for (let i = 0; i < contacts.length; i += 1) {
-      const contact = contacts[i];
-      /* Counted, never silently dropped: a contact this endpoint chose
-         not to reach is a fact the operator is told, not one it hides. */
-      if (i >= MAX_PROJECTION_CONTACTS || remaining() < MIN_WRITE_MS) {
-        /* `+=`, not `=`. A write already counted as unreached in the
-           catch below must not be overwritten by this tally, or the
-           counts stop summing to `contacts` and the page silently loses
-           a contact — the arithmetic-that-lies this whole path exists to
-           avoid. written + failed + skipped === contacts, always. */
-        skipped += contacts.length - i;
-        break;
-      }
+    /* THE BUDGET GATES REQUESTS, NOT THE SCAN. Deciding what a contact
+       needs is pure and free — toHubSpotSuppressionProperties() makes no
+       call — so an already-marked contact can always be accounted for
+       correctly, however little budget is left. Breaking out of the loop
+       on an exhausted budget would report "not reached" for contacts that
+       needed nothing and would have cost nothing, which is a worse answer
+       than the truth and no cheaper.
+
+       So nothing breaks: every contact found is examined and bucketed,
+       and only contacts that actually need a request are subject to the
+       budget and the cap. */
+    let attempted = 0;
+    for (const contact of contacts) {
+      let props;
       try {
-        const props = toHubSpotSuppressionProperties({
+        props = toHubSpotSuppressionProperties({
           scope: scope.hubspot,
           trigger: SUPPRESSION_TRIGGER.MANUAL,
           at: occurredAt,
           current: contact.consent,
         });
+      } catch {
+        /* The patch could not even be built for this contact. */
+        failed += 1;
+        continue;
+      }
+
+      /* An empty patch is not a request. This contact is already marked:
+         nothing to do, nothing to wait for, and it is `unchanged` whether
+         or not any budget remains. */
+      if (!props || !Object.keys(props).length) {
+        unchanged += 1;
+        continue;
+      }
+
+      if (attempted >= MAX_PROJECTION_CONTACTS || remaining() < MIN_WRITE_MS) {
+        /* Counted, never silently dropped: a contact this endpoint chose
+           not to reach is a fact the operator is told, not one it hides. */
+        skipped += 1;
+        continue;
+      }
+
+      attempted += 1;
+      try {
         /* The remaining budget goes INTO the request, so an overrun
            aborts the socket instead of outliving the check that let it
-           start. An empty patch never becomes a request at all. */
+           start — and it covers the response body, not only the headers. */
         const result = await writeSuppressionProperties(contact.id, props,
           { timeoutMs: requestMs() });
         if (result.written) {
@@ -590,6 +632,10 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
           log("operator.action.projection_written", {
             ...shape, contact_id: contact.id, ...suppressionWriteLogShape(props),
           });
+        } else {
+          /* A non-empty patch that wrote nothing. Not expected, and not
+             worth guessing about: nothing changed, so it is unchanged. */
+          unchanged += 1;
         }
       } catch {
         /* THE RULE, and it is about cause rather than symptom: if the
@@ -598,19 +644,24 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
            never started, and true in the way that matters to her, which
            is that trying again may work. Anything else is HubSpot
            declining, which is `failed`. One contact failing never stops
-           the rest; the deadline check at the top of the loop does. */
+           the rest. */
         if (remaining() < MIN_WRITE_MS) skipped += 1;
         else failed += 1;
       }
     }
+
     log("operator.action.projection_done", {
-      ...shape, contacts: contacts.length, written, failed, skipped,
+      ...shape, contacts: contacts.length, written, unchanged, failed, skipped,
     });
-    /* `contacts` travels with the counts because "found two, wrote none,
-       failed none" (both already marked) and "found none" are different
-       facts and must read differently. `skipped` travels for the same
-       reason: not reached is not the same as refused. */
-    return { reason: "written", written, failed, skipped, contacts: contacts.length };
+    /* THE INVARIANT, and the page depends on it:
+         written + unchanged + failed + skipped === contacts.length
+       Every contact found lands in exactly one bucket, and no bucket is
+       a synonym for another — an already-marked contact must never be
+       described as newly written, as failed, or as unreached. */
+    return {
+      reason: "written", written, unchanged, failed, skipped,
+      contacts: contacts.length,
+    };
   } catch (err) {
     /* Deliberately swallowed, deliberately loud. `log()` not `logError()`:
        a HubSpot error message can carry a contact's own details. */

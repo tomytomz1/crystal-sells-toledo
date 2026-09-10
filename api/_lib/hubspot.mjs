@@ -210,7 +210,31 @@ async function fetchWithTimeout(url, options = {}, timeoutMs) {
     : (Number.isFinite(timeoutMs) ? Math.max(1, timeoutMs) : TIMEOUT_MS);
   const timer = setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { ...options, signal: ctrl.signal });
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    /* THE BODY IS READ HERE, INSIDE THE TIMEOUT, AND THAT IS THE POINT.
+       `fetch()` resolves as soon as the response HEADERS arrive; the body
+       may still be streaming. Returning the Response and clearing the
+       timer would leave every caller's later `res.text()` unbounded — a
+       server that answers 200 promptly and then stalls the body would
+       run past the deadline with the AbortController already disarmed.
+       That is not a hypothetical shape: it is the ordinary behaviour of a
+       proxy or a load balancer under stress.
+
+       So the controller stays live until the bytes are in hand, and the
+       abort covers receiving the response AND consuming it. */
+    const text = await res.text();
+    /* A minimal stand-in carrying exactly what callers use: `ok`,
+       `status` and an already-resolved `text()`. Returning a real
+       Response is not possible once its body is consumed, and buffering
+       here keeps ONE place that knows how to make a HubSpot request
+       rather than duplicating the logic per caller. `text()` is async so
+       readJson() and every existing call site are unchanged. */
+    return {
+      ok: res.ok,
+      status: res.status,
+      headers: res.headers,
+      async text() { return text; },
+    };
   } finally {
     clearTimeout(timer);
   }

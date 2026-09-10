@@ -453,10 +453,20 @@ action, 10 September 2026** (`api/operator-action.js`,
   commit — costing the operator the page that tells her the record stands. The
   remaining budget is passed **into** each HubSpot request and the socket is
   **aborted** when it runs out, so a write cannot begin just inside the deadline
-  and run on under HubSpot's own 8 s timeout. Contacts not reached are **counted
-  and stated**, never silently dropped, and the counts always sum to the contacts
-  found. Worst case for the whole endpoint: 3 s ledger + 12 s projection + under
-  1 s of non-I/O work ≈ **16 s against a 30 s `maxDuration`.**
+  and run on under HubSpot's own 8 s timeout. **The bound covers the response
+  body, not only its headers** — `fetch()` resolves when the headers arrive, so a
+  stalled body would otherwise run on with the abort already disarmed. Contacts
+  not reached are **counted and stated**, never silently dropped: **every contact
+  found lands in exactly one of four buckets** — marked, already marked, could not
+  be updated, not reached — which always sum to the contacts found, and an
+  already-marked contact is never described as any of the other three. Worst case
+  for the whole endpoint: 3 s ledger + 12 s projection + under 1 s of non-I/O work
+  ≈ **16 s against a 30 s `maxDuration`.**
+- **The link is idempotent per SCOPE, not per link.** The dedupe key is
+  `operator:<MessageSid>:<channel>:revoked` and the channel is chosen on the
+  confirmation page, so re-submitting the **same** choice changes nothing while a
+  **different** choice records a second, equally permanent suppression. The
+  result page says exactly that rather than claiming the link is idempotent.
 - **Inert, and inert by design.** `OPERATOR_ACTION_SECRET` is set in **no
   environment**, so the endpoint answers 503 and renders nothing; the webhook
   still answers 503 at `twilioConfigured()` before reading a body. **Nothing here

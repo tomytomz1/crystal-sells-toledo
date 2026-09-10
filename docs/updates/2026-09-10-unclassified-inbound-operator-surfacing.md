@@ -249,10 +249,27 @@ count UTF-16 code units so they cannot disagree over an emoji.
 **Dedupe key: `operator:<MessageSid>:<channel>:revoked`**, with the existing
 `ON CONFLICT DO NOTHING` and **no conflict target** (naming one requires
 `SELECT`, which this role deliberately lacks — the 42501 outage of 9 September).
-A second click, a double submit, a forwarded copy of the email or a browser retry
-all converge on the same key. **A second, independently sealed token for the same
-message produces the identical key**, because idempotency derives from the
-`MessageSid` and not from the token — that is asserted by test.
+**The key is per CHANNEL, and the link is not.** A second submission **of the
+same scope** — a double click, a double submit, a forwarded copy of the email, a
+browser retry — converges: same key, `INSERT 0 0`, no second row. **A second
+submission of a DIFFERENT scope does not**, because the channel is part of the
+key and Crystal chooses the channel on the confirmation page, not in the link. It
+writes a second, separate and equally permanent row. That is the merged design —
+`sms`, `ai_voice` and `all` are genuinely different suppressions — and the page
+now says so in those words rather than claiming the link is idempotent.
+
+**A second, independently sealed token for the same message and scope produces
+the identical key**, because idempotency derives from the `MessageSid` and not
+from the token. Both halves are asserted by test, including that the three scopes
+produce three distinct keys.
+
+> The merged decision document's §6.5 phrases this loosely too — *"a double
+> click, a double submit, a second click from a forwarded copy of the email, or a
+> browser retry all converge"* — which is true of every case it lists, since none
+> of them changes the scope, but reads as a broader promise than the key gives.
+> Recorded here rather than rewritten there: it is merged design prose, and the
+> behaviour it describes is unchanged. **The operator-facing wording, which is
+> what could actually mislead, is exact.**
 
 **It cannot clear a suppression, enforced three ways**: `revoked` is the only
 event type in the file, `tools/check.mjs` fails the build if the endpoint so much
@@ -365,7 +382,7 @@ success.
 | `api/_lib/consent-ledger.mjs` | `SOURCE_OPERATOR`; `capEvidence()` exported; the stale retry comment corrected |
 | `tools/check.mjs` | `OPERATOR_ACTION_SECRET` in `SECRET_NAMES`; nine new guards; containment extended |
 | `vercel.json` | `maxDuration` for `api/twilio-inbound.js` (15 s) and `api/operator-action.js` (30 s) |
-| `tests/operator-action.test.mjs` | **new** — 119 tests |
+| `tests/operator-action.test.mjs` | **new** — 128 tests |
 | `tests/suppression.test.mjs` | the vacuous mutation retargeted |
 | `docs/updates/…-decision.md` | §6.1 GET wording; §11 marked closed |
 | `docs/CURRENT-STATE.md` | these two items move from *designed* to *built and inert*; the endpoint list corrected from one server endpoint to three |
@@ -414,7 +431,7 @@ anything.
 
 ## 8. Tests
 
-`tests/operator-action.test.mjs` — **119 tests, all passing**. Nothing reaches a
+`tests/operator-action.test.mjs` — **128 tests, all passing**. Nothing reaches a
 database, an SMTP server, Twilio or HubSpot: the ledger executor is injected, the
 mail transport factory is replaced, and `globalThis.fetch` throws if anything
 tries to use it.
@@ -679,7 +696,7 @@ These are not numbers chosen to sum to 30.
 
 The first draft of the fix wrote `skipped = contacts.length - i` at the loop
 break. A write already counted as unreached in the `catch` was then **overwritten**
-by that tally, so `written + failed + skipped` no longer summed to `contacts` and
+by that tally, so the counts no longer summed to `contacts` and
 the page silently lost a contact — arithmetic that lies, on the page whose entire
 job is to state the outcome truthfully. Now `+=`, with a test asserting the sum.
 
@@ -693,7 +710,77 @@ differs; it is **not** fixed here and this pull request is not widened to reach
 it. **To be settled separately**, and it is the natural companion to configuring
 webhook retry, since both concern what the webhook does when HubSpot is slow.
 
-## 14. Explicitly not done
+## 14. Three more, from review of `ee00d0b`
+
+### The hard bound was still not end-to-end
+
+`fetchWithTimeout()` set the abort timer, awaited `fetch()`, returned the
+`Response` and **cleared the timer** — and every caller then read the body
+*afterwards*, through `readJson()` → `res.text()`. **`fetch()` resolves when the
+response HEADERS arrive; the body may still be streaming.** So a HubSpot server —
+or any proxy or load balancer in front of one — could answer 200 promptly and
+then stall the body, with the `AbortController` already disarmed. The "12-second
+hard bound" covered receiving the response and not consuming it.
+
+**Fixed in the one place that makes a HubSpot request:** the body is now read
+*inside* the timeout window, and `fetchWithTimeout()` returns a small stand-in
+carrying exactly what callers use — `ok`, `status`, `headers` and an
+already-resolved `text()`. Every call site is unchanged, no request logic is
+duplicated, and the abort now covers **receiving and consuming**.
+
+**Measured:** against the pre-fix code in a throwaway copy, a response whose
+headers arrive immediately and whose body never completes **hangs the test run
+outright** — the run is abandoned rather than merely failing. That is the
+unbounded read, reproduced.
+
+### Already-marked contacts were not in the accounting
+
+`writeSuppressionProperties()` returns `{ written: false }` when
+`toHubSpotSuppressionProperties()` produces no patch, and nothing counted it. So
+the invariant this document claimed — `written + failed + skipped === contacts` —
+**was false**, and a contact that was already suppressed simply **disappeared from
+the operator's page**: three found, one updated, one already marked, one timed
+out, and the page accounted for two.
+
+Now four buckets, and the real invariant:
+
+> **`written + unchanged + failed + skipped === contacts.length`**
+
+An already-marked contact is **not** written (nothing changed), **not** failed
+(nothing went wrong) and **not** skipped (it *was* reached). It is `unchanged`,
+and it is never described as any of the other three.
+
+**And the budget now gates requests, not the scan.** Deciding what a contact
+needs is pure and free, so an already-marked contact is accounted for correctly
+however little budget remains. The loop no longer `break`s at all: every contact
+found is examined and bucketed, and only contacts that actually need a request
+are subject to the budget and the 25-contact cap. Reporting "not reached" for a
+contact that needed nothing and would have cost nothing was a worse answer than
+the truth, and no cheaper.
+
+Mixed outcomes are **enumerated rather than summarised** — *"Of 3 CRM contacts
+holding this number: 1 was marked; 1 was already marked; 1 could not be
+updated."* A summary is what let a contact vanish; a list cannot lose one. The
+reassurance sentence appears only where something actually went undone: *some
+were already marked* is not a problem and is not dressed as one.
+
+### The idempotency sentence was broader than the key
+
+The result page said *"a second click on the same link records nothing further"*.
+**The link binds one `MessageSid`, not one channel** — Crystal chooses `sms`,
+`ai_voice` or `all` on the confirmation page — so a second click with a
+**different** choice produces a different dedupe key and a **second, permanent**
+suppression row. The sentence was true of the case it imagined and false of a
+case a real operator can easily reach.
+
+The architecture is unchanged: three scopes really are three different
+suppressions. **The wording is now exact** — it names the choice just recorded,
+says that repeating *that* choice changes nothing, and warns that a different one
+is a separate and equally permanent act. A test asserts the page never claims
+link-wide idempotency, and another asserts that the same link with a different
+scope really does write a second row, so the warning is not itself a fiction.
+
+## 15. Explicitly not done
 
 - **No unsuppression route.** The endpoint cannot clear what it writes, so a
   mistaken entry is permanent under today's design. This is the single most
