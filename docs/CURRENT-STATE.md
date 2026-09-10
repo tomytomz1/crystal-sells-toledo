@@ -51,22 +51,34 @@ Schema in the production HubSpot portal:
   only.** Provisioned and grant-verified on 9 September 2026 — see "The ledger"
   below. `CONSENT_LEDGER_URL` is set in Vercel **Preview** and is **absent from
   Production**, so the live site has no connection to it.
+- **Preview can write to the live HubSpot portal.** `HUBSPOT_ACCESS_TOKEN`,
+  `HUBSPOT_PORTAL_ID` and `HUBSPOT_FORM_GUID` were scoped to **Production and
+  Preview** on 10 September 2026 for the gate 4 Stage B round trip, and were
+  left that way. There is no HubSpot sandbox, so **any Preview deployment of
+  any branch can now create real contacts and real timeline activities in
+  Crystal's production CRM**, and HubSpot will email its own form notification
+  to the form owner. This is a standing exposure that did not exist before that
+  date; removing the three variables from Preview returns it to a 503 at
+  delivery. `ZOHO_SMTP_*` was deliberately **not** given to Preview, so a
+  preview submission sends no acknowledgement email.
 - **§6a research is complete (9 September 2026).** The HubSpot form-submission
   timeline evidence is **useful operationally but is not sufficient as the sole
   durable consent ledger** — a submission can be permanently and irreversibly
   deleted, individually or in bulk, which removes it from the contact's timeline.
-  One part of §6a stays open as a manual **operator usability** check: whether
-  the HubSpot UI renders the whole enquiry block or truncates it. **Full
-  rendering of the actual consent evidence is unverified** until that check is
-  done.
+  The one part of §6a that stayed open — whether the HubSpot UI renders the
+  whole enquiry block or truncates it — was **closed on 10 September 2026**. An
+  operator read a real form-submission activity and found all **34 rows** present
+  and untruncated: the 23 base rows, then the eleven consent rows, including both
+  disclosure texts in full (335 and 330 characters) and no ellipsis, "show more"
+  or cut-off anywhere.
 - **Activation remains gated.** Gate 3 is now closed on **both** halves — code
   merged, database provisioned and verified. Gates 4–10 remain outstanding,
   listed in the decision document below. Gate 4's open question — a round-trip
   requires `COMMUNICATIONS_CONSENT_ENABLED` on *somewhere*, and Production is
   not a candidate — is answered: **Preview is that somewhere.**
   `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
-  Vercel **Preview only**. **Gate 4 Stage A closed on 10 September 2026**;
-  Stage B (the same round trip with HubSpot credentials) and gates 5–10 remain.
+  Vercel **Preview only**. **Gate 4 closed on 10 September 2026 — both stages.
+  Gate 5 closed the same day.** Gates 6–10 remain.
 - **A2P/TCR readiness is a separate activation dependency.** This repository makes
   no claim about its status.
 
@@ -132,8 +144,7 @@ grant has been proven. Vercel Preview points at it; Production does not.**
 - **The credential is proven.** A database client logged in as
   `consent_ledger_app` over TLS 1.3 to PostgreSQL 18.6, appended a row, and was
   refused `SELECT count(*)` — so the append-only grant holds over a real login,
-  not merely under `SET ROLE`. The ledger holds two synthetic verification rows
-  and nothing else.
+  not merely under `SET ROLE`.
 - **The application credential is retrievable from the Neon console.** Neon
   stores the password in its own vault even for a role created with SQL, and
   will display it. Neon console access is therefore equivalent to holding the
@@ -156,9 +167,26 @@ grant has been proven. Vercel Preview points at it; Production does not.**
   full disclosure text stored. The driver's HTTP path, the pooled host, the real
   `ON CONFLICT` clause against the live grant and the Vercel runtime are all now
   exercised. **Gate 4 Stage A is closed.**
-- **Stage B is open.** Preview has no HubSpot credential, so the endpoint stops
-  at `lead.not_configured` after the append: no `CONSENT LEDGER: RECORDED` row
-  has been rendered and no `cst_*` grant has been written by a real submission.
+- **Stage B is closed — the whole path is proven, 10 September 2026.** One
+  controlled Preview submission produced, in this order: two ledger rows, a
+  HubSpot contact (`action: create`), and a timeline activity — `lead.delivered`
+  in 1,800 ms, HTTP 200. The append preceded the CRM write by 725 ms, which is
+  the ordering `tools/check.mjs` enforces statically, observed live.
+  - **The contact carried `Communications consent: 6 of 23 properties`** — the
+    six SMS ones, `SMS permission status = Granted`. **The other seventeen were
+    blank**: every `cst_ai_voice_*`, every suppression flag, `cst_do_not_call`,
+    `cst_do_not_contact`. An unticked box wrote nothing. It is recorded in the
+    ledger as `consent_not_selected` — a decision that was made — and nowhere in
+    HubSpot as a state.
+  - **The timeline activity carried all 34 rows**, `CONSENT LEDGER: RECORDED`
+    first among the consent rows, both disclosure texts complete.
+  - `lead.ack.skipped / not_configured` confirmed no acknowledgement email was
+    sent, because `ZOHO_SMTP_*` was deliberately withheld from Preview.
+- **The evidence survives deletion of the HubSpot record — demonstrated, not
+  asserted.** The test contact was deleted, taking its timeline activity with it.
+  The Neon rows were unchanged: both present, disclosure texts intact at 335 and
+  330 characters, `website_rows` still 4. This is the reason the ledger exists,
+  and it is now an observation rather than a design argument.
 - **Idempotency against Neon is unverified.** The replay and partial-heal
   behaviour is measured against a local Postgres 16; no submission has been
   replayed onto an existing dedupe key in the Neon ledger.
@@ -167,6 +195,27 @@ grant has been proven. Vercel Preview points at it; Production does not.**
   code or SQLSTATE), whitelisted to identifier characters so no message, host
   or value can occupy them. Before this, every cause looked identical in the
   log and the outage took three sessions to identify.
+- **The ledger holds six rows**, all synthetic: two provisioning rows
+  (`form_type = setup_verification`, 9 September) and four website rows from the
+  two Preview submissions on 10 September. All are retained deliberately as
+  evidence. No real visitor's consent is in this table.
+
+### What is still unproven
+
+Stated plainly, because the rest of this section reads like everything works.
+
+- **Replay against Neon.** The per-row no-op and the partial heal are measured
+  against a local Postgres 16 with `db/001` applied verbatim. **No submission
+  has ever been replayed onto an existing dedupe key in the live ledger.** This
+  is the oldest outstanding gap in the phase.
+- **The failure path under live conditions.** `CONSENT LEDGER: NOT CONFIRMED`
+  and a withheld `cst_*` grant have never been observed together in a real
+  submission — both preview failures happened while HubSpot was absent, so the
+  block was never rendered. What an operator actually sees when the ledger is
+  unreachable and the CRM is not is unverified.
+- **Production with the feature on.** Never enabled there, and not scheduled.
+- **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
+  has been observed. Whether a permanent purge behaves the same is untested.
 
 Design, failure-semantics contract and the code:
 `docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
@@ -200,5 +249,6 @@ Open one of these only when the task actually needs it.
 | Ledger as built — module contract, failure semantics, the CONSENT LEDGER row, the static guards, what a human must still do | `docs/updates/2026-09-09-consent-evidence-ledger.md` |
 | Ledger as provisioned — Neon project, role creation, grant verification, the Neon-specific traps, what is still unproven | `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md` |
 | Why the conflict target had to go — the 42501 outage, the privilege rule, the rejected `GRANT SELECT`, the measured semantics | `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md` |
+| Gate 4 Stage B and gate 5 — the full round trip, the 34-row rendering, the deletion-survival test, the Preview CRM exposure | `docs/updates/2026-09-10-consent-ledger-stage-b-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
