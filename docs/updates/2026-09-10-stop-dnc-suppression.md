@@ -19,9 +19,17 @@ operator review, and for retry configuration*.
 Assume no repository access and no memory of previous conversations.
 
 **Nothing here is active.** The endpoint exists, is tested and is deployed with
-the rest of the site, but no Twilio number points at it, `TWILIO_AUTH_TOKEN` is
-set nowhere, and migration `002` has not been applied. With the token absent the
-endpoint answers 503 to everything and reads no request body at all.
+the rest of the site, but no Twilio number points at it and `TWILIO_AUTH_TOKEN`
+is set nowhere. With the token absent the endpoint answers 503 to everything and
+reads no request body at all.
+
+> **Correction, 10 September 2026 — after this document was merged.** Where it
+> says migration `002` has not been applied, that is no longer true. **`002` was
+> applied to the live Neon `production` branch and verified there the same day**,
+> and the statements below that still read *"not applied"* or *"the sender does
+> not exist"* are marked in place. Nothing else changed: no Twilio number, no
+> token, no code, and nothing calls the new function. Readings and procedure:
+> `docs/updates/2026-09-10-suppression-lookup-provisioning-verification.md`.
 
 ## What was built
 
@@ -216,7 +224,14 @@ ledger row still stands. That keeps "feature off" meaning no `cst_*` property is
 read or written anywhere, which is what makes off equivalent to today's
 production.
 
-## The lookup function — migration 002, not applied
+## The lookup function — migration 002
+
+**Correction, 10 September 2026:** this section's heading read *"not applied"*.
+It is applied. `db/002` §§1–3 ran as `neondb_owner` against the live
+`production` branch, the sender role `consent_ledger_sender` exists, and §4's
+checks — including the mis-pairing regression, run inside a transaction and
+rolled back — all passed. Everything below describes the file, which is
+unchanged and was applied byte-faithfully but for its two placeholders.
 
 Send-time enforcement (gate 8) must resolve suppression by number. The website
 role holds `INSERT` and nothing else and cannot read the ledger back, and that
@@ -330,10 +345,14 @@ ever reached this endpoint. See below.
 
 ## What a human must still do
 
-1. **Apply `db/002_suppression_lookup.sql`** as the table owner, replacing
+1. ~~**Apply `db/002_suppression_lookup.sql`** as the table owner, replacing
    `<sender_role>` and `<sender_password>`, and run the verification block in
    its section 4 — including the two refusals that prove the separation
-   (`consent_ledger_app` refused `EXECUTE`, the sender refused `SELECT`).
+   (`consent_ledger_app` refused `EXECUTE`, the sender refused `SELECT`).~~
+   **DONE, 10 September 2026.** Applied as `neondb_owner`; sender role
+   `consent_ledger_sender`; both refusals proven, along with the sender's
+   refusal on `INSERT`, `UPDATE` and `DELETE` and the absence of every table
+   privilege. The sender credential is in **no** environment — that is gate 8.
 2. **Add `TWILIO_AUTH_TOKEN`** to Vercel. Until then the endpoint answers 503.
 3. **Point a Twilio number's inbound webhook** at `POST /api/twilio-inbound` —
    **only once the TCR hold on error 30753 is resolved.** This is a Twilio
@@ -368,10 +387,14 @@ ever reached this endpoint. See below.
   not built, since Twilio is the thing that is blocked.
 - **Webhook retry is unconfigured**, and a 5xx alone does not cause Twilio to
   redeliver. See the response-policy note.
-- **Nothing is live.** No Twilio number points here; no token is set; migration
-  `002` is not applied.
-- **The sender does not exist.** Migration `002` creates the function and the
-  role, and nothing calls either. Send-time enforcement is gate 8.
+- **Nothing is live.** No Twilio number points here and no token is set.
+  ~~migration `002` is not applied.~~ **Corrected 10 September 2026:** `002`
+  **is** applied and verified. That changes no behaviour, because nothing calls
+  the function it creates.
+- ~~**The sender does not exist.**~~ **Corrected 10 September 2026: the sender
+  role exists** (`consent_ledger_sender`, `EXECUTE` on the function and no
+  table privilege) **and nothing calls it.** Its connection string is in no
+  environment. Send-time enforcement is gate 8 and has not begun.
 - **No unsuppression flow.** Clearing a suppression is a deliberate,
   human-initiated, auditable transition and is out of scope. A `START` records
   `reoptin_requested` and clears nothing.

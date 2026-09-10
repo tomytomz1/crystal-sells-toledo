@@ -250,12 +250,19 @@ Stated plainly, because the rest of this section reads like everything works.
 - **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
   has been observed. Whether a permanent purge behaves the same is untested.
 - **Gate 7 in production.** The SMS half is built and tested and has never run.
-  No Twilio request has ever reached the endpoint, migration `002` has never
-  been applied, and no suppression has ever been written. Signature
-  verification uses the Twilio SDK, and the tests sign with an independent
-  local HMAC — two implementations agreeing — but Twilio itself has never
-  signed a request to this endpoint, and the URL reconstruction from forwarded
-  headers has never met a real one.
+  No Twilio request has ever reached the endpoint, and **no suppression row has
+  ever been committed** — the only two ever inserted were synthetic, inside the
+  migration-002 verification transaction, and were rolled back. Signature verification uses the Twilio SDK, and the tests sign
+  with an independent local HMAC — two implementations agreeing — but Twilio
+  itself has never signed a request to this endpoint, and the URL
+  reconstruction from forwarded headers has never met a real one.
+  **Migration `002` is no longer on this list** — it was applied to the live
+  production branch and verified there on 10 September 2026. See "The
+  suppression lookup" below.
+- **Anything calling `get_suppression_state()` from application code.** The
+  function and the sender credential exist and are proven by hand. No code
+  path in `api/` resolves suppression at send time, and the sender connection
+  string is in no environment. That is gate 8, and it has not begun.
 - **Gate 7's remaining halves.** No voice ingress exists; unclassified inbound
   messages reach no operator; webhook retry is unconfigured. None of these is
   a deployment step — each is unbuilt work.
@@ -265,6 +272,59 @@ Design, failure-semantics contract and the code:
 it was verified, and what is still unproven:
 `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md`.
 
+### The suppression lookup — migration 002, applied and verified, and unused
+
+**Applied to the live Neon `production` branch on 10 September 2026, as
+`neondb_owner`, and verified there by attempt rather than by assertion.**
+`db/002_suppression_lookup.sql` §§1–3 were applied byte-faithfully, the two
+placeholders substituted and nothing else changed.
+
+What now exists in the database that did not before:
+
+- **`get_suppression_state(text)`** — `SECURITY DEFINER`, `STABLE`, owned by
+  `neondb_owner`, with `search_path` fixed to `pg_catalog, public`. It returns
+  `channel` and `suppressed_at` only. **No `reason_code`**, because
+  `min(occurred_at)` and `min(reason_code)` are independent aggregates that
+  pair a timestamp from one row with a reason from another — a column that is
+  not returned cannot be mis-paired.
+- **`consent_ledger_sender`** — a `LOGIN` role holding `EXECUTE` on that
+  function and **no table privilege of any kind** on
+  `communication_consent_events`: not `SELECT`, `INSERT`, `UPDATE`, `DELETE`
+  or `TRUNCATE`. It is not a superuser and is not a member of
+  `neon_superuser`.
+- `EXECUTE` **revoked from `PUBLIC`**, which PostgreSQL grants by default.
+  Without that revoke the website's `consent_ledger_app` would hold it.
+
+**Three separations were proven, not assumed.** The sender credential
+authenticated over TLS under its own identity and called the function
+successfully; it was refused `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the
+ledger; and **`consent_ledger_app` was refused `EXECUTE`** on the function. A
+lookup for a clean number returns 0 rows, which is the answer and not an error.
+
+**The mis-pairing regression was run against the live function and passed —
+and left nothing behind.** Two suppressions on one number whose timestamp
+order is the opposite of their lexical reason order were inserted **inside a
+transaction**: 8 rows before, 10 inside, the function returned the single
+correct row `sms / 2026-09-01 00:00:00+00`, then `ROLLBACK`. **8 rows after.**
+No synthetic suppression row exists in the ledger, so the earlier concern —
+permanent rows asserting an opt-out that never happened — does not apply.
+`db/001` is untouched and the ledger still holds the same eight rows described
+above.
+
+**Nothing calls any of this.** Send-time enforcement is gate 8 and has not
+begun. The sender connection string is in **no** environment — not Production,
+not Preview, and it is not `CONSENT_LEDGER_URL`, which remains the
+`INSERT`-only website credential. Applying `002` therefore changed no
+behaviour of the site or the endpoint.
+
+Neon vaults the sender password and will display it in the Connect panel, as
+it does for `consent_ledger_app`: **Neon console access is equivalent to
+holding both credentials.** A property of the platform, recorded rather than
+discovered later.
+
+How it was applied and every reading taken:
+`docs/updates/2026-09-10-suppression-lookup-provisioning-verification.md`.
+
 ### Not built, and not active
 
 Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
@@ -273,14 +333,12 @@ Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
 `all` channel exist and are unused, so that phase needs no second migration.
 
 **Gate 7 is implemented for SMS, inert, and NOT fully complete.** The endpoint,
-the classifier, the suppression ledger events, the HubSpot projection, migration
-`002` and six static guards are tested — and **nothing is live**: no Twilio
-number points at `POST /api/twilio-inbound`, `TWILIO_AUTH_TOKEN` is set in no
-environment (with it absent the endpoint answers 503 and reads no request body),
-and `db/002_suppression_lookup.sql` **has not been applied**. Migration `002`
-adds a `SECURITY DEFINER` lookup function returning `channel` and
-`suppressed_at` only, and a sender role holding `EXECUTE` and **no table
-privileges**; `db/001` is untouched.
+the classifier, the suppression ledger events, the HubSpot projection and six
+static guards are tested — and **no message path is live**: no Twilio number
+points at `POST /api/twilio-inbound`, and `TWILIO_AUTH_TOKEN` is set in no
+environment (with it absent the endpoint answers 503 and reads no request
+body). **The database half is now applied and verified** — see "The suppression
+lookup" above — but nothing calls it, so its existence changes no behaviour.
 
 **Three things keep gate 7 open**, and none is closed by the implementation:
 
@@ -316,9 +374,9 @@ readable view; natural-language opt-out is aggressive but deterministic, with no
 AI classifier and no naive substring matching; and `evidence_text` stores the
 consumer's exact words **only** for opt-out-classified messages, never ordinary
 conversation. Where Twilio supplies `OptOutType`, that classification is
-preferred over our own. Nothing awaits a decision — only implementation, which
-has not begun. A migration `002` will add the function and the sender role;
-`db/001` is unchanged.
+preferred over our own. Nothing awaits a decision. **Migration `002` has since
+been applied and verified against the live production branch**, creating the
+function and the sender role; `db/001` is unchanged.
 
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested, but nothing sends or calls, so nothing calls it in production.
@@ -344,5 +402,6 @@ Open one of these only when the task actually needs it.
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
 | Gate 7 as built — the endpoint, the classifier and its near-misses, the ledger event shape, the HubSpot projection, migration 002, the static guards | `docs/updates/2026-09-10-stop-dnc-suppression.md` |
+| Migration 002 as applied — the owner credential, the sender role, the SECURITY DEFINER and search_path readings, the four refusals, the rolled-back mis-pairing regression | `docs/updates/2026-09-10-suppression-lookup-provisioning-verification.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
