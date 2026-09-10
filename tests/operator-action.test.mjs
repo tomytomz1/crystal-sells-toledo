@@ -29,11 +29,14 @@ import { test, describe, before, after, afterEach, beforeEach } from "node:test"
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
+import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import operatorHandler, { CONFIRM_LITERAL } from "../api/operator-action.js";
+import operatorHandler, {
+  CONFIRM_LITERAL, MAX_PROJECTION_CONTACTS, PROJECTION_DEADLINE_MS,
+} from "../api/operator-action.js";
 import inboundHandler from "../api/twilio-inbound.js";
 import {
   sealOperatorToken, unsealOperatorToken, operatorActionUrl, operatorActionConfigured,
@@ -364,6 +367,54 @@ describe("the sealed token", () => {
 
   test("a MessageSid carrying a colon is refused at seal time, not at dedupe time", () => {
     assert.equal(tokenError(() => tokenFor({ sid: "SM:1" })).token, TOKEN_MALFORMED);
+  });
+
+  /* `sid` is interpolated into the notification's Message-ID HEADER and
+     `phone` into its body and its tel:/sms: links. Both arrive from a
+     signature-verified Twilio body, so nothing hostile should reach here
+     — but a header built from request data with no shape check is a
+     header-injection surface whether or not it is reachable today, and a
+     CRLF payload need not contain the colon the older rule refused. */
+  describe("sid and phone shape", () => {
+    test("a real Twilio MessageSid and every form toE164 accepts are allowed", () => {
+      assert.equal(unsealOperatorToken(tokenFor({ sid: SID })).sid, SID);
+      for (const p of ["+14195550123", "4195550123", "1 (419) 555-0123", "+1 419.555.0123"])
+        assert.equal(unsealOperatorToken(tokenFor({ phone: p })).phone, p,
+          `a number toE164() accepts was refused: ${JSON.stringify(p)}`);
+    });
+
+    test("CRLF in the MessageSid is refused — it would inject a mail header", () => {
+      for (const bad of ["SM1\r\n\r\nHello", "SM1\nX", "SM1\rX", "SM 1", "SM1@x"])
+        assert.equal(tokenError(() => tokenFor({ sid: bad })).token, TOKEN_MALFORMED,
+          `accepted a MessageSid of ${JSON.stringify(bad)}`);
+    });
+
+    test("CRLF in the phone is refused — it would inject into the mail body", () => {
+      for (const bad of ["+14195550123\r\nBcc: x@y.example", "+1419555\n0123", "not a number"])
+        assert.equal(tokenError(() => tokenFor({ phone: bad })).token, TOKEN_MALFORMED,
+          `accepted a phone of ${JSON.stringify(bad)}`);
+    });
+
+    test("a sealed payload with a bad shape is refused on the way OUT too", () => {
+      /* Sealed by hand with the real key, bypassing sealOperatorToken's
+         input check, to prove unsealing does not simply trust the tag. */
+      const key = hkdfSync("sha256", Buffer.from(SECRET, "utf8"),
+        Buffer.from("crystalsellstoledo.operator-action.v1", "utf8"),
+        Buffer.from("operator-action-token", "utf8"), 32);
+      const nonce = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", Buffer.from(key), nonce);
+      cipher.setAAD(Buffer.concat([Buffer.from("csto-oa", "utf8"), Buffer.from([1])]));
+      const payload = JSON.stringify({
+        v: 1, sid: "SM1\r\nBcc: x", p: PHONE, b: WORDS,
+        iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60,
+      });
+      const sealed = Buffer.concat([cipher.update(Buffer.from(payload, "utf8")), cipher.final()]);
+      const token = Buffer.concat([Buffer.from([1]), nonce, cipher.getAuthTag(), sealed])
+        .toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+      assert.equal(tokenError(() => unsealOperatorToken(token)).token, TOKEN_MALFORMED,
+        "a validly sealed token with an injectable sid was accepted");
+    });
   });
 });
 
@@ -896,6 +947,75 @@ describe("the HubSpot projection after an operator entry", () => {
       "an already-marked contact is not stated exactly");
   });
 
+  /* findContactsByPhone() returns up to 100 contacts and each write is
+     bounded at 8 s, so an unbounded sequential loop is up to ~800 s
+     inside a 30 s maxDuration — the function would be killed AFTER the
+     ledger commit and the operator would never see the page that tells
+     her the record stands. */
+  test("more contacts than the cap: the extra are skipped and SAID to be skipped", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    const total = MAX_PROJECTION_CONTACTS + 3;
+    let patches = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/objects/contacts/search"))
+        return new Response(JSON.stringify({
+          results: Array.from({ length: total }, (_, i) => ({ id: String(i + 1), properties: {} })),
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      patches += 1;
+      return new Response(JSON.stringify({ id: "1" }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const calls = captureLedger();
+    const res = await callOperator(validPost());
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1, "the ledger row was not written");
+    assert.equal(patches, MAX_PROJECTION_CONTACTS,
+      `the loop ran ${patches} times against a cap of ${MAX_PROJECTION_CONTACTS}`);
+    assert.ok(res.body.includes(
+      `${MAX_PROJECTION_CONTACTS} of ${total} CRM contacts holding this number were marked; ` +
+      "3 were not reached before the time limit."),
+      "the page does not say the remaining contacts were skipped");
+    assert.match(res.body, /the record above is the one that counts/i);
+  });
+
+  test("a slow CRM stops at the deadline rather than running past the function budget", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    let patches = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/objects/contacts/search"))
+        return new Response(JSON.stringify({
+          results: [{ id: "1", properties: {} }, { id: "2", properties: {} },
+                    { id: "3", properties: {} }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      patches += 1;
+      /* Each write eats a third of the projection budget, so the third
+         contact is past the deadline before it is attempted. */
+      await new Promise((r) => setTimeout(r, Math.ceil(PROJECTION_DEADLINE_MS / 2) + 20));
+      return new Response(JSON.stringify({ id: "1" }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const calls = captureLedger();
+    const started = Date.now();
+    const res = await callOperator(validPost());
+    const elapsed = Date.now() - started;
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(patches, 2, `the loop kept going past the deadline (${patches} writes)`);
+    assert.ok(elapsed < PROJECTION_DEADLINE_MS * 2,
+      `the projection took ${elapsed}ms - the deadline did not stop it`);
+    assert.ok(res.body.includes("1 was not reached before the time limit"),
+      "the page does not admit that a contact went unreached");
+  });
+
   test("nobody in the CRM holding the number is not a failure", async () => {
     setEnv({
       [FEATURE_FLAG]: "true",
@@ -1151,6 +1271,33 @@ describe("an unclassified inbound message", () => {
     const res = await callInbound();
     assert.equal(res.statusCode, 200);
     assert.ok(Date.now() - started < 1000, "the happy path is not fast");
+  });
+
+  /* sendInboundNotification() resolves `{ sent: false, reason }` for
+     anything it declines to attempt. Reading only the absence of a throw
+     is how a silent 200 comes back. */
+  test("a send that DECLINES without throwing is 503, not 200", async () => {
+    /* Two halves, because the failure needs both to be true.
+
+       ONE: the sender really does decline by RETURNING rather than
+       throwing. If that ever stops being so, this test's premise is gone
+       and it says so rather than passing vacuously. */
+    for (const k of ["ZOHO_SMTP_HOST", "ZOHO_SMTP_PORT", "ZOHO_SMTP_USER", "ZOHO_SMTP_PASSWORD"])
+      setEnv({ [k]: undefined });
+    assert.deepEqual(await sendInboundNotification({ to: "x" }),
+      { sent: false, reason: "not_configured" },
+      "the sender no longer declines by returning - this test's premise is gone");
+
+    /* TWO: the webhook reads that answer instead of inferring success
+       from the absence of a throw, and reads it BEFORE logging success. */
+    const src = readFileSync(join(REPO, "api/twilio-inbound.js"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ");
+    const at = src.indexOf("result.sent !== true");
+    const notified = src.indexOf("unclassified_notified");
+    assert.notEqual(at, -1,
+      "the webhook does not check whether the notification was actually sent");
+    assert.ok(at < notified,
+      "success is logged before the sent check - a declined send would report 200");
   });
 
   test("mail unconfigured answers 503, not a silent 200", async () => {
@@ -1417,6 +1564,40 @@ describe("the operator-action static guards", () => {
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a third-party asset on the confirmation page");
     assert.match(output, /off-site resource/);
+  });
+
+  /* THE GUARD THAT DID NOT GUARD. Its predecessor was an OR whose first
+     alternative matched the CALL SITE, four hundred characters from an
+     unrelated `ledger_absent` 503 — so every failure path in
+     surfaceToOperator() could be turned into a 200 with check.mjs still
+     passing. This mutation is the one that defeated it. */
+  test("turning the surfacing failures into 200s is refused", () => {
+    mutate(WEBHOOK, pristineWebhook, (t) => {
+      const start = t.indexOf("async function surfaceToOperator");
+      const next = t.indexOf("\nasync function ", start + 1);
+      const body = t.slice(start, next === -1 ? t.length : next);
+      return t.slice(0, start) +
+        body.replace(/return reply\(res, 503\);/g, "return reply(res, 200, EMPTY_TWIML);") +
+        t.slice(next === -1 ? t.length : next);
+    });
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted a surfacing path that answers 200 on every failure");
+    assert.match(output, /silent 200|reported as success/);
+  });
+
+  test("deleting one of the four surfacing failure paths is refused", () => {
+    mutate(WEBHOOK, pristineWebhook, (t) => {
+      const start = t.indexOf("async function surfaceToOperator");
+      const next = t.indexOf("\nasync function ", start + 1);
+      const body = t.slice(start, next === -1 ? t.length : next);
+      /* Just one — the guard must count, not merely find one survivor. */
+      return t.slice(0, start) +
+        body.replace("return reply(res, 503);", "return reply(res, 200, EMPTY_TWIML);") +
+        t.slice(next === -1 ? t.length : next);
+    });
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted a surfacing path with one failure turned into a 200");
+    assert.match(output, /silent 200|reported as success/);
   });
 
   test("removing the notification from the unclassified branch is refused", () => {

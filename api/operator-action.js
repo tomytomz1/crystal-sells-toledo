@@ -121,6 +121,29 @@ const SCOPES = Object.freeze({
 const MAX_NOTE_CHARS = 280;
 
 /* ---------------------------------------------------------------------
+   THE PROJECTION IS BOUNDED, AND IT HAS TO BE
+   ---------------------------------------------------------------------
+   findContactsByPhone() returns up to 100 contacts, and each write is a
+   separate HubSpot request bounded at 8 s by api/_lib/hubspot.mjs. Run
+   sequentially and unbounded, that is up to ~800 s of work inside a 30 s
+   maxDuration — so a slow CRM with a handful of duplicate contacts on one
+   number would blow the function budget AFTER the ledger append had
+   already committed.
+
+   What that costs is not compliance — the suppression is durable either
+   way — but it costs the OPERATOR THE ANSWER. She would get a platform
+   timeout instead of the page that tells her the record stands, with no
+   way to tell whether her opt-out was written. The whole point of the
+   result page is that a partial outcome is stated rather than guessed at,
+   and no page at all is the worst version of guessing.
+
+   So the loop stops at whichever comes first, and says what it did not
+   do. Both numbers are chosen against the 30 s budget: 3 s for the
+   ledger, up to 8 s for the contact search, and the rest here. */
+export const MAX_PROJECTION_CONTACTS = 25;
+export const PROJECTION_DEADLINE_MS = 12000;
+
+/* ---------------------------------------------------------------------
    THE RESPONSE
    ---------------------------------------------------------------------
    Every header here is load-bearing:
@@ -436,10 +459,11 @@ async function handlePost(req, res) {
 function projectionSentence(projection) {
   const written = projection.written || 0;
   const failed = projection.failed || 0;
+  const skipped = projection.skipped || 0;
   const contacts = projection.contacts || 0;
   const stands = "That is a display problem only — the record above is the one that " +
     "counts, and it was written.";
-  const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const n = (k, noun) => `${k} ${noun}${k === 1 ? "" : "s"}`;
 
   if (projection.reason === "consent_state_disabled")
     return "The CRM copy was not updated, because CRM consent tracking is switched " +
@@ -454,17 +478,28 @@ function projectionSentence(projection) {
     return "The CRM could not be searched, so no contact was marked there. " + stands;
 
   /* Contacts were found and each was attempted individually. */
-  if (written > 0 && failed > 0)
-    return `${written} of ${plural(contacts, "CRM contact")} holding this number ` +
-      `${written === 1 ? "was" : "were"} marked; ${failed} could not be updated. ` + stands;
-  if (written === 0 && failed > 0)
+  if (failed === 0 && skipped === 0) {
+    if (written === 0)
+      return `${n(contacts, "CRM contact")} holding this number ` +
+        `${contacts === 1 ? "was" : "were"} already marked, so nothing needed changing there.`;
+    return `${n(written, "CRM contact")} holding this number ` +
+      `${written === 1 ? "was" : "were"} marked as well.`;
+  }
+  if (written === 0 && skipped === 0)
     return "The CRM copy could not be updated for any of the " +
-      `${plural(failed, "contact")} holding this number. ` + stands;
-  if (written === 0 && contacts > 0)
-    return `${plural(contacts, "CRM contact")} holding this number ` +
-      `${contacts === 1 ? "was" : "were"} already marked, so nothing needed changing there.`;
-  return `${plural(written, "CRM contact")} holding this number ` +
-    `${written === 1 ? "was" : "were"} marked as well.`;
+      `${n(failed, "contact")} holding this number. ` + stands;
+
+  /* Something was left undone. Say which, and how much — composed rather
+     than enumerated, so a new outcome cannot fall through to a sentence
+     written for a different one. */
+  const parts = [written > 0
+    ? `${written} of ${n(contacts, "CRM contact")} holding this number ` +
+      `${written === 1 ? "was" : "were"} marked`
+    : `None of ${n(contacts, "CRM contact")} holding this number could be marked`];
+  if (failed > 0) parts.push(`${failed} could not be updated`);
+  if (skipped > 0)
+    parts.push(`${skipped} ${skipped === 1 ? "was" : "were"} not reached before the time limit`);
+  return parts.join("; ") + ". " + stands;
 }
 
 /**
@@ -492,7 +527,18 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
 
     let written = 0;
     let failed = 0;
-    for (const contact of contacts) {
+    let skipped = 0;
+    /* The clock starts AFTER the search, which has its own 8 s bound. */
+    const deadline = Date.now() + PROJECTION_DEADLINE_MS;
+
+    for (let i = 0; i < contacts.length; i += 1) {
+      const contact = contacts[i];
+      /* Counted, never silently dropped: a contact this endpoint chose
+         not to reach is a fact the operator is told, not one it hides. */
+      if (i >= MAX_PROJECTION_CONTACTS || Date.now() >= deadline) {
+        skipped = contacts.length - i;
+        break;
+      }
       try {
         const props = toHubSpotSuppressionProperties({
           scope: scope.hubspot,
@@ -513,12 +559,13 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
       }
     }
     log("operator.action.projection_done", {
-      ...shape, contacts: contacts.length, written, failed,
+      ...shape, contacts: contacts.length, written, failed, skipped,
     });
     /* `contacts` travels with the counts because "found two, wrote none,
        failed none" (both already marked) and "found none" are different
-       facts and must read differently. */
-    return { reason: "written", written, failed, contacts: contacts.length };
+       facts and must read differently. `skipped` travels for the same
+       reason: not reached is not the same as refused. */
+    return { reason: "written", written, failed, skipped, contacts: contacts.length };
   } catch (err) {
     /* Deliberately swallowed, deliberately loud. `log()` not `logError()`:
        a HubSpot error message can carry a contact's own details. */

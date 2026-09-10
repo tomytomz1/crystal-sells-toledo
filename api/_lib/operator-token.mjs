@@ -94,6 +94,31 @@ export const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_ACTION_URL_BYTES = 4096;
 export const MAX_TOKEN_CHARS = 3000;
 
+/* ---------------------------------------------------------------------
+   SHAPE, NOT JUST PRESENCE
+   ---------------------------------------------------------------------
+   `sid` and `phone` arrive from a Twilio webhook body. That body IS
+   signature-verified before it reaches here, so nothing hostile should
+   ever get this far — but "should" is doing a lot of work in that
+   sentence, and these two values do not stay inside this module:
+
+   * `sid` is interpolated into the notification's `Message-ID` HEADER,
+     and a bare CR/LF in a header value is header injection.
+   * `phone` is interpolated into the notification's plain-text body and
+     into `tel:` / `sms:` links.
+
+   A colon in `sid` was already refused, because dedupeKey() cannot take
+   one. That check was about the ledger; these are about the email, and
+   the difference matters — a payload of "\r\n\r\nHello" contains no colon
+   at all. Whitelisted rather than escaped: there is no legitimate Twilio
+   value outside these sets, so anything else is a refusal and a 503,
+   which is the direction this path fails in everywhere else.
+
+   Deliberately permissive enough to accept everything toE164() accepts,
+   so this can never refuse a number the ledger would have written. */
+const SAFE_SID = /^[A-Za-z0-9_-]{1,64}$/;
+const SAFE_PHONE = /^[+0-9() .-]{7,32}$/;
+
 /* Stable, PII-free refusal reasons. Safe to log and safe to show. */
 export const OPERATOR_NOT_CONFIGURED = "OPERATOR_ACTION_NOT_CONFIGURED";
 export const TOKEN_MISSING = "OPERATOR_TOKEN_MISSING";
@@ -203,13 +228,13 @@ export function sealOperatorToken({ sid, phone, body } = {}, {
 } = {}) {
   const messageSid = String(sid == null ? "" : sid).trim();
   const number = String(phone == null ? "" : phone).trim();
-  if (!messageSid) throw new OperatorTokenError(TOKEN_MALFORMED, "sid");
-  if (!number) throw new OperatorTokenError(TOKEN_MALFORMED, "phone");
-  /* A colon in the MessageSid would let two different events produce one
-     dedupe key downstream. dedupeKey() refuses one; refusing it here means
-     the failure happens while the email is being built rather than after
-     the operator has clicked. */
-  if (messageSid.includes(":")) throw new OperatorTokenError(TOKEN_MALFORMED, "sid");
+  /* SAFE_SID admits no colon, so this also carries the older rule it
+     replaces: a colon would let two different events produce one dedupe
+     key downstream, and dedupeKey() refuses one. Refusing here means the
+     failure happens while the email is being built rather than after the
+     operator has clicked. */
+  if (!SAFE_SID.test(messageSid)) throw new OperatorTokenError(TOKEN_MALFORMED, "sid");
+  if (!SAFE_PHONE.test(number)) throw new OperatorTokenError(TOKEN_MALFORMED, "phone");
 
   const payload = {
     v: TOKEN_VERSION,
@@ -296,8 +321,13 @@ export function unsealOperatorToken(token, { env = process.env, now = Date.now()
 
   const sid = String(payload.sid == null ? "" : payload.sid).trim();
   const phone = String(payload.p == null ? "" : payload.p).trim();
-  if (!sid || sid.includes(":")) throw new OperatorTokenError(TOKEN_MALFORMED, "sid");
-  if (!phone) throw new OperatorTokenError(TOKEN_MALFORMED, "p");
+  /* Re-checked on the way OUT as well as on the way in. The tag already
+     proves this payload was sealed by a holder of the key, so this is not
+     defending against a forger — it is defending against a token minted
+     by a future version of this module with a weaker rule, and against
+     the assumption that "it was validated once" survives a refactor. */
+  if (!SAFE_SID.test(sid)) throw new OperatorTokenError(TOKEN_MALFORMED, "sid");
+  if (!SAFE_PHONE.test(phone)) throw new OperatorTokenError(TOKEN_MALFORMED, "p");
 
   const exp = Number(payload.exp);
   if (!Number.isFinite(exp)) throw new OperatorTokenError(TOKEN_MALFORMED, "exp");

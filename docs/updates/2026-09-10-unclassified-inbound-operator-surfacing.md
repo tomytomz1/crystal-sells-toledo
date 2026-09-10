@@ -335,6 +335,9 @@ and therefore has no live traffic to notice.
 | 12 | The token module seals with `aes-256-gcm`, keeps both hard size bounds, and **logs nothing** |
 | 13 | The sealing secret has a **minimum length** — HKDF does not turn a weak secret into a strong key |
 
+Guard 5 was **rebuilt** on 10 September 2026 after an adversarial review proved
+it did not protect its own invariant — §12.
+
 `OPERATOR_ACTION_SECRET` was added to `SECRET_NAMES`, so the build fails if it
 ever appears in anything delivered to a browser. `api/operator-action.js` and
 `api/_lib/operator-token.mjs` were added to the ledger-schema containment list.
@@ -362,7 +365,7 @@ success.
 | `api/_lib/consent-ledger.mjs` | `SOURCE_OPERATOR`; `capEvidence()` exported; the stale retry comment corrected |
 | `tools/check.mjs` | `OPERATOR_ACTION_SECRET` in `SECRET_NAMES`; nine new guards; containment extended |
 | `vercel.json` | `maxDuration` for `api/twilio-inbound.js` (15 s) and `api/operator-action.js` (30 s) |
-| `tests/operator-action.test.mjs` | **new** — 105 tests |
+| `tests/operator-action.test.mjs` | **new** — 114 tests |
 | `tests/suppression.test.mjs` | the vacuous mutation retargeted |
 | `docs/updates/…-decision.md` | §6.1 GET wording; §11 marked closed |
 | `docs/CURRENT-STATE.md` | these two items move from *designed* to *built and inert*; the endpoint list corrected from one server endpoint to three |
@@ -385,6 +388,8 @@ at send time exactly as a keyword STOP does and **no migration is needed.**
   the operator note exceeds 280 characters — **refused, never truncated**; 410
   expired; 503 without the ledger or on an append failure; 200 with exactly one
   `revoked` row otherwise. Idempotent on `operator:<MessageSid>:<channel>:revoked`.
+  **The HubSpot projection is bounded** at 25 contacts and 12 seconds, and the
+  page says how many were not reached.
 - **The ledger is authoritative; HubSpot is the projection.** A CRM failure costs
   visibility, not compliance, and never changes the response — and the result page
   states the **actual** outcome, including a partial one.
@@ -407,7 +412,7 @@ anything.
 
 ## 8. Tests
 
-`tests/operator-action.test.mjs` — **105 tests, all passing**. Nothing reaches a
+`tests/operator-action.test.mjs` — **114 tests, all passing**. Nothing reaches a
 database, an SMTP server, Twilio or HubSpot: the ledger executor is injected, the
 mail transport factory is replaced, and `globalThis.fetch` throws if anything
 tries to use it.
@@ -434,7 +439,7 @@ five logging assertions that the number, the words, the note and the token never
 appear; static containment of the secret's name and value; and nine guard
 mutations run against a **throwaway copy of the tree**, never the working tree.
 
-**Added after independent review found four defects** (§11): the deadline
+**Added after independent review found four defects** (§11), and again after the adversarial self-review in §12: the deadline
 covering transport creation, proved by a factory that never resolves and by one
 that resolves *after* the deadline without a send ever starting; an overlength
 note refused with zero ledger statements and no projection; all seven projection
@@ -546,7 +551,72 @@ also exposed that the first attempt at them was ungrammatical — *"and One othe
 could not be updated. Those is a display problem"* — which a loose regex would
 have shipped.
 
-## 12. Explicitly not done
+## 12. Four more defects, found by adversarial self-review of `dfb5e43`
+
+The head was reviewed again before merge, on the explicit assumption that it
+still contained a defect. It contained four. All are fixed on the same branch;
+none reached `main`.
+
+1. **A fail-open return value.** `sendInboundNotification()` resolves
+   `{ sent: false, reason }` for anything it declines to attempt, and
+   `surfaceToOperator()` **never looked at the answer** — it inferred success
+   from the absence of a throw and answered **200**. Unreachable today, because
+   the caller pre-checks `isMailConfigured()` and that is the only decline reason
+   the sender currently has. It is fixed anyway, because *a silent 200 on an
+   unsent notification is the exact defect this entire path was built to delete*,
+   and the acknowledgement sender next door already has a second decline reason
+   (`no_recipient`) that would re-open it the day someone copies it across.
+   **Root cause:** trusting a function's exceptions and ignoring its return
+   contract.
+
+2. **The HubSpot projection was unbounded, and could destroy the operator's
+   answer.** `findContactsByPhone()` returns **up to 100** contacts; each write
+   is a separate request bounded at 8 s; the loop was sequential and unbounded —
+   up to ~800 s inside a 30 s `maxDuration`. A slow CRM with a handful of
+   duplicate contacts on one number would blow the function budget **after the
+   ledger append had already committed**, and the operator would get a platform
+   timeout instead of the page that tells her the record stands. It costs no
+   compliance and all of the reassurance. Now bounded at **25 contacts and 12
+   seconds**, with the unreached ones **counted and stated** rather than dropped.
+   **Root cause:** copying the webhook's projection shape without asking what the
+   response was for. The webhook answers TwiML to a machine; this answers a page
+   to the person who needs to know whether her opt-out was recorded.
+
+3. **A static guard that did not guard.** Guard 5's second clause was an OR whose
+   first alternative matched the **call site** in the `!decision` branch, which
+   happens to sit within 400 characters of the unrelated `ledger_absent` 503. So
+   **every** `reply(res, 503)` inside `surfaceToOperator()` could be replaced with
+   a 200 and `check.mjs` still passed — the guard was syntactically satisfied
+   while the invariant it names was destroyed. **Proved by mutation in a throwaway
+   copy, not by reading.** Rebuilt to extract the function body and **count** its
+   failure paths: fewer than four fails the build, and so does a 200 emitted
+   before the last of them. **Root cause:** a regex anchored to a name that
+   appears in two places, and a mutation test that only ever exercised the guard's
+   *other* clause — so the broken half had never been run against a break.
+
+4. **No shape validation on `sid` and `phone` before they reach an email.**
+   `sid` is interpolated into the notification's **`Message-ID` header** and
+   `phone` into its body and its `tel:`/`sms:` links, and neither was checked
+   beyond "non-empty" and "no colon". A CRLF payload contains no colon, so the
+   older rule would not have stopped `\r\n\r\n…` reaching a mail header. **Not
+   reachable today** — the values come from a signature-verified Twilio body, so
+   exploiting it needs `TWILIO_AUTH_TOKEN`, at which point an attacker can forge
+   opt-outs outright. Fixed regardless, at the existing choke point, because an
+   unvalidated request-derived value in a mail header is a finding whether or not
+   today's authentication happens to cover it. Whitelisted on the way **in and
+   out**, and deliberately permissive enough to accept everything `toE164()`
+   accepts, so it can never refuse a number the ledger would have written.
+   **Root cause:** validating for the *ledger's* needs (`dedupeKey()` refuses a
+   colon) and assuming that covered the *email's* needs. Different consumer,
+   different grammar.
+
+**What these four have in common** is the assumption that a check written for one
+purpose covers another: the ledger's colon rule standing in for header safety,
+the webhook's projection shape standing in for a human-facing one, one clause of
+a guard standing in for the guard, and a thrown error standing in for every way a
+function can fail. None was caught by 105 passing tests.
+
+## 13. Explicitly not done
 
 - **No unsuppression route.** The endpoint cannot clear what it writes, so a
   mistaken entry is permanent under today's design. This is the single most

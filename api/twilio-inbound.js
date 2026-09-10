@@ -339,8 +339,9 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
   }
 
   const started = Date.now();
+  let result;
   try {
-    await sendInboundNotification(buildInboundNotification({
+    result = await sendInboundNotification(buildInboundNotification({
       from, body: cappedBody, messageSid, receivedAt: occurredAt, actionUrl,
     }));
   } catch (mailErr) {
@@ -349,6 +350,21 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
     log("twilio.inbound.unclassified_notify_failed", {
       ...shape, stage: "send", mail_error: classifyMailError(mailErr),
       ms: Date.now() - started,
+    });
+    return reply(res, 503);
+  }
+
+  /* NOT SENT IS NOT SENT, even when it did not throw. sendInboundNotification()
+     resolves `{ sent: false, reason }` for anything it declines to attempt —
+     today only "not_configured", which the guard above already caught, so this
+     branch is unreachable RIGHT NOW. It exists because 200-on-a-falsy-result is
+     precisely the silent-200 this whole path was built to delete, and the day
+     someone adds a second decline reason to that function (the acknowledgement
+     sender already has "no_recipient") the endpoint would start answering 200
+     for a notification nobody received. Read the answer rather than assuming it. */
+  if (!result || result.sent !== true) {
+    log("twilio.inbound.unclassified_not_surfaced", {
+      ...shape, reason: String(result?.reason || "not_sent"),
     });
     return reply(res, 503);
   }

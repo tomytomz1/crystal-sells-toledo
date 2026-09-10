@@ -444,14 +444,22 @@ action, 10 September 2026** (`api/operator-action.js`,
 - **An operator note over 280 characters is REFUSED with a 400, not truncated** —
   `CLAUDE.md` rule 11. Nothing is written and nothing is projected.
 - **A partial CRM projection is reported as partial.** The result page states the
-  actual outcome — some marked and some not, all failed, all already marked — and
-  none of them changes the HTTP 200, because the suppression was already durable.
+  actual outcome — some marked and some not, all failed, all already marked, some
+  not reached — and none of them changes the HTTP 200, because the suppression was
+  already durable.
+- **The CRM projection is bounded: 25 contacts and 12 seconds.** A phone can match
+  up to 100 contacts and each write is bounded at 8 s, so an unbounded loop could
+  run past the 30 s function budget **after** the ledger commit — costing the
+  operator the page that tells her the record stands. Contacts not reached are
+  **counted and stated**, never silently dropped.
 - **Inert, and inert by design.** `OPERATOR_ACTION_SECRET` is set in **no
   environment**, so the endpoint answers 503 and renders nothing; the webhook
   still answers 503 at `twilioConfigured()` before reading a body. **Nothing here
   has run outside a test** — no notification has been sent, no token has been
   opened by a browser, and **no operator row exists in the ledger.**
-- Nine new static guards in `tools/check.mjs`, and
+- Nine new static guards in `tools/check.mjs` — one of which was rebuilt after an
+  adversarial review proved by mutation that it passed while its own invariant was
+  broken — and
   `OPERATOR_ACTION_SECRET` added to `SECRET_NAMES`. What was built, the contract,
   and what is unproven:
   `docs/updates/2026-09-10-unclassified-inbound-operator-surfacing.md`.

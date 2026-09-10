@@ -1038,9 +1038,31 @@ for (const file of pages) {
     const inbound = readFileSync(webhookPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
     if (!inbound.includes("sendInboundNotification("))
       fail(webhookRel, "does not send the operator notification - an unrecognised opt-out would reach nobody");
-    if (!/surfaceToOperator\([\s\S]{0,400}?reply\(res,\s*503\)/.test(inbound) &&
-        !/reply\(res,\s*503\)/.test(inbound.slice(inbound.indexOf("async function surfaceToOperator"))))
-      fail(webhookRel, "the surfacing path cannot answer 503 - a failure to surface would be a silent 200");
+    /* ANCHORED TO THE FUNCTION BODY, and that is the whole point.
+       This was an OR whose first alternative matched the CALL SITE in the
+       `!decision` branch, which happens to sit within 400 characters of
+       the unrelated `ledger_absent` 503. Proved by mutation on
+       10 September 2026: replacing EVERY `reply(res, 503)` inside
+       surfaceToOperator() with a 200 left check.mjs passing — the guard
+       was syntactically satisfied while the invariant it names was
+       destroyed. Now the body is extracted and counted on its own. */
+    const surfaceStart = inbound.indexOf("async function surfaceToOperator");
+    if (surfaceStart === -1)
+      fail(webhookRel, "has no surfaceToOperator - the unclassified branch surfaces nothing");
+    else {
+      /* To the next top-level function declaration, or end of file. */
+      const nextFn = inbound.indexOf("\nasync function ", surfaceStart + 1);
+      const surfaceBody = inbound.slice(surfaceStart, nextFn === -1 ? inbound.length : nextFn);
+      const failures = (surfaceBody.match(/reply\(res,\s*503\)/g) || []).length;
+      /* Four ways to fail to surface, and every one of them is a 503:
+         unconfigured, seal failure, send failure, and a send that
+         declined without throwing. Fewer than four means one of them
+         became a silent 200. */
+      if (failures < 4)
+        fail(webhookRel, `surfaceToOperator answers 503 on only ${failures} of its 4 failure paths - a failure to surface would be a silent 200`);
+      if (/reply\(res,\s*200/.test(surfaceBody.slice(0, surfaceBody.lastIndexOf("reply(res, 503)"))))
+        fail(webhookRel, "surfaceToOperator answers 200 before its last failure check - a failure would be reported as success");
+    }
 
     const operatorRel = "api/operator-action.js";
     const operatorPath = join(ROOT, "..", operatorRel);
