@@ -84,8 +84,12 @@ Schema in the production HubSpot portal:
   `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
   Vercel **Preview only**. **Gate 4 closed on 10 September 2026 — both stages.
   Gate 5 closed the same day.** Gates 6–10 remain.
-- **A2P/TCR readiness is a separate activation dependency.** This repository makes
-  no claim about its status.
+- **A2P/TCR readiness is a separate activation dependency, and gate 6 is
+  externally blocked.** An existing Twilio A2P Brand is in a support/TCR hold
+  for **error 30753** while Twilio works the email whitelist. **Do not create
+  another Brand, profile or campaign, and do not change the registration, while
+  that case is open.** Nothing in this repository can advance it. No live SMS
+  test is possible until it clears.
 
 ## Consent evidence architecture — approved direction
 
@@ -258,6 +262,17 @@ Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
 **later phases**. The ledger's `reason_code`, `evidence_text`, `metadata` and
 `all` channel exist and are unused, so that phase needs no second migration.
 
+**Gate 7 is designed but not implemented.** The decision document settles how
+suppression behaves — keyed to the phone number rather than the contact, never
+cleared automatically, Twilio as the STOP enforcement point with our records
+mirroring it, signature verification before parsing, idempotency by
+`MessageSid`, and why a later ticked box produces `reoptin_requested` instead of
+clearing a suppression. See
+`docs/updates/2026-09-10-stop-dnc-suppression-decision.md`. **Three decisions in
+it await the operator** — a second read-only database credential for send-time
+lookup, how aggressive natural-language opt-out matching should be, and storing
+the consumer's message verbatim as evidence.
+
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested, but nothing sends or calls, so nothing calls it in production.
 
@@ -280,5 +295,6 @@ Open one of these only when the task actually needs it.
 | Why the conflict target had to go — the 42501 outage, the privilege rule, the rejected `GRANT SELECT`, the measured semantics | `docs/updates/2026-09-10-consent-ledger-conflict-target-privilege.md` |
 | Gate 4 Stage B and gate 5 — the full round trip, the 34-row rendering, the deletion-survival test, the Preview CRM exposure | `docs/updates/2026-09-10-consent-ledger-stage-b-verification.md` |
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
+| Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |
