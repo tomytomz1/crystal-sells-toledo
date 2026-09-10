@@ -436,7 +436,7 @@ designed wrongly.
 | Method | What it does |
 |---|---|
 | **GET** `/api/operator-action?t=<sealed token>` | Renders a **confirmation page**. Reads nothing, writes nothing, records nothing. Safe for a link scanner, a prefetch, a forwarded email or a curious click. |
-| **POST** `/api/operator-action` | **The only writer.** Requires the token in the form body, an explicitly chosen scope, and a confirmation field. Appends one `suppressed` ledger event and renders the result. |
+| **POST** `/api/operator-action` | **The only writer.** Requires the token in the form body, an explicitly chosen scope, and a confirmation field. Appends one `revoked` ledger event and renders the result. |
 
 **GET can never write, and that is not a stylistic preference.** Outlook Safe
 Links, mail-gateway antivirus, Gmail's prefetch and iOS link previews all issue
