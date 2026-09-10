@@ -2,12 +2,22 @@
 
 **10 September 2026. DESIGN ONLY. Nothing here is implemented.**
 
-> **Implementation-review corrections, 10 September 2026.** Three statements in
-> this document were found inaccurate when it was implemented and reviewed
+> **Implementation-review corrections, 10 September 2026.** Several statements
+> in this document were found inaccurate when it was implemented and reviewed
 > against current Twilio documentation. They are corrected **in place, marked as
 > corrections** — the design decisions themselves are unchanged and were not
-> reopened. See §2.8 (what "before parsing" means), §2.9 (retry is not
-> automatic), and the note at §2.1 on the lookup function's result shape.
+> reopened.
+>
+> | Where | What was wrong |
+> |---|---|
+> | §2.1 | the lookup function's draft returned `min(occurred_at), min(reason_code)` — independent aggregates that pair values from different rows |
+> | §2.4 | the standard Twilio keyword list omitted `REVOKE` and `OPTOUT` |
+> | §2.5 | the fallback keyword list did not match the implementation |
+> | §2.8 | "before parsing anything" — form decoding is required *in order to* verify |
+> | §2.9 | "Twilio retries on any non-2xx", twice |
+> | §2.10 | claimed unclassified messages are surfaced, and that `occurred_at` holds Twilio's timestamp |
+> | §2.12 | "reports failure so Twilio retries" |
+>
 > The as-built record is `docs/updates/2026-09-10-stop-dnc-suppression.md`.
 
 Assume no repository access and no memory of previous conversations.
@@ -240,10 +250,17 @@ explicitly **not** proposed here.
 **Decision: Twilio is the enforcement point, and where Twilio tells us what it
 classified, we use that rather than guessing at it ourselves.**
 
-Twilio intercepts the standard opt-out keywords — STOP, STOPALL, UNSUBSCRIBE,
-CANCEL, END, QUIT — at its own layer. It blocks further messages to that number
-from that sender and sends the confirmation itself. **This happens whether or
-not our webhook succeeds.**
+Twilio intercepts the standard opt-out keywords at its own layer. The default
+English long-code list is, in full — **corrected in review, which found `REVOKE`
+and `OPTOUT` missing here**:
+
+> **STOP · UNSUBSCRIBE · END · QUIT · STOPALL · REVOKE · OPTOUT · CANCEL**
+
+Twilio blocks the number on any of them. It blocks further messages to that number from that sender and sends the
+confirmation itself. **This happens whether or not our webhook succeeds** — so a
+keyword missing from *our* fallback list does not leave the consumer
+unprotected; it leaves us with no evidence of an opt-out Twilio has already
+enforced.
 
 #### Prefer `OptOutType` when it is present
 
@@ -342,7 +359,11 @@ never a bare substring:
 
 1. **Normalise**: lowercase, strip punctuation, collapse whitespace, trim.
 2. **Exact keyword equality first** — the whole normalised body being `stop`,
-   `stopall`, `unsubscribe`, `cancel`, `end`, `quit`, `optout`, `opt out`.
+   `unsubscribe`, `end`, `quit`, `stopall`, `revoke`, `optout`, `cancel`, and
+   `opt out` as the spaced variant of OPTOUT that normalisation would otherwise
+   split. **Corrected in review: `revoke` was missing.** This list matches
+   `STOP_KEYWORDS` in `api/_lib/optout.mjs` exactly, and a test asserts every
+   Twilio default keyword is present.
 3. **Then phrase patterns**, each requiring the opt-out to be the *substance* of
    the message, not a word inside it. The distinguishing feature is that a verb
    of stopping is bound to an object of contacting:
@@ -476,7 +497,7 @@ Response policy, which is where the care is needed:
 | Signature invalid | **403**, nothing written | Not from Twilio |
 | Signature valid, ledger append **succeeds**, HubSpot write succeeds | **200** | Done |
 | Signature valid, ledger append **fails** | **5xx** | The evidence is not durable, so the endpoint must not claim success. **Not a retry mechanism** — see the correction above. |
-| Signature valid, ledger append succeeds, **HubSpot write fails** | **200**, log loudly, reconcile later | The suppression **is** durable. Enforcement resolves by number (§2.1), so it is already effective. Returning 5xx would make Twilio retry forever against a HubSpot outage, and each retry would no-op the ledger anyway. |
+| Signature valid, ledger append succeeds, **HubSpot write fails** | **200**, log loudly, reconcile later | The suppression **is** durable. Enforcement resolves by number (§2.1), so it is already effective. A 5xx here would claim the whole request failed when the part that matters succeeded — and *where retry is configured*, it would drive repeated redelivery against a HubSpot outage, each one a ledger no-op. **Corrected in review: the original text said "retry forever", which assumed automatic retry.** |
 
 That last row only holds because of §2.1. **If enforcement read HubSpot as the
 source of truth, a failed HubSpot write would be a compliance hole and 200 would
@@ -526,15 +547,28 @@ So:
 - **Classified as opt-out / revocation / DNC** → a ledger event is written and
   `evidence_text` carries the verbatim body.
 - **Anything else** → **no ledger event and no `evidence_text`.** The message is
-  surfaced to the operator through ordinary channels and is not consent
-  evidence.
+  not consent evidence.
+  > **Corrected in review.** The original text said such messages are "surfaced
+  > to the operator through ordinary channels". **No such channel exists.** The
+  > implementation logs `twilio.inbound.unclassified_not_surfaced` and nothing
+  > more, and a log line is not an operator workflow. **Operator surfacing
+  > remains UNBUILT and OPEN**, and is one of the reasons gate 7 is not
+  > complete. Until it is built, a real opt-out our rules did not recognise
+  > reaches nobody.
 
 **Correlation evidence is preserved regardless of classification**:
 `source_event_id` holds the `MessageSid`, `metadata` holds the structural
 context (`MessageSid`, `AccountSid`, `OptOutType` when present, the matched
-rule identifier), and `occurred_at` holds Twilio's timestamp. So a written event
-can always be tied back to the exact Twilio message record, whether or not the
-body travelled with it.
+rule identifier). So a written event can always be tied back to the exact Twilio
+message record, whether or not the body travelled with it.
+
+> **Corrected in review.** The original text said `occurred_at` holds Twilio's
+> timestamp. **It does not.** The ordinary incoming-SMS webhook carries no
+> message timestamp — there is no `DateCreated` on that payload — so
+> `occurred_at` is **server receipt time**, which is at or *after* the moment
+> the consumer sent the message. Read it as an **upper bound**: the opt-out
+> happened at or before that instant. **`MessageSid` is the correlation key** to
+> Twilio's own record, which holds the authoritative timestamp.
 
 Constraints for the implementation session: **length-cap it**, and **never let
 it reach a log line**. It is the first consumer free text this system stores and
@@ -570,7 +604,14 @@ suppressed", and that principle extends to the whole path:
 - **An inbound webhook that cannot be verified is not processed** — it is not
   "probably fine".
 - **A ledger append that fails means the evidence is not durable**, and the
-  webhook reports failure so Twilio retries.
+  webhook **reports failure rather than falsely claiming success**. That is the
+  whole of what the 5xx achieves.
+  > **Corrected in review.** The original text said "so Twilio retries".
+  > **Redelivery is not automatic** — it happens only if retry is separately
+  > configured, which is a live-activation prerequisite (§2.9). Without it, a
+  > ledger outage during a real STOP loses the evidence permanently. Twilio
+  > still blocks the number, so the consumer is protected; our record of why
+  > does not exist.
 - **The one thing that may fail softly is the HubSpot projection** (§2.9),
   because enforcement does not depend on it.
 

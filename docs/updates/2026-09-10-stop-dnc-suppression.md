@@ -1,11 +1,17 @@
 # Gate 7 — STOP suppression over SMS, as built
 
-**Gate 7 is NOT fully complete.** This implements the SMS half. Two named
-requirements remain open and are listed under "What is explicitly not done":
-**no voice/Retell ingress exists**, so no spoken do-not-call can reach any of
-this; and **unclassified inbound messages are not surfaced to an operator** in
-any workflow a human would actually see. Read the gate as *closed for SMS
-suppression ingress, open for voice and for operator review*.
+**Gate 7 is NOT fully complete.** This implements the SMS half. **Three**
+requirements remain open, all listed under "What is explicitly not done":
+
+1. **No voice/Retell ingress exists**, so no spoken do-not-call can reach any of
+   this.
+2. **Unclassified inbound messages are not surfaced to an operator** in any
+   workflow a human would actually see.
+3. **Webhook retry is unconfigured**, and a 5xx does not by itself make Twilio
+   redeliver — so a ledger outage during a real STOP would lose the evidence.
+
+Read the gate as *closed for SMS suppression ingress; open for voice, for
+operator review, and for retry configuration*.
 
 **10 September 2026.** Implementation of the design settled in
 `docs/updates/2026-09-10-stop-dnc-suppression-decision.md`.
@@ -29,7 +35,7 @@ endpoint answers 503 to everything and reads no request body at all.
 | HubSpot projection — I/O | `api/_lib/hubspot.mjs` (extended) |
 | Lookup function and sender role | `db/002_suppression_lookup.sql` |
 | Static guards | `tools/check.mjs` |
-| Tests | `tests/suppression.test.mjs` — 57 |
+| Tests | `tests/suppression.test.mjs` — 59 |
 
 `db/001_communication_consent_events.sql` is **untouched**. The three columns
 this phase writes — `reason_code`, `evidence_text`, `metadata` — were created
