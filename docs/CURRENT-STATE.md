@@ -350,8 +350,12 @@ and `api/_lib/optout.mjs`:
   channel.
 - **`reoptin_requested` ledger events.** `START` — and `UNSTOP`, `YES`,
   `OPT IN` — recorded as a request. Never a grant, and it clears nothing.
-- **The webhook.** `POST /api/twilio-inbound`, signature-verified with the
-  Twilio SDK before the body is parsed, idempotent by `MessageSid`.
+- **The webhook.** `POST /api/twilio-inbound`. The form body is decoded first
+  because it has to be — Twilio's signature covers every POST parameter, so
+  there is nothing to verify until they are decoded — and the Twilio SDK then
+  verifies the signature **before any field is interpreted, classified or
+  acted upon**. An invalid signature answers 403 with no field interpreted
+  and nothing written. Idempotent by `MessageSid`.
 - **The HubSpot projection** of the suppression flags onto the contact.
 
 So `reason_code`, `evidence_text`, `metadata` and the `all` channel are **in use
