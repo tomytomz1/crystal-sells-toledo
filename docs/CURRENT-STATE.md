@@ -249,6 +249,11 @@ Stated plainly, because the rest of this section reads like everything works.
 - **Production with the feature on.** Never enabled there, and not scheduled.
 - **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
   has been observed. Whether a permanent purge behaves the same is untested.
+- **Gate 7 in production.** It is built and tested and has never run. No Twilio
+  request has ever reached the endpoint, migration `002` has never been applied,
+  and no suppression has ever been written. The signature scheme is checked
+  against a locally computed HMAC — the same arithmetic Twilio performs — but
+  Twilio has not performed it against this endpoint.
 
 Design, failure-semantics contract and the code:
 `docs/updates/2026-09-09-consent-evidence-ledger.md`. What was provisioned, how
@@ -262,7 +267,17 @@ Suppression writing, STOP processing, DNC processing, re-opt-in / unsuppression,
 **later phases**. The ledger's `reason_code`, `evidence_text`, `metadata` and
 `all` channel exist and are unused, so that phase needs no second migration.
 
-**Gate 7 is designed but not implemented.** The decision document settles how
+**Gate 7 is implemented and inert.** The endpoint, the classifier, the
+suppression ledger events, the HubSpot projection, migration `002` and the
+static guards are all merged and tested — and **nothing is live**: no Twilio
+number points at `POST /api/twilio-inbound`, `TWILIO_AUTH_TOKEN` is set in no
+environment (with it absent the endpoint answers 503 and reads no request body),
+and `db/002_suppression_lookup.sql` **has not been applied**. Migration `002`
+adds a `SECURITY DEFINER` lookup function and a sender role holding `EXECUTE`
+and **no table privileges**; `db/001` is untouched. What a human must still do:
+`docs/updates/2026-09-10-stop-dnc-suppression.md`.
+
+The design document settles how
 suppression behaves — keyed to the phone number rather than the contact, never
 cleared automatically, Twilio as the STOP enforcement point with our records
 mirroring it, signature verification before parsing, idempotency by
@@ -303,5 +318,6 @@ Open one of these only when the task actually needs it.
 | Gate 4 Stage B and gate 5 — the full round trip, the 34-row rendering, the deletion-survival test, the Preview CRM exposure | `docs/updates/2026-09-10-consent-ledger-stage-b-verification.md` |
 | Replay and idempotency on live Neon — the four measurements, why the partial state was synthetic, the transport residue | `docs/updates/2026-09-10-consent-ledger-replay-verification.md` |
 | Gate 7 design — suppression keying, reassignment, STOP and natural-language opt-out, webhook verification and idempotency, failure semantics | `docs/updates/2026-09-10-stop-dnc-suppression-decision.md` |
+| Gate 7 as built — the endpoint, the classifier and its near-misses, the ledger event shape, the HubSpot projection, migration 002, the static guards | `docs/updates/2026-09-10-stop-dnc-suppression.md` |
 | Lead acknowledgement email over Zoho Mail SMTP | `docs/updates/2026-09-08-zoho-mail-acknowledgement.md` |
 | A2P registration answers | `docs/updates/2026-09-09-a2p-campaign-answers.md` |

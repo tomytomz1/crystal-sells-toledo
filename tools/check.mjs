@@ -181,6 +181,12 @@ const SECRET_NAMES = [
   /* The append-only consent ledger's connection string. A database
      credential, and one for the store that exists to be trustworthy. */
   "CONSENT_LEDGER_URL",
+  /* The Twilio auth token. It is the ONLY thing standing between the
+     suppression endpoint and anyone who can guess its URL: the inbound
+     webhook's signature is computed with it, so a leak makes forged
+     opt-outs — and forged opt-in requests — indistinguishable from real
+     ones. */
+  "TWILIO_AUTH_TOKEN",
 ];
 for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
   const text = readFileSync(join(ROOT, file), "utf8");
@@ -937,6 +943,99 @@ for (const file of pages) {
   for (const fn of ["canSendSms", "canPlaceAutomatedVoiceCall"])
     if (!new RegExp(`export function ${fn}\\b`).test(permissionSrc))
       fail("api/_lib/permission.mjs", `no exported ${fn} - the resolver is the only place permission may be decided`);
+
+  /* -------------------------------------------------------------------
+     GATE 7 — THE INBOUND SUPPRESSION ENDPOINT
+     -------------------------------------------------------------------
+     Four invariants, each of which a refactor could delete without
+     breaking a single visible behaviour. tests/suppression.test.mjs runs
+     this script against a throwaway copy of the tree with each one broken,
+     so a guard nobody has seen fail is not what is being relied on here.
+     ------------------------------------------------------------------- */
+  const webhookRel = "api/twilio-inbound.js";
+  const webhookPath = join(ROOT, "..", webhookRel);
+  if (!existsSync(webhookPath))
+    fail(webhookRel, "missing - nothing records a STOP, so an opt-out would be silently lost");
+  else {
+    const raw = readFileSync(webhookPath, "utf8");
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, " ");
+
+    /* 1. AUTHENTICATE BEFORE INTERPRETING. The body is attacker-controlled
+          until the signature says otherwise, so the verification call must
+          come before the classification call. Matched as CALL SITES, not
+          bare identifiers - an import is always first and would make the
+          ordering comparison prove nothing (the mistake this project
+          already made once, in the ledger append guard below). */
+    const VERIFY_CALL = "verifyTwilioSignature(req";
+    /* `= classify(params)` and not `classify(params)`: the bare form also
+       matches the FUNCTION DECLARATION `function classify(params)`, which
+       sits above the handler and would make this comparison prove nothing.
+       That is exactly the bug the ledger append guard shipped with in
+       September 2026, caught here the first time this guard was run. */
+    const CLASSIFY_CALL = "= classify(params)";
+    const verifyAt = src.indexOf(VERIFY_CALL);
+    const classifyAt = src.indexOf(CLASSIFY_CALL);
+    if (verifyAt === -1)
+      fail(webhookRel, `does not call \`${VERIFY_CALL}…\` - an unauthenticated request would be processed, so anyone could forge an opt-out or a re-opt-in`);
+    if (classifyAt === -1)
+      fail(webhookRel, `does not call \`${CLASSIFY_CALL}\` - nothing classifies the message`);
+    else if (verifyAt !== -1 && verifyAt > classifyAt)
+      fail(webhookRel, "classifies the message before verifying the signature - an attacker's body would be interpreted");
+
+    /* 2. LEDGER BEFORE HUBSPOT. The ledger is the enforcement source of
+          truth; the HubSpot write is a projection whose failure is
+          swallowed. Reversed, a swallowed failure would be the durable
+          record, and the endpoint would answer 200 having recorded
+          nothing. */
+    const LEDGER_CALL = "await appendSuppressionEvents(";
+    const PROJECT_CALL = "await projectToHubSpot(";
+    const ledgerAt = src.indexOf(LEDGER_CALL);
+    const projectAt = src.indexOf(PROJECT_CALL);
+    if (ledgerAt === -1)
+      fail(webhookRel, `does not call \`${LEDGER_CALL}…\` - a STOP would leave no durable evidence`);
+    if (projectAt !== -1 && ledgerAt !== -1 && ledgerAt > projectAt)
+      fail(webhookRel, "writes to HubSpot before the ledger - the durable record would be the one whose failure is ignored");
+
+    /* 3. THE CONSUMER'S MESSAGE NEVER REACHES A LOG. `params.Body` may be
+          read for classification and for evidence_text, and must never be
+          an argument to log(). */
+    for (const m of src.matchAll(/\blog\(([^;]*?)\);/gs))
+      if (/\bBody\b/.test(m[1]))
+        fail(webhookRel, "logs the inbound message body - the consent ledger stores it as evidence, a log line is not evidence and is not access-controlled");
+
+    /* 4. THE WEBSITE PATH STILL WRITES NO SUPPRESSION. The separation is
+          the point: different path, different credential, different
+          authority. */
+    const leadSuppression = readFileSync(join(ROOT, "..", "api/lead.js"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ");
+    for (const name of ["appendSuppressionEvents", "toHubSpotSuppressionProperties",
+                        "writeSuppressionProperties"])
+      if (leadSuppression.includes(name))
+        fail("api/lead.js", `calls ${name} - an ordinary form submission must never write a suppression`);
+  }
+
+  /* The suppression lookup migration, and the two hardening steps that are
+     silent when missing: without SET search_path a caller can shadow the
+     table and be read with the owner's rights, and without the REVOKE the
+     function is granted to PUBLIC - including the website's role. */
+  const migRel = "db/002_suppression_lookup.sql";
+  const migPath = join(ROOT, "..", migRel);
+  if (!existsSync(migPath))
+    fail(migRel, "missing - send-time enforcement has no way to resolve suppression by number");
+  else {
+    const mig = readFileSync(migPath, "utf8");
+    if (!/SECURITY DEFINER/.test(mig))
+      fail(migRel, "the lookup function is not SECURITY DEFINER - it would run as the caller and return nothing");
+    if (!/SET\s+search_path\s*=/.test(mig))
+      fail(migRel, "no SET search_path on a SECURITY DEFINER function - a caller could shadow the table and have it read with the owner's rights");
+    if (!/REVOKE\s+EXECUTE\s+ON\s+FUNCTION[\s\S]*?FROM\s+PUBLIC/i.test(mig))
+      fail(migRel, "does not REVOKE EXECUTE FROM PUBLIC - PostgreSQL grants EXECUTE to PUBLIC by default, so every role including the website's would get it");
+    /* The sender must never gain a table privilege. Comments are stripped
+       first so the documented refusals in section 4 do not trip this. */
+    const migCode = mig.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    if (/GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)[\s\S]*?ON\s+(?:TABLE\s+)?communication_consent_events/i.test(migCode))
+      fail(migRel, "grants a table privilege - the sender role must hold EXECUTE on the function and nothing else");
+  }
 }
 
 /* ---------------------------------------------------------------------

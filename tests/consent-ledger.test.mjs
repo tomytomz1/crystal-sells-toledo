@@ -491,7 +491,10 @@ describe("the append-order guard in tools/check.mjs", () => {
     /* Everything tools/build.mjs and tools/check.mjs read. `.env.example`
        is one of check.mjs's own subjects, so its absence would fail the
        run for a reason that has nothing to do with this guard. */
-    for (const item of ["src", "assets", "tools", "api", "package.json",
+    /* `db/` joined this list when the gate 7 guards started reading
+       db/002_suppression_lookup.sql: check.mjs now fails without it, for a
+       reason that has nothing to do with the guard under test here. */
+    for (const item of ["src", "assets", "tools", "api", "db", "package.json",
                         "robots.txt", "site.webmanifest", ".env.example"])
       cpSync(join(REPO, item), join(root, item), { recursive: true });
     /* check.mjs reads public/, so the copy needs one. Built once; every
