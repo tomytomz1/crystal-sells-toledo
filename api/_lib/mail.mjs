@@ -285,10 +285,15 @@ export const NOTIFICATION_SUBJECT_PREFIX = "Crystal Sells Toledo: inbound messag
    quieter failure. So the send races a single deadline and anything
    slower is the failure case: 503, loudly.
 
-   The losing send is NOT cancelled — nodemailer has no cancellation and
-   the socket may still deliver. That is accepted: the outcome it risks is
-   a duplicate email, which is benign, and the alternative is a webhook
-   that hangs. */
+   The deadline covers the ENTIRE attempt — creating the transport as well
+   as sending — because the factory dynamically imports nodemailer and a
+   stuck import would otherwise burn the budget before the clock started.
+
+   A send that already started is NOT cancelled — nodemailer has no
+   cancellation and the socket may still deliver. That is accepted: the
+   outcome it risks is a duplicate email, which is benign, and the
+   alternative is a webhook that hangs. A send that has NOT started when
+   the deadline passes is never started. */
 export const NOTIFICATION_DEADLINE_MS = 8000;
 export const NOTIFICATION_TIMED_OUT = "MAIL_NOTIFICATION_TIMEOUT";
 
@@ -406,12 +411,22 @@ export function buildInboundNotification({ from, body, messageSid, receivedAt, a
 export async function sendInboundNotification(message, { deadlineMs = NOTIFICATION_DEADLINE_MS } = {}) {
   if (!isMailConfigured()) return { sent: false, reason: "not_configured" };
 
-  const transport = await transportFactory();
   const started = Date.now();
 
+  /* THE TIMER STARTS BEFORE ANYTHING ELSE, AND THAT IS THE FIX.
+     This function previously awaited transportFactory() and only then
+     began the race, so transport creation was OUTSIDE the deadline. The
+     real factory does a dynamic `import("nodemailer")`, which can be slow
+     on a cold container and can in principle hang — and a hang there
+     would consume the whole webhook budget before the 8-second clock had
+     started ticking. A deadline that does not cover the whole attempt is
+     not a deadline; it is a deadline on the part that happened to be
+     easiest to wrap. */
+  let expired = false;
   let timer;
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => {
+      expired = true;
       const err = new Error(NOTIFICATION_TIMED_OUT);
       err.code = "ETIMEDOUT";
       reject(err);
@@ -424,8 +439,31 @@ export async function sendInboundNotification(message, { deadlineMs = NOTIFICATI
        the race settles, so it holds nothing open afterwards. */
   });
 
+  /* One promise for the WHOLE attempt: create the transport, then send. */
+  const attempt = (async () => {
+    const transport = await transportFactory();
+    /* THE DEADLINE HAS ALREADY PASSED — do not start a send now. The
+       caller has answered 503 and the request is over; opening an SMTP
+       connection at this point would send a notification nobody is
+       waiting on, from a function that has already reported failure.
+       A send that had ALREADY STARTED cannot be cancelled — nodemailer
+       has no cancellation — and may still deliver, which is the
+       documented, benign duplicate-email risk. This guard is about the
+       send that has not started yet, which is a different thing and is
+       simply not started. */
+    if (expired) {
+      const err = new Error(NOTIFICATION_TIMED_OUT);
+      err.code = "ETIMEDOUT";
+      throw err;
+    }
+    return transport.sendMail(message);
+  })();
+
   try {
-    await Promise.race([transport.sendMail(message), deadline]);
+    /* Promise.race() attaches a reaction to `attempt`, so a rejection
+       arriving after the deadline has already won is handled rather than
+       becoming an unhandled rejection. */
+    await Promise.race([attempt, deadline]);
   } finally {
     clearTimeout(timer);
   }

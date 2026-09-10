@@ -183,7 +183,7 @@ Do not add one-off scripts for individual test names.
 | Site | crystalsellstoledo.com — lead generation for a Toledo REALTOR® |
 | Agent | Crystal Saylor, Key Realty LTD, Ohio licence 2025003655 |
 | Contact | (419) 245-4655 · crystal@crystalsellstoledo.com |
-| Stack | Static HTML built by `tools/build.mjs`, one Vercel function at `api/lead.js` |
+| Stack | Static HTML built by `tools/build.mjs`, and three Vercel functions: `api/lead.js` (the lead), `api/twilio-inbound.js` (inbound SMS — inert), `api/operator-action.js` (the operator's suppression entry — inert) |
 | Deploy | Vercel, production branch `main` |
 | CRM | **HubSpot** — Contacts API + authenticated Forms Submission API. Service Key scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `forms`. Zoho code is a dormant rollback path, imported by nothing. |
 

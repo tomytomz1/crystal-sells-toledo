@@ -82,15 +82,32 @@ does **not** replace webhook idempotency, which is the ledger's dedupe key.
 
 **Never a silent 200.** That was the defect.
 
-**The deadline is 8 seconds, and it is a constant rather than a sum.** Twilio's
-webhook request times out at roughly 15 s; the SMTP transport is bounded at 5 s
-connection, 5 s greeting and 8 s socket, which are three *independent* bounds
-that do not add up to a promise. `sendInboundNotification()` races the send
-against a single timer and treats losing as the failure case. The losing send is
-**not cancelled** — nodemailer has no cancellation — so the socket may still
-deliver, which risks a duplicate email and never a hang. `vercel.json` now gives
-`api/twilio-inbound.js` a 15 s `maxDuration`, so the function cannot be killed
-before it can answer 503.
+**The deadline is 8 seconds, it is a constant rather than a sum, and it covers
+the whole attempt.** Twilio's webhook request times out at roughly 15 s; the SMTP
+transport is bounded at 5 s connection, 5 s greeting and 8 s socket, which are
+three *independent* bounds that do not add up to a promise.
+`sendInboundNotification()` starts one timer, then races **both** transport
+creation and the send against it.
+
+**That scope is a correction, and it is the point.** The first implementation
+awaited `transportFactory()` and only then began the race, so transport creation
+sat *outside* the deadline — and the real factory does a dynamic
+`import("nodemailer")`, which is slow on a cold container and can in principle
+hang. A stuck import would have consumed the entire webhook budget before the
+8-second clock started. A deadline that does not cover the whole attempt is not a
+deadline; it is a deadline on the part that was easiest to wrap.
+
+Two consequences, and they are different from each other:
+
+- **A send that has not started when the deadline passes is never started.** If
+  the factory resolves late, the resolved transport is discarded: the caller has
+  already answered 503 and nobody is waiting on it.
+- **A send that has already started is not cancelled** — nodemailer has no
+  cancellation — so the socket may still deliver. That risks a duplicate email
+  and never a hang, and it is accepted rather than papered over.
+
+`vercel.json` gives `api/twilio-inbound.js` a 15 s `maxDuration`, so the function
+cannot be killed before it can answer 503.
 
 **`HELP` is untouched.** So is every classified suppression: those are already
 durable and already projected, and a notification for them was out of scope.
@@ -100,8 +117,10 @@ durable and already projected, and a notification for them was out of scope.
 AES-256-GCM from `node:crypto`. **No new dependency.**
 
 - **Key**: HKDF-SHA256 over `OPERATOR_ACTION_SECRET` with a fixed salt and a
-  use-specific `info` string, so the secret may be any length or alphabet and a
-  future second use of the same secret cannot silently become the same key.
+  use-specific `info` string, so the secret may be any alphabet an operator can
+  paste into Vercel, and a future second use of the same secret cannot silently
+  become the same key. **Any length at or above the floor below** — not any
+  length.
 - **Wire format**: base64url of `version byte ‖ 12-byte nonce ‖ 16-byte tag ‖
   ciphertext`. The version byte travels in the clear and is bound into the AAD,
   so it cannot be relabelled with the tag still verifying.
@@ -124,6 +143,29 @@ figure was arithmetic. `sealOperatorToken()` refuses to emit a token over
 `unsealOperatorToken()` refuses an oversized token on length alone, before any
 decryption. A test measures the genuine worst case — a full 1 KB of four-byte
 characters — and asserts it lands inside the bound.
+
+**The secret has an enforced entropy floor: 32 UTF-8 bytes, and the endpoint is
+inert below it.** This key mints bearer capabilities — anyone who can derive it
+can seal a token for any number and record a permanent, un-undoable opt-out
+against it, with no account, session or second factor behind it. **HKDF does not
+add entropy**; it stretches and separates. `OPERATOR_ACTION_SECRET=hunter2`
+derives a perfectly well-formed 256-bit key that an attacker recovers by trying
+`hunter2`, so the floor has to be on the *input*. The first implementation
+treated any non-empty value as configured.
+
+**One rule, three callers.** `operatorActionConfigured()`, sealing and unsealing
+all resolve the secret through a single `usableSecret()` helper, so "configured"
+cannot mean one thing at the gate and another at the cipher — which is exactly
+how a weak secret slips past a check performed in only one of the three places. A
+short secret reads **identically to an absent one**: 503, no page, nothing
+recorded. A refusal names the variable and never the value **or its length** — a
+length is a search space.
+
+**The Production value must be randomly generated**, at least 32 bytes, from a
+CSPRNG — for example `openssl rand -base64 48`. A 32-character passphrase a human
+invented is 32 bytes of *length* and nowhere near 32 bytes of *entropy*, and this
+floor cannot tell the two apart. **This pull request does not generate or set
+it.**
 
 **The module logs nothing at all**, and `tools/check.mjs` fails the build if it
 ever does: it is the one place the plaintext number and message exist together.
@@ -192,8 +234,17 @@ it, so the act and the recogniser sit in separate columns.
 
 **The operator's note goes in `metadata` and never in `evidence_text`.** That
 column means *what the consumer said*; mixing operator prose into it would
-corrupt the one field whose value depends on being verbatim. It is capped at 280
-characters.
+corrupt the one field whose value depends on being verbatim.
+
+**A note over 280 characters is REFUSED with a 400, not truncated.** `CLAUDE.md`
+rule 11 — *"Reject overlength input; never silently truncate user data."* The
+first implementation sliced it, which would have written a note stopping
+mid-sentence into an append-only table this application cannot correct, and told
+the operator it had recorded what she typed. The refusal happens before the
+ledger is touched: **nothing is written, nothing is projected**, and the log
+carries the limit rather than one character of the note. The textarea keeps its
+`maxlength` as a browser convenience; the server rule is authoritative, and both
+count UTF-16 code units so they cannot disagree over an emoji.
 
 **Dedupe key: `operator:<MessageSid>:<channel>:revoked`**, with the existing
 `ON CONFLICT DO NOTHING` and **no conflict target** (naming one requires
@@ -227,8 +278,26 @@ and a `manual` value in all three reason maps already existed.
 **A HubSpot failure cannot weaken the ledger suppression.** The append has
 already committed, enforcement resolves by phone against the ledger, and the
 result page says so in words: *"That is a display problem only — the record above
-is the one that counts, and it was written."* A partial outcome is shown, not
-hidden, and it is not a failure.
+is the one that counts, and it was written."*
+
+**A partial outcome is shown, not hidden — and that too is a correction.** The
+first implementation's result sentence read only `written` and ignored `failed`,
+so "both contacts marked" and "one marked, one refused" produced the same page.
+A page that claims two contacts were marked when one was not is simply false.
+Seven distinct outcomes now read distinctly:
+
+| Outcome | What the page says |
+|---|---|
+| feature off / CRM unconfigured | not updated, and why; the record above is unaffected |
+| no matching contact | nothing to mark there; the record stands on its own |
+| the search itself failed | no contact was marked; a display problem only |
+| some written, some failed | *"1 of 2 CRM contacts … was marked; 1 could not be updated"* |
+| all writes failed | *"could not be updated for any of the 2 contacts"* |
+| all already marked | *"were already marked, so nothing needed changing there"* |
+| all written | *"were marked as well"* |
+
+**None of them changes the HTTP 200.** The suppression was durable before any of
+this ran.
 
 **Nothing is written when the operator decides a message is not an opt-out.** She
 closes the tab; the ledger and the CRM stay untouched.
@@ -250,7 +319,7 @@ Both were approved at the merge of #23 and are closed here.
 
 ## 3. New static guards — `tools/check.mjs`
 
-Eight, on top of the four gate 7 guards already there. Each is an invariant a
+Nine, on top of the four gate 7 guards already there. Each is an invariant a
 refactor could delete without breaking a visible behaviour, on code that is inert
 and therefore has no live traffic to notice.
 
@@ -264,6 +333,7 @@ and therefore has no live traffic to notice.
 | 10 | The no-scope refusal still exists |
 | 11 | The confirmation page references **no off-site resource** |
 | 12 | The token module seals with `aes-256-gcm`, keeps both hard size bounds, and **logs nothing** |
+| 13 | The sealing secret has a **minimum length** — HKDF does not turn a weak secret into a strong key |
 
 `OPERATOR_ACTION_SECRET` was added to `SECRET_NAMES`, so the build fails if it
 ever appears in anything delivered to a browser. `api/operator-action.js` and
@@ -290,12 +360,13 @@ success.
 | `api/twilio-inbound.js` | the unclassified branch surfaces instead of answering a silent 200 |
 | `api/_lib/mail.mjs` | the operator notification: builder, `lastFour()`, deadline-bounded sender |
 | `api/_lib/consent-ledger.mjs` | `SOURCE_OPERATOR`; `capEvidence()` exported; the stale retry comment corrected |
-| `tools/check.mjs` | `OPERATOR_ACTION_SECRET` in `SECRET_NAMES`; eight new guards; containment extended |
+| `tools/check.mjs` | `OPERATOR_ACTION_SECRET` in `SECRET_NAMES`; nine new guards; containment extended |
 | `vercel.json` | `maxDuration` for `api/twilio-inbound.js` (15 s) and `api/operator-action.js` (30 s) |
-| `tests/operator-action.test.mjs` | **new** — 83 tests |
+| `tests/operator-action.test.mjs` | **new** — 105 tests |
 | `tests/suppression.test.mjs` | the vacuous mutation retargeted |
 | `docs/updates/…-decision.md` | §6.1 GET wording; §11 marked closed |
-| `docs/CURRENT-STATE.md` | these two items move from *designed* to *built and inert* |
+| `docs/CURRENT-STATE.md` | these two items move from *designed* to *built and inert*; the endpoint list corrected from one server endpoint to three |
+| `CLAUDE.md` | the Project-facts Stack row corrected from "one Vercel function" to three |
 
 **`db/001` and `db/002` are untouched.** `get_suppression_state()` already
 filters `event_type IN ('suppressed', 'revoked')`, so an operator entry suppresses
@@ -310,11 +381,15 @@ at send time exactly as a keyword STOP does and **no migration is needed.**
 - **`GET /api/operator-action`**: 200 with a page, 410 expired, 400 invalid, 503
   unconfigured. **Writes nothing in every one of those cases.**
 - **`POST /api/operator-action`**: 400 without a body token, an explicit scope
-  and the confirmation literal; 400 if the token is in the query string; 410
+  and the confirmation literal; 400 if the token is in the query string; 400 if
+  the operator note exceeds 280 characters — **refused, never truncated**; 410
   expired; 503 without the ledger or on an append failure; 200 with exactly one
   `revoked` row otherwise. Idempotent on `operator:<MessageSid>:<channel>:revoked`.
 - **The ledger is authoritative; HubSpot is the projection.** A CRM failure costs
-  visibility, not compliance, and never changes the response.
+  visibility, not compliance, and never changes the response — and the result page
+  states the **actual** outcome, including a partial one.
+- **The endpoint is inert unless `OPERATOR_ACTION_SECRET` is at least 32 bytes.**
+  A short secret is indistinguishable from an absent one.
 
 ## 7. Environment
 
@@ -332,7 +407,7 @@ anything.
 
 ## 8. Tests
 
-`tests/operator-action.test.mjs` — **83 tests, all passing**. Nothing reaches a
+`tests/operator-action.test.mjs` — **105 tests, all passing**. Nothing reaches a
 database, an SMTP server, Twilio or HubSpot: the ledger executor is injected, the
 mail transport factory is replaced, and `globalThis.fetch` throws if anything
 tries to use it.
@@ -356,8 +431,19 @@ deterministic `Message-ID`; HTML escaping of the consumer's words; email success
 200, failure → 503, timeout → 503 (measured against the deadline), mail
 unconfigured → 503, secret absent → 503; **HELP and a classified STOP unchanged**;
 five logging assertions that the number, the words, the note and the token never
-appear; static containment of the secret's name and value; and eight guard
+appear; static containment of the secret's name and value; and nine guard
 mutations run against a **throwaway copy of the tree**, never the working tree.
+
+**Added after independent review found four defects** (§11): the deadline
+covering transport creation, proved by a factory that never resolves and by one
+that resolves *after* the deadline without a send ever starting; an overlength
+note refused with zero ledger statements and no projection; all seven projection
+outcomes asserted as **exact sentences** rather than loose patterns; and the
+secret floor, including that the gate and the cipher agree on every value tested.
+
+**The deadline tests were proved against the pre-fix code in a throwaway copy**,
+where the factory-never-resolves case does not merely fail — it hangs the run,
+which is precisely the production failure it describes.
 
 `tests/suppression.test.mjs`, `tests/mail.test.mjs` and
 `tests/consent-ledger.test.mjs` were re-run and pass.
@@ -400,7 +486,10 @@ Unchanged from the decision document's §9, and none of it is done here:
 1. Add `CONSENT_LEDGER_URL` (the `INSERT`-only credential) to **Production**
    before the webhook is activated.
 2. Add `OPERATOR_ACTION_SECRET` to **Production** before the operator action is
-   live. Absent, the endpoint is inert.
+   live. Absent — **or shorter than 32 bytes** — the endpoint is inert. It must be
+   **randomly generated** from a CSPRNG (`openssl rand -base64 48` or equivalent),
+   not a chosen passphrase: the length floor cannot tell length from entropy.
+   **This pull request does not generate or set it.**
 3. Confirm `ZOHO_SMTP_*` really is scoped to Production in the Vercel dashboard —
    documented is not observed.
 4. Send one notification to the mailbox and confirm it arrives unfiltered on the
@@ -414,7 +503,50 @@ Unchanged from the decision document's §9, and none of it is done here:
    operator's row.
 9. **Decide the unsuppression path before gate 9.**
 
-## 11. Explicitly not done
+## 11. Four defects found by independent review, and fixed
+
+All four were in this pull request's own first implementation, all four were
+found by review against the merged design, and all four are corrected on the same
+branch. None reached `main`.
+
+1. **The "overall" deadline was not overall.** `sendInboundNotification()` awaited
+   `transportFactory()` and only then started the race, so transport creation —
+   a dynamic `import("nodemailer")` — sat outside the deadline it was supposed to
+   be bounded by. **Root cause:** wrapping the operation that was obviously slow
+   rather than the whole attempt; the word "overall" was in the comment and not in
+   the code. Proved in a throwaway copy: against the old code a never-resolving
+   factory does not fail the test, it **hangs the run**.
+2. **The operator note was silently truncated.** `slice(0, MAX_NOTE_CHARS)`
+   violates `CLAUDE.md` rule 11 outright, and would have written a note stopping
+   mid-sentence into an append-only table, reported as recorded. **Root cause:** a
+   cap treated as formatting rather than as validation. Now a 400 that writes
+   nothing and projects nothing.
+3. **A partial HubSpot projection was reported as a complete one.**
+   `projectToHubSpot()` returned `failed`, and `projectionSentence()` ignored it,
+   so "both contacts marked" and "one marked, one refused" produced the same page
+   — contradicting this document's own claim that a partial outcome is shown
+   rather than hidden. **Root cause:** a value produced and never consumed, which
+   no test noticed because the tests asserted the response code, not the sentence.
+4. **`OPERATOR_ACTION_SECRET` had no entropy floor.** Any non-empty value counted
+   as configured, so `hunter2` would have minted real bearer capabilities. **Root
+   cause:** treating HKDF as if it added entropy rather than stretching what it is
+   given.
+
+**A fifth, documentary:** `CLAUDE.md` and `docs/CURRENT-STATE.md` both still said
+this project had **one** server function. That was already stale when
+`api/twilio-inbound.js` merged, and this pull request made it stale twice over.
+Both corrected to name all three.
+
+**One test-quality defect was found while fixing #3**, by the same discipline that
+caught the vacuous mutation in §4: an assertion written as
+`/1 .*was marked/is` passed against a page that did not contain the claim at all,
+because a dotall `.*` across a whole HTML document matches almost anything. The
+projection assertions are now exact sentence matches. Writing the sentences out
+also exposed that the first attempt at them was ungrammatical — *"and One other
+could not be updated. Those is a display problem"* — which a loose regex would
+have shipped.
+
+## 12. Explicitly not done
 
 - **No unsuppression route.** The endpoint cannot clear what it writes, so a
   mistaken entry is permanent under today's design. This is the single most

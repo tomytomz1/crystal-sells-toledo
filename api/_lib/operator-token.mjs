@@ -21,9 +21,11 @@
    WHAT THIS MODULE IS NOT
    -----------------------
    It is not an authorisation system. Holding the token is the whole
-   authority, and that authority is exactly one thing: record a `revoked`
-   event for ONE MessageSid. It cannot clear a suppression, read the
-   ledger, reach the CRM or send anything — see the threat model in
+   authority — and so, transitively, is holding the SECRET, which is why
+   the secret has an enforced entropy floor below. That authority is
+   exactly one thing: record a `revoked` event for ONE MessageSid. It
+   cannot clear a suppression, read the ledger, reach the CRM or send
+   anything — see the threat model in
    docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md §6.7.
 
    It also names no ledger table, column or connection string. The write
@@ -34,6 +36,31 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, timingSafeEqua
 
 /** The only secret this endpoint has. Absent => the endpoint is inert. */
 export const OPERATOR_SECRET_VAR = "OPERATOR_ACTION_SECRET";
+
+/* ---------------------------------------------------------------------
+   HOW STRONG THE SECRET MUST BE
+   ---------------------------------------------------------------------
+   THIS KEY MINTS BEARER CAPABILITIES. Anyone who can derive it can seal a
+   token for any number they choose and record a permanent, un-undoable
+   opt-out against it. There is no account, no session and no second
+   factor behind it — the token IS the authority.
+
+   HKDF DOES NOT ADD ENTROPY. It stretches and separates; it cannot make a
+   guessable input unguessable. `OPERATOR_ACTION_SECRET=hunter2` derives a
+   perfectly well-formed 256-bit key that an attacker recovers by trying
+   "hunter2". So the floor is on the INPUT, not on the derived key.
+
+   32 bytes, and the endpoint fails closed below that — the same direction
+   every other gate in this project fails. The Production value must be
+   RANDOMLY GENERATED, not chosen: a 32-character passphrase a human
+   invented is 32 bytes of length and nowhere near 32 bytes of entropy.
+   That instruction belongs with whoever sets it, and it is written down
+   in docs/updates/2026-09-10-unclassified-inbound-operator-surfacing.md
+   §10 rather than only in a comment nobody reads at configuration time.
+
+   NEITHER THE VALUE NOR ITS LENGTH IS EVER LOGGED. A length is a search
+   space, and this module logs nothing at all in any case. */
+export const MIN_SECRET_BYTES = 32;
 
 /* The public origin the link points at. A CONSTANT, not a variable, for
    the same reason api/_lib/mail.mjs pins FROM_ADDRESS: one site, one
@@ -86,19 +113,36 @@ export class OperatorTokenError extends Error {
   }
 }
 
-/** True when the endpoint has a key to seal and unseal with. */
+/* ONE RULE, THREE CALLERS. `operatorActionConfigured()`, sealing and
+   unsealing all resolve the secret through this and nothing else, so
+   "configured" cannot come to mean one thing at the gate and another at
+   the cipher — which is exactly how a weak secret gets past a check that
+   is only performed in one of the three places. Returns null rather than
+   throwing, so the boolean gate below can use it without a try. */
+function usableSecret(env) {
+  const secret = String(env[OPERATOR_SECRET_VAR] || "").trim();
+  if (Buffer.byteLength(secret, "utf8") < MIN_SECRET_BYTES) return null;
+  return secret;
+}
+
+/** True when the endpoint has a key STRONG ENOUGH to seal and unseal with.
+ *  A short secret reads exactly like an absent one: the endpoint is inert,
+ *  answers 503 and renders nothing. Failing closed is the point — an
+ *  endpoint that quietly worked with a weak key would be worse than one
+ *  that did not work at all. */
 export function operatorActionConfigured(env = process.env) {
-  return Boolean(String(env[OPERATOR_SECRET_VAR] || "").trim());
+  return usableSecret(env) !== null;
 }
 
 /* ---------------------------------------------------------------------
    THE KEY
    ---------------------------------------------------------------------
    HKDF-SHA256 over the configured secret, with a fixed salt and info, so
-   the secret may be any length and any character set an operator can
-   paste into Vercel without the cipher caring. Deterministic: the same
-   secret always yields the same key, which is what lets a link sealed by
-   one deployment be opened by the next.
+   the secret may be any character set an operator can paste into Vercel
+   without the cipher caring — any LENGTH at or above MIN_SECRET_BYTES,
+   which is checked before this runs. Deterministic: the same secret
+   always yields the same key, which is what lets a link sealed by one
+   deployment be opened by the next.
 
    The info string binds the key to THIS use. A future second use of the
    same secret must derive with a different info string or it is the same
@@ -110,7 +154,9 @@ const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 
 function keyFrom(env) {
-  const secret = String(env[OPERATOR_SECRET_VAR] || "").trim();
+  const secret = usableSecret(env);
+  /* The detail is the VARIABLE NAME, never the value and never its
+     length. "too short" and "absent" are deliberately the same answer. */
   if (!secret) throw new OperatorTokenError(OPERATOR_NOT_CONFIGURED, OPERATOR_SECRET_VAR);
   return Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), KEY_SALT, KEY_INFO, 32));
 }

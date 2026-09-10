@@ -109,7 +109,15 @@ const SCOPES = Object.freeze({
 });
 
 /* The operator's own note is bounded. It is not evidence and never
-   becomes evidence; it goes in `metadata` and nowhere else. */
+   becomes evidence; it goes in `metadata` and nowhere else.
+
+   OVERLENGTH IS REFUSED, NOT TRUNCATED. CLAUDE.md rule 11: "Reject
+   overlength input; never silently truncate user data." A slice() here
+   would have written a note that stops mid-sentence into an append-only
+   table this application cannot correct — and told the operator it had
+   recorded what she typed. Counted in UTF-16 code units, which is what
+   the textarea's `maxlength` counts, so the browser hint and the server
+   rule agree rather than disagreeing on an emoji. */
 const MAX_NOTE_CHARS = 280;
 
 /* ---------------------------------------------------------------------
@@ -334,8 +342,22 @@ async function handlePost(req, res) {
       "recorded. Nothing has been changed.");
   }
 
+  const note = String(params.note || "").trim();
+  if (note.length > MAX_NOTE_CHARS) {
+    /* Refused BEFORE the ledger is touched, like every other refusal on
+       this path: nothing is written, nothing is projected, and the log
+       carries the length limit rather than one character of what she
+       typed. */
+    log("operator.action.refused", {
+      message_sid: payload.sid, reason: "note_too_long", limit: MAX_NOTE_CHARS,
+    });
+    return notice(res, 400, "Not recorded",
+      `That note is longer than ${MAX_NOTE_CHARS} characters, so <strong>nothing was ` +
+      "recorded</strong> — it was not shortened for you. Go back, shorten the note, and " +
+      "submit again. The link still works.");
+  }
+
   const occurredAt = new Date().toISOString();
-  const note = String(params.note || "").trim().slice(0, MAX_NOTE_CHARS);
 
   let event;
   try {
@@ -402,9 +424,23 @@ async function handlePost(req, res) {
     <p class="meta">MessageSid ${escapeHtml(payload.sid)}</p>`));
 }
 
-/** What the result page says about the CRM half. A partial outcome is
-    shown rather than hidden — but it is not a failure. */
+/** What the result page says about the CRM half.
+ *
+ * A PARTIAL OUTCOME IS SHOWN, NOT HIDDEN. This function previously read
+ * only `written` and ignored `failed`, so "one of two contacts could not
+ * be updated" and "both were updated" produced the same sentence — and a
+ * page that says two contacts were marked when one was not is simply
+ * false. None of these outcomes is a failure of the request: the durable
+ * suppression was written before any of this ran.
+ */
 function projectionSentence(projection) {
+  const written = projection.written || 0;
+  const failed = projection.failed || 0;
+  const contacts = projection.contacts || 0;
+  const stands = "That is a display problem only — the record above is the one that " +
+    "counts, and it was written.";
+  const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
   if (projection.reason === "consent_state_disabled")
     return "The CRM copy was not updated, because CRM consent tracking is switched " +
       "off in this environment. That does not affect the record above.";
@@ -415,12 +451,20 @@ function projectionSentence(projection) {
     return "Nobody in the CRM holds this number, so there was nothing to mark there. " +
       "The record above stands on its own.";
   if (projection.reason === "failed")
-    return "The CRM copy could not be updated. That is a display problem only — the " +
-      "record above is the one that counts, and it was written.";
-  const n = projection.written || 0;
-  return n === 1
-    ? "One CRM contact holding this number was marked as well."
-    : `${n} CRM contacts holding this number were marked as well.`;
+    return "The CRM could not be searched, so no contact was marked there. " + stands;
+
+  /* Contacts were found and each was attempted individually. */
+  if (written > 0 && failed > 0)
+    return `${written} of ${plural(contacts, "CRM contact")} holding this number ` +
+      `${written === 1 ? "was" : "were"} marked; ${failed} could not be updated. ` + stands;
+  if (written === 0 && failed > 0)
+    return "The CRM copy could not be updated for any of the " +
+      `${plural(failed, "contact")} holding this number. ` + stands;
+  if (written === 0 && contacts > 0)
+    return `${plural(contacts, "CRM contact")} holding this number ` +
+      `${contacts === 1 ? "was" : "were"} already marked, so nothing needed changing there.`;
+  return `${plural(written, "CRM contact")} holding this number ` +
+    `${written === 1 ? "was" : "were"} marked as well.`;
 }
 
 /**
@@ -471,7 +515,10 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
     log("operator.action.projection_done", {
       ...shape, contacts: contacts.length, written, failed,
     });
-    return { reason: "written", written, failed };
+    /* `contacts` travels with the counts because "found two, wrote none,
+       failed none" (both already marked) and "found none" are different
+       facts and must read differently. */
+    return { reason: "written", written, failed, contacts: contacts.length };
   } catch (err) {
     /* Deliberately swallowed, deliberately loud. `log()` not `logError()`:
        a HubSpot error message can carry a contact's own details. */

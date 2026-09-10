@@ -40,14 +40,15 @@ import {
   OperatorTokenError, OPERATOR_SECRET_VAR, TOKEN_EXPIRED, TOKEN_INVALID,
   TOKEN_MALFORMED, TOKEN_MISSING, TOKEN_TOO_LARGE, OPERATOR_NOT_CONFIGURED,
   MAX_TOKEN_CHARS, MAX_ACTION_URL_BYTES, TOKEN_TTL_MS, ACTION_PATH,
+  MIN_SECRET_BYTES,
 } from "../api/_lib/operator-token.mjs";
 import {
   capEvidence, EVIDENCE_TEXT_MAX_BYTES, SOURCE_OPERATOR, SUPPRESSION_COLUMNS,
   LEDGER_URL_VAR, EVENT_TYPE, CHANNEL, _setExecutor, _resetExecutor,
 } from "../api/_lib/consent-ledger.mjs";
 import {
-  buildInboundNotification, lastFour, setTransportFactory,
-  NOTIFICATION_SUBJECT_PREFIX, NOTIFICATION_DEADLINE_MS,
+  buildInboundNotification, lastFour, setTransportFactory, sendInboundNotification,
+  NOTIFICATION_SUBJECT_PREFIX, NOTIFICATION_DEADLINE_MS, NOTIFICATION_TIMED_OUT,
 } from "../api/_lib/mail.mjs";
 import { SUPPRESSION_REASON, FEATURE_FLAG } from "../api/_lib/consent.mjs";
 import { TWILIO_TOKEN_VAR } from "../api/_lib/twilio.mjs";
@@ -55,6 +56,9 @@ import { TWILIO_TOKEN_VAR } from "../api/_lib/twilio.mjs";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SECRET = "test_operator_secret_not_a_real_credential";
+/* A SECOND secret, also over the entropy floor, used to prove that a
+   token sealed with one key is refused by another. */
+const OTHER_SECRET = "a_completely_different_test_secret_not_a_credential";
 const LEDGER_URL = "postgres://app:secret@ledger.example/neondb";
 const PHONE = "+14195550123";
 const SID = "SM0123456789abcdef0123456789abcdef";
@@ -223,7 +227,7 @@ describe("the sealed token", () => {
 
   test("a token sealed with a different secret is refused", () => {
     const other = sealOperatorToken({ sid: SID, phone: PHONE, body: WORDS },
-      { env: { [OPERATOR_SECRET_VAR]: "a_different_secret_entirely" } });
+      { env: { [OPERATOR_SECRET_VAR]: OTHER_SECRET } });
     assert.equal(tokenError(() => unsealOperatorToken(other)).token, TOKEN_INVALID);
   });
 
@@ -261,6 +265,83 @@ describe("the sealed token", () => {
     setEnv({ [OPERATOR_SECRET_VAR]: undefined });
     assert.equal(operatorActionConfigured(), false);
     assert.equal(tokenError(() => tokenFor()).token, OPERATOR_NOT_CONFIGURED);
+  });
+
+  /* THE KEY MINTS BEARER CAPABILITIES, and HKDF cannot make a guessable
+     input unguessable — it stretches, it does not add entropy. A short
+     secret must read exactly like an absent one. */
+  describe("the secret's entropy floor", () => {
+    test("an empty secret is not configured", () => {
+      for (const value of ["", "   ", undefined]) {
+        setEnv({ [OPERATOR_SECRET_VAR]: value });
+        assert.equal(operatorActionConfigured(), false, `accepted ${JSON.stringify(value)}`);
+      }
+    });
+
+    test("a short secret is not configured, and cannot seal or unseal", () => {
+      const short = "a".repeat(MIN_SECRET_BYTES - 1);
+      setEnv({ [OPERATOR_SECRET_VAR]: short });
+      assert.equal(operatorActionConfigured(), false, "a short secret passed the gate");
+      assert.equal(tokenError(() => tokenFor()).token, OPERATOR_NOT_CONFIGURED);
+      assert.equal(tokenError(() => unsealOperatorToken("AAAA")).token, OPERATOR_NOT_CONFIGURED);
+    });
+
+    test("`hunter2` is refused, however well-formed the derived key would be", () => {
+      setEnv({ [OPERATOR_SECRET_VAR]: "hunter2" });
+      assert.equal(operatorActionConfigured(), false);
+    });
+
+    test("whitespace does not pad a short secret over the floor", () => {
+      setEnv({ [OPERATOR_SECRET_VAR]: "  " + "a".repeat(MIN_SECRET_BYTES - 1) + "  " });
+      assert.equal(operatorActionConfigured(), false, "trimmed whitespace counted toward the floor");
+    });
+
+    test("exactly the floor is enough, and round-trips", () => {
+      const exact = "b".repeat(MIN_SECRET_BYTES);
+      assert.equal(Buffer.byteLength(exact, "utf8"), MIN_SECRET_BYTES);
+      setEnv({ [OPERATOR_SECRET_VAR]: exact });
+      assert.equal(operatorActionConfigured(), true);
+      assert.equal(unsealOperatorToken(tokenFor()).sid, SID);
+    });
+
+    test("the floor is on BYTES, not characters", () => {
+      /* Ten four-byte characters are 10 characters and 40 bytes. A
+         character count would be the wrong measure of a search space. */
+      const multi = "🙃".repeat(10);
+      assert.equal(multi.length < MIN_SECRET_BYTES, true);
+      assert.equal(Buffer.byteLength(multi, "utf8") >= MIN_SECRET_BYTES, true);
+      setEnv({ [OPERATOR_SECRET_VAR]: multi });
+      assert.equal(operatorActionConfigured(), true);
+    });
+
+    test("the existing test credential is over the floor and still works", () => {
+      assert.ok(Buffer.byteLength(SECRET, "utf8") >= MIN_SECRET_BYTES);
+      assert.ok(Buffer.byteLength(OTHER_SECRET, "utf8") >= MIN_SECRET_BYTES);
+      assert.equal(operatorActionConfigured(), true);
+      assert.equal(unsealOperatorToken(tokenFor()).body, WORDS);
+    });
+
+    /* One rule, three callers: the gate, sealing and unsealing must not be
+       able to disagree about what "configured" means. */
+    test("the gate and the cipher agree on every value", () => {
+      for (const value of ["", "short", "a".repeat(MIN_SECRET_BYTES - 1),
+                           "a".repeat(MIN_SECRET_BYTES), SECRET]) {
+        setEnv({ [OPERATOR_SECRET_VAR]: value });
+        const gate = operatorActionConfigured();
+        let sealed = true;
+        try { tokenFor(); } catch { sealed = false; }
+        assert.equal(gate, sealed,
+          `the gate says ${gate} and sealing says ${sealed} for the same value`);
+      }
+    });
+
+    test("a refusal names the variable and never the value or its length", () => {
+      setEnv({ [OPERATOR_SECRET_VAR]: "a".repeat(MIN_SECRET_BYTES - 1) });
+      const err = tokenError(() => tokenFor());
+      assert.equal(err.detail, OPERATOR_SECRET_VAR);
+      assert.ok(!/\d/.test(err.message), "the refusal carries a number - a length is a search space");
+      assert.ok(!err.message.includes("aaa"));
+    });
   });
 
   /* THE SIZE BOUND, MEASURED RATHER THAN ARITHMETIC. The design document
@@ -452,6 +533,58 @@ describe("POST /api/operator-action — what it refuses", () => {
     }));
     assert.equal(res.statusCode, 400);
     assert.equal(calls.length, 0);
+  });
+
+  /* CLAUDE.md rule 11: reject overlength input, never silently truncate
+     user data. This path used to slice(0, MAX_NOTE_CHARS) and carry on,
+     writing a note that stops mid-sentence into an append-only table the
+     application cannot correct — and telling the operator it had recorded
+     what she typed. */
+  test("an overlength note is REFUSED, not truncated, and writes nothing", async () => {
+    const calls = captureLedger();
+    const res = await callOperator(validPost({ note: "n".repeat(281) }));
+    assert.equal(res.statusCode, 400);
+    assert.equal(calls.length, 0, "an overlength note reached the ledger");
+    assert.match(res.body, /Not recorded/);
+    assert.match(res.body, /not shortened for you/);
+  });
+
+  test("a note at exactly the limit is accepted whole", async () => {
+    const note = "n".repeat(280);
+    const calls = captureLedger();
+    const res = await callOperator(validPost({ note }));
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(JSON.parse(column(calls, "metadata")).operator_note, note,
+      "the note was altered on its way into metadata");
+  });
+
+  test("an overlength note is refused before HubSpot is consulted", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    let reached = false;
+    globalThis.fetch = async () => { reached = true; throw new Error("should not be reached"); };
+    const calls = captureLedger();
+    const res = await callOperator(validPost({ note: "n".repeat(400) }));
+    assert.equal(res.statusCode, 400);
+    assert.equal(calls.length, 0);
+    assert.equal(reached, false, "a refused POST still projected to the CRM");
+  });
+
+  test("the refusal logs the limit and not one character of the note", async () => {
+    captureLedger();
+    const { text } = await capturingLogs(() =>
+      callOperator(validPost({ note: "hassling secret note ".repeat(20) })));
+    assert.match(text, /note_too_long/);
+    assert.ok(!text.includes("hassling"), "the operator's note reached a log");
+  });
+
+  test("the confirmation page still hints the limit in the browser", async () => {
+    const res = await callOperator({ method: "GET", url: `${ACTION_PATH}?t=${tokenFor()}`, headers: {} });
+    assert.match(res.body, /maxlength="280"/,
+      "the browser hint is gone - server validation is authoritative, but the hint is still worth having");
   });
 
   test("with CONSENT_LEDGER_URL absent the POST is 503, not a page saying recorded", async () => {
@@ -661,11 +794,106 @@ describe("the HubSpot projection after an operator entry", () => {
     assert.equal(patches.length, 2, "not every matching contact was marked");
     /* The MANUAL trigger's value in the SMS reason dropdown. No new
        dropdown option: `manual` already exists in all three maps. */
+    assert.ok(res.body.includes("2 CRM contacts holding this number were marked as well."),
+      "the full-success outcome is not stated exactly");
     const props = patches[0].body.properties;
     assert.equal(props.cst_sms_suppressed, "true");
     assert.equal(props.cst_sms_suppression_reason, "manual");
     /* And nothing is ever cleared. */
     for (const v of Object.values(props)) assert.notEqual(v, "false");
+  });
+
+  /* A PARTIAL OUTCOME MUST BE SHOWN, NOT HIDDEN. projectionSentence()
+     read only `written` and ignored `failed`, so a page could say two
+     contacts were marked when one of them was not. */
+  test("one contact written and one failed is reported as exactly that", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.includes("/objects/contacts/search"))
+        return new Response(JSON.stringify({
+          results: [{ id: "101", properties: {} }, { id: "102", properties: {} }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      /* The second contact's write is refused; the first succeeds. */
+      if (target.includes("/102"))
+        return new Response(JSON.stringify({ message: "nope" }), { status: 500 });
+      return new Response(JSON.stringify({ id: "101" }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const calls = captureLedger();
+    const res = await callOperator(validPost());
+    assert.equal(res.statusCode, 200, "a partial CRM outcome changed the response");
+    assert.equal(calls.length, 1, "the ledger row was not written");
+    /* Asserted as the exact sentence, not as a loose pattern: a dotall
+       `.*` across a whole HTML page will match almost anything, which is
+       how an assertion passes while proving nothing. */
+    assert.ok(res.body.includes(
+      "1 of 2 CRM contacts holding this number was marked; 1 could not be updated."),
+      "the partial outcome is not stated exactly");
+    assert.match(res.body, /the record above is the one that counts/i);
+    assert.ok(!/2 CRM contacts holding this number were marked as well/.test(res.body),
+      "the page claims both contacts were marked when one failed");
+  });
+
+  test("matching contacts whose writes ALL fail is reported as a failed projection", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/objects/contacts/search"))
+        return new Response(JSON.stringify({
+          results: [{ id: "101", properties: {} }, { id: "102", properties: {} }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ message: "nope" }), { status: 500 });
+    };
+
+    const calls = captureLedger();
+    const res = await callOperator(validPost());
+    assert.equal(res.statusCode, 200, "a failed CRM projection changed the response");
+    assert.equal(calls.length, 1, "the ledger row was not written");
+    assert.equal(column(calls, "event_type"), EVENT_TYPE.REVOKED);
+    assert.ok(res.body.includes(
+      "The CRM copy could not be updated for any of the 2 contacts holding this number."),
+      "the total projection failure is not stated exactly");
+    assert.match(res.body, /display problem only/i);
+    /* The one thing that must never be in doubt on that page. */
+    assert.match(res.body, /the record above is the one that counts/i);
+    assert.ok(!/were marked as well/.test(res.body),
+      "the page claims contacts were marked when none were");
+  });
+
+  test("contacts that were already marked read as already marked, not as marked now", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    /* An already-suppressed contact produces an empty patch, and
+       writeSuppressionProperties() then reports `written: false` without
+       calling HubSpot at all — so this is neither a success nor a
+       failure and must not read as either. */
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/objects/contacts/search"))
+        return new Response(JSON.stringify({
+          results: [{
+            id: "101",
+            properties: { cst_sms_suppressed: "true", cst_sms_suppressed_at: "2026-09-01T00:00:00Z" },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      throw new Error("no contact should have been patched");
+    };
+
+    const calls = captureLedger();
+    const res = await callOperator(validPost());
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.ok(res.body.includes(
+      "1 CRM contact holding this number was already marked, so nothing needed changing there."),
+      "an already-marked contact is not stated exactly");
   });
 
   test("nobody in the CRM holding the number is not a failure", async () => {
@@ -854,6 +1082,75 @@ describe("an unclassified inbound message", () => {
     assert.ok(elapsed >= NOTIFICATION_DEADLINE_MS - 250,
       `answered in ${elapsed}ms - the deadline did not bound the send`);
     assert.ok(elapsed < 15000, `answered in ${elapsed}ms - past Twilio's webhook timeout`);
+  });
+
+  /* THE DEFECT THIS PAIR EXISTS FOR. The deadline used to start AFTER
+     `await transportFactory()`, so transport creation was outside it. The
+     real factory does a dynamic `import("nodemailer")`, and a stuck
+     import would have consumed the whole webhook budget before the clock
+     started. */
+  test("a transport factory that never resolves answers 503 at the deadline", async () => {
+    mailConfigured();
+    setTransportFactory(() => new Promise(() => {}));
+    const started = Date.now();
+    const res = await callInbound();
+    const elapsed = Date.now() - started;
+    assert.equal(res.statusCode, 503);
+    assert.ok(elapsed >= NOTIFICATION_DEADLINE_MS - 250,
+      `answered in ${elapsed}ms - the deadline did not cover transport creation`);
+    assert.ok(elapsed < 15000,
+      `answered in ${elapsed}ms - past Twilio's webhook timeout`);
+  });
+
+  test("a factory resolving AFTER the deadline never gets to send", async () => {
+    /* Exercised directly, with a short deadline, so the assertion about
+       what happens after it can be made without waiting 8 seconds. */
+    mailConfigured();
+    let sendMailCalled = 0;
+    let resolveFactory;
+    setTransportFactory(() => new Promise((resolve) => { resolveFactory = resolve; }));
+
+    const started = Date.now();
+    await assert.rejects(
+      sendInboundNotification({ to: "x" }, { deadlineMs: 120 }),
+      (err) => err && err.message === NOTIFICATION_TIMED_OUT);
+    assert.ok(Date.now() - started < 2000, "the short deadline did not bound the attempt");
+
+    /* NOW let the factory finish, as a slow dynamic import eventually
+       would. The send must never start: the caller has already answered
+       503 and nobody is waiting on this. */
+    resolveFactory({ sendMail: async () => { sendMailCalled += 1; return {}; } });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(sendMailCalled, 0,
+      "sendMail was started after the deadline had already been reported as a failure");
+  });
+
+  test("a send that had already started is not claimed to be cancelled", async () => {
+    /* The documented, accepted risk: a send in flight when the deadline
+       passes may still deliver, because nodemailer has no cancellation.
+       Asserted so the claim in the docs stays honest. */
+    mailConfigured();
+    let settle;
+    let sendMailCalled = 0;
+    setTransportFactory(async () => ({
+      sendMail: () => { sendMailCalled += 1; return new Promise((r) => { settle = r; }); },
+    }));
+
+    await assert.rejects(
+      sendInboundNotification({ to: "x" }, { deadlineMs: 120 }),
+      (err) => err && err.message === NOTIFICATION_TIMED_OUT);
+    assert.equal(sendMailCalled, 1, "the send never started, so this proves nothing");
+    settle({});   // the socket completes afterwards; nothing throws
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  test("a fast factory and a fast send still answer 200 well inside the deadline", async () => {
+    mailConfigured();
+    setTransportFactory(async () => ({ sendMail: async () => ({ messageId: "x" }) }));
+    const started = Date.now();
+    const res = await callInbound();
+    assert.equal(res.statusCode, 200);
+    assert.ok(Date.now() - started < 1000, "the happy path is not fast");
   });
 
   test("mail unconfigured answers 503, not a silent 200", async () => {
@@ -1128,6 +1425,21 @@ describe("the operator-action static guards", () => {
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a webhook that surfaces nothing");
     assert.match(output, /reach nobody/);
+  });
+
+  test("dropping the secret's entropy floor is refused", () => {
+    const tokenPath = join(root, "api", "_lib", "operator-token.mjs");
+    const pristine = readFileSync(join(REPO, "api/_lib/operator-token.mjs"), "utf8");
+    const mutated = pristine.replace(/MIN_SECRET_BYTES/g, "SUGGESTED_SECRET_BYTES");
+    assert.notEqual(mutated, pristine, "the mutation changed nothing");
+    writeFileSync(tokenPath, mutated);
+    try {
+      const { ok, output } = runCheck();
+      assert.ok(!ok, "check.mjs accepted a sealing key with no minimum length");
+      assert.match(output, /HKDF does not turn a weak secret into a strong key/);
+    } finally {
+      writeFileSync(tokenPath, pristine);
+    }
   });
 
   test("dropping the token module's size bound is refused", () => {

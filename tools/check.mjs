@@ -1120,6 +1120,12 @@ for (const file of pages) {
         fail(tokenRel, "does not seal with aes-256-gcm - a signed plaintext token would put a phone number in a URL");
       if (!/MAX_ACTION_URL_BYTES/.test(tok) || !/MAX_TOKEN_CHARS/.test(tok))
         fail(tokenRel, "has no hard size bound - a URL over the header budget fails in production, not in a test");
+      /* 13. THE SECRET HAS AN ENTROPY FLOOR. This key mints bearer
+             capabilities and HKDF cannot make a guessable input
+             unguessable, so a short secret must read as "not configured"
+             rather than deriving a well-formed key from `hunter2`. */
+      if (!/MIN_SECRET_BYTES/.test(tok))
+        fail(tokenRel, "has no minimum length for the sealing secret - HKDF does not turn a weak secret into a strong key");
       for (const m of tok.matchAll(/\blog\(/g))
         fail(tokenRel, "logs - this module holds the plaintext number and message and must emit nothing");
     }
