@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import operatorHandler, {
-  CONFIRM_LITERAL, MAX_PROJECTION_CONTACTS, PROJECTION_DEADLINE_MS,
+  CONFIRM_LITERAL, MAX_PROJECTION_CONTACTS, PROJECTION_BUDGET_MS, MIN_WRITE_MS,
 } from "../api/operator-action.js";
 import inboundHandler from "../api/twilio-inbound.js";
 import {
@@ -982,24 +982,46 @@ describe("the HubSpot projection after an operator entry", () => {
     assert.match(res.body, /the record above is the one that counts/i);
   });
 
-  test("a slow CRM stops at the deadline rather than running past the function budget", async () => {
+  /* THE DEFECT THIS REPLACES. The first version of this test asserted
+     `elapsed < PROJECTION_BUDGET_MS * 2`, which a 20-second projection
+     satisfies — so it passed against a bound that was not hard. The
+     deadline was checked BETWEEN writes, which says when a write may
+     START and nothing about when it ends: a write beginning at 11.9 s ran
+     on under HubSpot's own 8 s request timeout and finished near 19.9 s.
+
+     These two prove the bound is now enforced INSIDE the request. */
+  test("a write that outlives the budget is ABORTED at the deadline, not after it", async () => {
     setEnv({
       [FEATURE_FLAG]: "true",
       HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
     });
-    let patches = 0;
-    globalThis.fetch = async (url) => {
-      if (String(url).includes("/objects/contacts/search"))
-        return new Response(JSON.stringify({
-          results: [{ id: "1", properties: {} }, { id: "2", properties: {} },
-                    { id: "3", properties: {} }],
-        }), { status: 200, headers: { "content-type": "application/json" } });
-      patches += 1;
-      /* Each write eats a third of the projection budget, so the third
-         contact is past the deadline before it is attempted. */
-      await new Promise((r) => setTimeout(r, Math.ceil(PROJECTION_DEADLINE_MS / 2) + 20));
-      return new Response(JSON.stringify({ id: "1" }),
-        { status: 200, headers: { "content-type": "application/json" } });
+
+    /* The search burns most of the budget, so the single write starts
+       with only a sliver left — the exact shape that used to let an 8 s
+       request run on past a 12 s "deadline". */
+    const searchMs = PROJECTION_BUDGET_MS - 1200;
+    const aborts = [];
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url).includes("/objects/contacts/search")) {
+        await new Promise((r) => setTimeout(r, searchMs));
+        return new Response(JSON.stringify({ results: [{ id: "1", properties: {} }] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      /* A write that never resolves on its own. Only the signal can end
+         it — which is the whole point: a Promise.race would leave this
+         running. */
+      return new Promise((_, reject) => {
+        const sig = options.signal;
+        assert.ok(sig, "no AbortSignal reached the HubSpot write");
+        const onAbort = () => {
+          aborts.push(Date.now());
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          reject(err);
+        };
+        if (sig.aborted) onAbort();
+        else sig.addEventListener("abort", onAbort, { once: true });
+      });
     };
 
     const calls = captureLedger();
@@ -1007,13 +1029,189 @@ describe("the HubSpot projection after an operator entry", () => {
     const res = await callOperator(validPost());
     const elapsed = Date.now() - started;
 
+    /* The ledger already succeeded, so the operator still gets her page. */
+    assert.equal(res.statusCode, 200, "a CRM overrun changed the response");
+    assert.equal(calls.length, 1, "the ledger row was not written");
+    assert.equal(column(calls, "event_type"), EVENT_TYPE.REVOKED);
+
+    assert.equal(aborts.length, 1, "the in-flight write was never aborted");
+
+    /* THE ASSERTION THAT MATTERS. Close to the real budget — not the
+       budget plus another HubSpot timeout, which is what the old bound
+       allowed and the old assertion tolerated. */
+    assert.ok(elapsed >= searchMs,
+      `finished in ${elapsed}ms - the search did not consume the budget it was given`);
+    assert.ok(elapsed < PROJECTION_BUDGET_MS + 1500,
+      `the projection took ${elapsed}ms against a ${PROJECTION_BUDGET_MS}ms hard budget`);
+    assert.ok(elapsed < PROJECTION_BUDGET_MS + 8000 - 1000,
+      `the projection took ${elapsed}ms - that is the old soft bound, not a hard one`);
+
+    /* And the page tells the truth about the contact it could not reach. */
+    assert.ok(res.body.includes(
+      "None of 1 CRM contact holding this number could be marked; " +
+      "1 was not reached before the time limit."),
+      "the page does not say the contact went unreached");
+    assert.match(res.body, /the record above is the one that counts/i);
+  });
+
+  test("the remaining budget, not the default, is what reaches the request", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    const searchMs = PROJECTION_BUDGET_MS - 2000;
+    let writeStartedAt = 0;
+    const aborts = [];
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url).includes("/objects/contacts/search")) {
+        await new Promise((r) => setTimeout(r, searchMs));
+        return new Response(JSON.stringify({ results: [{ id: "1", properties: {} }] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      writeStartedAt = Date.now();
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          aborts.push(Date.now() - writeStartedAt);
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          reject(err);
+        }, { once: true });
+      });
+    };
+
+    captureLedger();
+    await callOperator(validPost());
+
+    assert.equal(aborts.length, 1, "the write was not aborted");
+    /* ~2 s of budget was left, so the request must have been given about
+       that — emphatically not HubSpot's 8 s default. */
+    assert.ok(aborts[0] < 3500,
+      `the write ran for ${aborts[0]}ms - it was given the default timeout, not the remaining budget`);
+    assert.ok(aborts[0] > 800,
+      `the write ran for only ${aborts[0]}ms - it was not given the time that remained`);
+  });
+
+  test("the counts always sum to the contacts found", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    /* Three contacts, budget nearly gone: one write is attempted and
+       aborted, the rest are never started. An earlier draft assigned
+       rather than added the tail, losing the aborted contact from the
+       accounting entirely. */
+    const searchMs = PROJECTION_BUDGET_MS - 1200;
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url).includes("/objects/contacts/search")) {
+        await new Promise((r) => setTimeout(r, searchMs));
+        return new Response(JSON.stringify({
+          results: [{ id: "1", properties: {} }, { id: "2", properties: {} },
+                    { id: "3", properties: {} }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const err = new Error("aborted"); err.name = "AbortError"; reject(err);
+        }, { once: true });
+      });
+    };
+
+    captureLedger();
+    const res = await callOperator(validPost());
     assert.equal(res.statusCode, 200);
-    assert.equal(calls.length, 1);
-    assert.equal(patches, 2, `the loop kept going past the deadline (${patches} writes)`);
-    assert.ok(elapsed < PROJECTION_DEADLINE_MS * 2,
-      `the projection took ${elapsed}ms - the deadline did not stop it`);
-    assert.ok(res.body.includes("1 was not reached before the time limit"),
-      "the page does not admit that a contact went unreached");
+    /* 0 written + 0 failed + 3 unreached = the 3 that were found. */
+    assert.ok(res.body.includes(
+      "None of 3 CRM contacts holding this number could be marked; " +
+      "3 were not reached before the time limit."),
+      "the counts do not sum to the contacts found - one was lost from the tally");
+  });
+
+  test("a write is not even started when too little budget remains", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    /* The search leaves less than MIN_WRITE_MS, so starting a request
+       would only guarantee an abort. */
+    const searchMs = PROJECTION_BUDGET_MS - Math.floor(MIN_WRITE_MS / 2);
+    let writes = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/objects/contacts/search")) {
+        await new Promise((r) => setTimeout(r, searchMs));
+        return new Response(JSON.stringify({ results: [{ id: "1", properties: {} }] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      writes += 1;
+      return new Response(JSON.stringify({ id: "1" }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    captureLedger();
+    const started = Date.now();
+    const res = await callOperator(validPost());
+    assert.equal(res.statusCode, 200);
+    assert.equal(writes, 0, "a write was started with no budget left to finish it");
+    assert.ok(Date.now() - started < PROJECTION_BUDGET_MS + 1500);
+    assert.ok(res.body.includes("1 was not reached before the time limit"));
+  });
+
+  /* The override must be exactly that — an override. Every existing
+     caller omits it and must keep HubSpot's 8-second default. */
+  test("existing callers keep the 8-second default when no override is passed", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    const { writeSuppressionProperties, findContactsByPhone, HUBSPOT_TIMEOUT_MS } =
+      await import("../api/_lib/hubspot.mjs");
+    assert.equal(HUBSPOT_TIMEOUT_MS, 8000);
+
+    /* Measure the abort deadline the signal actually carries, without
+       waiting 8 s for it: the timer is read, not awaited. */
+    const observed = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const at = Date.now();
+      await new Promise((resolve) => {
+        options.signal.addEventListener("abort", () => resolve(), { once: true });
+        /* Sample the signal shortly after; if it has not aborted by
+           1 s the timeout is clearly longer than any short override. */
+        setTimeout(() => { observed.push({ aborted: options.signal.aborted, ms: Date.now() - at }); resolve(); }, 60);
+      });
+      return new Response(JSON.stringify({ id: "1", results: [] }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    await writeSuppressionProperties("101", { cst_sms_suppressed: "true" });
+    await findContactsByPhone("+14195550123");
+    assert.equal(observed.length, 2);
+    for (const o of observed)
+      assert.equal(o.aborted, false,
+        "a caller that passed no override was aborted early - the default changed");
+  });
+
+  test("an exhausted budget never silently becomes the 8-second default", async () => {
+    setEnv({
+      [FEATURE_FLAG]: "true",
+      HUBSPOT_ACCESS_TOKEN: "pat-test", HUBSPOT_PORTAL_ID: "1", HUBSPOT_FORM_GUID: "g",
+    });
+    const { writeSuppressionProperties } = await import("../api/_lib/hubspot.mjs");
+    let ranFor = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const at = Date.now();
+      return new Promise((_, reject) => {
+        options.signal.addEventListener("abort", () => {
+          ranFor = Date.now() - at;
+          const err = new Error("aborted"); err.name = "AbortError"; reject(err);
+        }, { once: true });
+      });
+    };
+
+    /* A caller whose budget is already gone. Falling back to the default
+       here is exactly how a hard bound turns soft again. */
+    await assert.rejects(
+      writeSuppressionProperties("101", { cst_sms_suppressed: "true" }, { timeoutMs: -50 }));
+    assert.ok(ranFor < 1000,
+      `an exhausted budget ran for ${ranFor}ms - it fell back to the default`);
   });
 
   test("nobody in the CRM holding the number is not a failure", async () => {

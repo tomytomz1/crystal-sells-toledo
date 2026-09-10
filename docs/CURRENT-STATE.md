@@ -447,11 +447,16 @@ action, 10 September 2026** (`api/operator-action.js`,
   actual outcome — some marked and some not, all failed, all already marked, some
   not reached — and none of them changes the HTTP 200, because the suppression was
   already durable.
-- **The CRM projection is bounded: 25 contacts and 12 seconds.** A phone can match
-  up to 100 contacts and each write is bounded at 8 s, so an unbounded loop could
-  run past the 30 s function budget **after** the ledger commit — costing the
-  operator the page that tells her the record stands. Contacts not reached are
-  **counted and stated**, never silently dropped.
+- **The CRM projection is HARD-bounded: 25 contacts and 12 seconds, covering the
+  contact search and every write.** A phone can match up to 100 contacts, so an
+  unbounded loop could run past the 30 s function budget **after** the ledger
+  commit — costing the operator the page that tells her the record stands. The
+  remaining budget is passed **into** each HubSpot request and the socket is
+  **aborted** when it runs out, so a write cannot begin just inside the deadline
+  and run on under HubSpot's own 8 s timeout. Contacts not reached are **counted
+  and stated**, never silently dropped, and the counts always sum to the contacts
+  found. Worst case for the whole endpoint: 3 s ledger + 12 s projection + under
+  1 s of non-I/O work ≈ **16 s against a 30 s `maxDuration`.**
 - **Inert, and inert by design.** `OPERATOR_ACTION_SECRET` is set in **no
   environment**, so the endpoint answers 503 and renders nothing; the webhook
   still answers 503 at `twilioConfigured()` before reading a body. **Nothing here

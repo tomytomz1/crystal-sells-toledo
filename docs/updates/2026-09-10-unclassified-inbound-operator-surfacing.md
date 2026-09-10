@@ -365,7 +365,7 @@ success.
 | `api/_lib/consent-ledger.mjs` | `SOURCE_OPERATOR`; `capEvidence()` exported; the stale retry comment corrected |
 | `tools/check.mjs` | `OPERATOR_ACTION_SECRET` in `SECRET_NAMES`; nine new guards; containment extended |
 | `vercel.json` | `maxDuration` for `api/twilio-inbound.js` (15 s) and `api/operator-action.js` (30 s) |
-| `tests/operator-action.test.mjs` | **new** — 114 tests |
+| `tests/operator-action.test.mjs` | **new** — 119 tests |
 | `tests/suppression.test.mjs` | the vacuous mutation retargeted |
 | `docs/updates/…-decision.md` | §6.1 GET wording; §11 marked closed |
 | `docs/CURRENT-STATE.md` | these two items move from *designed* to *built and inert*; the endpoint list corrected from one server endpoint to three |
@@ -388,8 +388,10 @@ at send time exactly as a keyword STOP does and **no migration is needed.**
   the operator note exceeds 280 characters — **refused, never truncated**; 410
   expired; 503 without the ledger or on an append failure; 200 with exactly one
   `revoked` row otherwise. Idempotent on `operator:<MessageSid>:<channel>:revoked`.
-  **The HubSpot projection is bounded** at 25 contacts and 12 seconds, and the
-  page says how many were not reached.
+  **The HubSpot projection is hard-bounded** at 25 contacts and 12 seconds —
+  covering the search and every write, with the remaining budget passed into each
+  request and the socket aborted when it runs out — and the page says how many
+  were not reached.
 - **The ledger is authoritative; HubSpot is the projection.** A CRM failure costs
   visibility, not compliance, and never changes the response — and the result page
   states the **actual** outcome, including a partial one.
@@ -412,7 +414,7 @@ anything.
 
 ## 8. Tests
 
-`tests/operator-action.test.mjs` — **114 tests, all passing**. Nothing reaches a
+`tests/operator-action.test.mjs` — **119 tests, all passing**. Nothing reaches a
 database, an SMTP server, Twilio or HubSpot: the ledger executor is injected, the
 mail transport factory is replaced, and `globalThis.fetch` throws if anything
 tries to use it.
@@ -578,6 +580,8 @@ none reached `main`.
    timeout instead of the page that tells her the record stands. It costs no
    compliance and all of the reassurance. Now bounded at **25 contacts and 12
    seconds**, with the unreached ones **counted and stated** rather than dropped.
+   **The first version of this bound was not hard** — see §13, which is the
+   defect that fix left behind.
    **Root cause:** copying the webhook's projection shape without asking what the
    response was for. The webhook answers TwiML to a machine; this answers a page
    to the person who needs to know whether her opt-out was recorded.
@@ -616,7 +620,80 @@ the webhook's projection shape standing in for a human-facing one, one clause of
 a guard standing in for the guard, and a thrown error standing in for every way a
 function can fail. None was caught by 105 passing tests.
 
-## 13. Explicitly not done
+## 13. The projection bound was not actually hard — found by review of `4397f00`
+
+`4397f00`'s projection deadline was checked **between** writes. That bounds when
+a write may **start** and says nothing about when it **ends**:
+
+- the contact search could take up to 8 s and sat **outside** the budget;
+- the deadline was then set to `now + 12 s`;
+- a write passing the check at 11.9 s still ran under HubSpot's own **8 s**
+  request timeout and finished near **19.9 s**.
+
+So the advertised "12-second bound" was really a *12-plus-8-second* bound on top
+of an 8-second search — and with 3 s of ledger and ordinary overhead, the 30 s
+`maxDuration` was still reachable **after the durable write had committed**. That
+is the exact failure §12's fix was written to prevent, surviving the fix.
+
+**Measured, not argued.** Against the pre-fix code in a throwaway copy, the new
+regression reports the projection taking **18,814 ms** against a 12,000 ms budget,
+with the write given HubSpot's **8,009 ms** default rather than the time that
+remained.
+
+### What changed
+
+1. **An optional per-request timeout** threads through `fetchWithTimeout()` →
+   `hubspotFetch()` → `updateContact()` → `writeSuppressionProperties()` and
+   `findContactsByPhone()`. **Omitting it changes nothing**: every existing caller
+   keeps the 8 s default, asserted by test. An override that is present but
+   non-positive floors at 1 ms rather than falling back to the default — quietly
+   restoring 8 s is precisely how a hard bound turns soft again.
+2. **The budget covers the search.** Leaving it outside would reintroduce the same
+   arithmetic: an 8 s search plus a 12 s write phase is a 20 s projection however
+   hard each half is. Inside, a slow search simply leaves less time for writes,
+   and that is reported.
+3. **The remaining budget goes into the request and the socket is aborted** when
+   it expires. Racing a promise would leave the request in flight and the work
+   running; only the `AbortController` actually stops it.
+4. **A write is not started below `MIN_WRITE_MS` (500 ms)** — starting one there
+   only guarantees an abort.
+5. **The counting rule, documented in the code:** a write stopped because the
+   budget was gone is reported as **unreached**, the same as one never started —
+   true in the way that matters to the operator, which is that trying again may
+   work. Anything else is HubSpot declining, and is **failed**.
+
+### The headroom, which is the point
+
+| | |
+|---|---|
+| Ledger append | ≤ **3 s** (`LEDGER_TIMEOUT_MS`) |
+| Projection — search **and** every write | ≤ **12 s** (`PROJECTION_BUDGET_MS`, hard) |
+| Body read, unseal, event build, render | **< 1 s** (no I/O) |
+| **Worst case** | **≤ 16 s** |
+| `maxDuration` | **30 s** |
+| **Headroom** | **~14 s — nearly half the budget** |
+
+These are not numbers chosen to sum to 30.
+
+### One more defect found while fixing this
+
+The first draft of the fix wrote `skipped = contacts.length - i` at the loop
+break. A write already counted as unreached in the `catch` was then **overwritten**
+by that tally, so `written + failed + skipped` no longer summed to `contacts` and
+the page silently lost a contact — arithmetic that lies, on the page whose entire
+job is to state the outcome truthfully. Now `+=`, with a test asserting the sum.
+
+### Recorded, deliberately not fixed here
+
+**`api/twilio-inbound.js`'s own `projectToHubSpot()` has the same unbounded
+shape** — up to 100 contacts, each write at the 8 s default, no overall budget.
+It is pre-existing merged code from [#20](https://github.com/tomytomz1/crystal-sells-toledo/pull/20)
+answering TwiML to a machine rather than a page to a person, so the consequence
+differs; it is **not** fixed here and this pull request is not widened to reach
+it. **To be settled separately**, and it is the natural companion to configuring
+webhook retry, since both concern what the webhook does when HubSpot is slow.
+
+## 14. Explicitly not done
 
 - **No unsuppression route.** The endpoint cannot clear what it writes, so a
   mistaken entry is permanent under today's design. This is the single most

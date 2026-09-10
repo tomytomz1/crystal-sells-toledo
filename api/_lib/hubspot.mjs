@@ -32,6 +32,9 @@ import { log, logError } from "./log.mjs";
 
 const API = () => process.env.HUBSPOT_API_BASE || "https://api.hubapi.com";
 const TIMEOUT_MS = 8000;
+/** The default per-request bound, exported so a caller working inside its
+ *  own budget can cap against it rather than restating the number. */
+export const HUBSPOT_TIMEOUT_MS = TIMEOUT_MS;
 
 /* Where the full enquiry goes.
  *
@@ -176,9 +179,36 @@ export function toFormSubmission(payload, { pageUri, pageName } = {}) {
   return body;
 }
 
-async function fetchWithTimeout(url, options = {}) {
+/* ---------------------------------------------------------------------
+   PER-REQUEST TIMEOUT OVERRIDE
+   ---------------------------------------------------------------------
+   TIMEOUT_MS stays the default for every existing caller: omit the
+   argument and nothing about this module's behaviour changes.
+
+   The override exists for ONE caller — api/operator-action.js's
+   suppression projection, which runs inside a hard overall budget after
+   a durable ledger write has already committed. A per-request timeout
+   there is not a nicety: without it the projection's "deadline" is only
+   checked BETWEEN requests, so a write starting a moment before the
+   budget expires runs on for a further TIMEOUT_MS and can carry the
+   whole function past its maxDuration — losing the operator the page
+   that tells her the suppression was recorded.
+
+   THE ABORT IS THE MECHANISM. Racing a promise would leave the request
+   in flight and the socket open; aborting the AbortController actually
+   stops it, which is what "hard" has to mean here.
+   --------------------------------------------------------------------- */
+async function fetchWithTimeout(url, options = {}, timeoutMs) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  /* An OMITTED override means the default. An override that is present
+     but non-positive means the caller's budget is already gone — and it
+     must NOT quietly become the 8-second default, which is precisely how
+     a hard bound turns back into a soft one. It floors at 1 ms so the
+     request aborts rather than running to completion. */
+  const ms = timeoutMs == null
+    ? TIMEOUT_MS
+    : (Number.isFinite(timeoutMs) ? Math.max(1, timeoutMs) : TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), ms);
   try {
     return await fetch(url, { ...options, signal: ctrl.signal });
   } finally {
@@ -186,7 +216,7 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
-async function hubspotFetch(path, options = {}) {
+async function hubspotFetch(path, options = {}, timeoutMs) {
   const token = process.env.HUBSPOT_ACCESS_TOKEN;
   if (!token) throw new Error("HUBSPOT_NOT_CONFIGURED");
   return fetchWithTimeout(API() + path, {
@@ -196,7 +226,7 @@ async function hubspotFetch(path, options = {}) {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
-  });
+  }, timeoutMs);
 }
 
 async function readJson(res) {
@@ -328,11 +358,11 @@ async function createContact(props) {
   return { id: String(json.id), action: "create" };
 }
 
-async function updateContact(ref, props, byEmail = false) {
+async function updateContact(ref, props, byEmail = false, timeoutMs) {
   const res = await hubspotFetch(contactUrl(ref, { byEmail }), {
     method: "PATCH",
     body: JSON.stringify({ properties: props }),
-  });
+  }, timeoutMs);
   const json = await readJson(res);
   if (!res.ok) throw hubspotError("UPDATE", res.status, json);
   if (!json?.id) throw new Error("HUBSPOT_UPDATE_MALFORMED_RESPONSE");
@@ -614,7 +644,7 @@ export function phoneSearchVariants(e164) {
  * Searches the standard phone fields and the consent phone property, since
  * a contact may have consented on a number that is not their primary one.
  */
-export async function findContactsByPhone(e164) {
+export async function findContactsByPhone(e164, { timeoutMs } = {}) {
   const variants = phoneSearchVariants(e164);
   if (!variants.length) return [];
 
@@ -637,7 +667,7 @@ export async function findContactsByPhone(e164) {
   const res = await hubspotFetch("/crm/v3/objects/contacts/search", {
     method: "POST",
     body: JSON.stringify({ filterGroups: groups, properties, limit: 100 }),
-  });
+  }, timeoutMs);
   const json = await readJson(res);
   if (!res.ok) throw hubspotError("SUPPRESSION_SEARCH", res.status, json);
   if (!json || !Array.isArray(json.results))
@@ -663,8 +693,10 @@ export async function findContactsByPhone(e164) {
  * being set true and can produce nothing, and has no branch that writes
  * false or clears anything.
  */
-export async function writeSuppressionProperties(contactId, props) {
+export async function writeSuppressionProperties(contactId, props, { timeoutMs } = {}) {
+  /* Nothing to write is not a request: an already-suppressed contact
+     produces an empty patch and costs no network time and no budget. */
   if (!props || !Object.keys(props).length) return { written: false };
-  await updateContact(contactId, props);
+  await updateContact(contactId, props, false, timeoutMs);
   return { written: true };
 }

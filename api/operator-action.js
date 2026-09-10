@@ -75,7 +75,9 @@ import {
   consentStateEnabled, toHubSpotSuppressionProperties,
   suppressionWriteLogShape, SUPPRESSION_TRIGGER,
 } from "./_lib/hubspot-consent-state.mjs";
-import { findContactsByPhone, writeSuppressionProperties, isConfigured } from "./_lib/hubspot.mjs";
+import {
+  findContactsByPhone, writeSuppressionProperties, isConfigured, HUBSPOT_TIMEOUT_MS,
+} from "./_lib/hubspot.mjs";
 import { readFormBody, parseFormParams } from "./_lib/twilio.mjs";
 import { escapeHtml } from "./_lib/mail.mjs";
 import { log } from "./_lib/log.mjs";
@@ -121,27 +123,49 @@ const SCOPES = Object.freeze({
 const MAX_NOTE_CHARS = 280;
 
 /* ---------------------------------------------------------------------
-   THE PROJECTION IS BOUNDED, AND IT HAS TO BE
+   THE PROJECTION IS BOUNDED, AND THE BOUND IS HARD
    ---------------------------------------------------------------------
    findContactsByPhone() returns up to 100 contacts, and each write is a
-   separate HubSpot request bounded at 8 s by api/_lib/hubspot.mjs. Run
-   sequentially and unbounded, that is up to ~800 s of work inside a 30 s
-   maxDuration — so a slow CRM with a handful of duplicate contacts on one
-   number would blow the function budget AFTER the ledger append had
-   already committed.
+   separate HubSpot request. Run unbounded, that is far more work than the
+   30 s maxDuration allows — and it happens AFTER the ledger append has
+   already committed, so what it costs is not compliance but THE
+   OPERATOR'S ANSWER: a platform timeout instead of the page telling her
+   the suppression was recorded.
 
-   What that costs is not compliance — the suppression is durable either
-   way — but it costs the OPERATOR THE ANSWER. She would get a platform
-   timeout instead of the page that tells her the record stands, with no
-   way to tell whether her opt-out was written. The whole point of the
-   result page is that a partial outcome is stated rather than guessed at,
-   and no page at all is the worst version of guessing.
+   A FIRST ATTEMPT AT THIS WAS NOT ACTUALLY A DEADLINE. It checked the
+   clock BETWEEN writes, which bounds when a write may START and says
+   nothing about when it ends. A write beginning at 11.9 s ran on under
+   HubSpot's own 8 s request timeout and finished near 19.9 s — so the
+   "12-second bound" was really a 12-plus-8-second bound, and the failure
+   it was written to prevent was still reachable. Found by review of
+   `4397f00`.
 
-   So the loop stops at whichever comes first, and says what it did not
-   do. Both numbers are chosen against the 30 s budget: 3 s for the
-   ledger, up to 8 s for the contact search, and the rest here. */
+   SO THE REMAINING BUDGET IS PASSED INTO THE REQUEST, and the request is
+   ABORTED when it runs out. Racing a promise would leave the socket open
+   and the work running; only the AbortController actually stops it.
+
+   THE BUDGET COVERS THE SEARCH TOO. Putting the search outside it would
+   reintroduce the same arithmetic — an 8 s search plus a 12 s write phase
+   is a 20 s projection however hard each half is. Inside, the whole
+   projection is one number, and a slow search simply leaves less time for
+   writes, which is reported rather than hidden.
+
+   WHAT THE WHOLE ENDPOINT COSTS, worst case, against a 30 s maxDuration:
+
+     ledger append        <=  3 s   (LEDGER_TIMEOUT_MS)
+     projection           <= 12 s   (this budget: search + every write)
+     read, unseal, build,
+     render               <   1 s   (no I/O)
+     ------------------------------------------------
+     total                <= 16 s   leaving ~14 s of headroom
+
+   The headroom is the point. These are not numbers chosen to sum to 30. */
 export const MAX_PROJECTION_CONTACTS = 25;
-export const PROJECTION_DEADLINE_MS = 12000;
+export const PROJECTION_BUDGET_MS = 12000;
+
+/* Below this, a write cannot plausibly complete and starting one only
+   guarantees an abort. The contact is reported unreached instead. */
+export const MIN_WRITE_MS = 500;
 
 /* ---------------------------------------------------------------------
    THE RESPONSE
@@ -518,8 +542,15 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
     return { reason: "hubspot_not_configured" };
   }
 
+  /* THE BUDGET STARTS HERE — before the search, not after it. */
+  const deadline = Date.now() + PROJECTION_BUDGET_MS;
+  /* Never longer than the budget has left, never longer than HubSpot's
+     own default. `remaining()` is the only source of that number. */
+  const remaining = () => deadline - Date.now();
+  const requestMs = () => Math.min(HUBSPOT_TIMEOUT_MS, remaining());
+
   try {
-    const contacts = await findContactsByPhone(phone);
+    const contacts = await findContactsByPhone(phone, { timeoutMs: requestMs() });
     if (!contacts.length) {
       log("operator.action.projection_no_contacts", shape);
       return { reason: "no_contacts" };
@@ -528,15 +559,18 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
     let written = 0;
     let failed = 0;
     let skipped = 0;
-    /* The clock starts AFTER the search, which has its own 8 s bound. */
-    const deadline = Date.now() + PROJECTION_DEADLINE_MS;
 
     for (let i = 0; i < contacts.length; i += 1) {
       const contact = contacts[i];
       /* Counted, never silently dropped: a contact this endpoint chose
          not to reach is a fact the operator is told, not one it hides. */
-      if (i >= MAX_PROJECTION_CONTACTS || Date.now() >= deadline) {
-        skipped = contacts.length - i;
+      if (i >= MAX_PROJECTION_CONTACTS || remaining() < MIN_WRITE_MS) {
+        /* `+=`, not `=`. A write already counted as unreached in the
+           catch below must not be overwritten by this tally, or the
+           counts stop summing to `contacts` and the page silently loses
+           a contact — the arithmetic-that-lies this whole path exists to
+           avoid. written + failed + skipped === contacts, always. */
+        skipped += contacts.length - i;
         break;
       }
       try {
@@ -546,7 +580,11 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
           at: occurredAt,
           current: contact.consent,
         });
-        const result = await writeSuppressionProperties(contact.id, props);
+        /* The remaining budget goes INTO the request, so an overrun
+           aborts the socket instead of outliving the check that let it
+           start. An empty patch never becomes a request at all. */
+        const result = await writeSuppressionProperties(contact.id, props,
+          { timeoutMs: requestMs() });
         if (result.written) {
           written += 1;
           log("operator.action.projection_written", {
@@ -554,8 +592,15 @@ async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
           });
         }
       } catch {
-        /* One contact failing does not stop the rest. */
-        failed += 1;
+        /* THE RULE, and it is about cause rather than symptom: if the
+           budget is gone the write was stopped BY US, so it is reported
+           as unreached — the same thing the operator would be told had it
+           never started, and true in the way that matters to her, which
+           is that trying again may work. Anything else is HubSpot
+           declining, which is `failed`. One contact failing never stops
+           the rest; the deadline check at the top of the loop does. */
+        if (remaining() < MIN_WRITE_MS) skipped += 1;
+        else failed += 1;
       }
     }
     log("operator.action.projection_done", {
