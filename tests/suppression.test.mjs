@@ -1251,14 +1251,23 @@ describe("the HubSpot projection is bounded", () => {
       MessageSid: SID, From: PHONE, Body: "STOP", AccountSid: "AC1",
     }).toString();
 
-    /* The body arrives only LONG after the body-read bound — and, for the
-       avoidance of doubt, after the projection deadline too, so a failure
-       to bound the read would show up as the old behaviour rather than as
-       a timeout. `body` is absent so readFormBody() takes its streaming
-       path. */
-    const stallMs = PROJECTION_DEADLINE_MS + 500;
+    /* THE BODY SIMPLY NEVER ARRIVES. `body` is absent so readFormBody()
+       takes its streaming path, and this mock delivers nothing — which is
+       what "stalls" means, and needs no timer to express.
+
+       AN EARLIER VERSION SCHEDULED "LATE EVENTS" HERE, at
+       PROJECTION_DEADLINE_MS + 500, and then asserted below that they
+       "have already fired by now". They had not: the handler answers at
+       about WEBHOOK_BODY_TIMEOUT_MS, roughly seven seconds earlier, and
+       the timer was unref()'d so it may never have fired at all. It also
+       carried a guard that would have FAILED had it fired, because the
+       listeners it checked for are removed at timeout. A test that claims
+       to exercise something it does not is worse than one that does not
+       claim it — post-timeout `data`, `end` and `error` are exercised for
+       real in the readFormBody section, against an EventEmitter that
+       actually emits them. This test keeps only what it can prove: the
+       handler-level consequences of a body that never came. */
     const handlers = {};
-    let fed = false;
     let destroyed = 0;
     let paused = 0;
     const stalling = {
@@ -1271,23 +1280,7 @@ describe("the HubSpot projection is bounded", () => {
         "x-forwarded-host": "crystalsellstoledo.com",
         "x-twilio-signature": "stub",
       },
-      on(ev, cb) {
-        handlers[ev] = cb;
-        if (!fed) {
-          fed = true;
-          const t = setTimeout(() => {
-            assert.ok(handlers.data && handlers.end,
-              "readFormBody no longer streams - this test would prove nothing");
-            /* LATE EVENTS, fired deliberately after the timeout has already
-               answered. If the listeners were still attached, or if the
-               promise could settle twice, this is what would expose it. */
-            handlers.data(Buffer.from(raw, "utf8"));
-            handlers.end();
-          }, stallMs);
-          if (typeof t.unref === "function") t.unref();
-        }
-        return this;
-      },
+      on(ev, cb) { handlers[ev] = cb; return this; },
       off(ev) { delete handlers[ev]; return this; },
       destroy() { destroyed += 1; this.destroyed = true; },
       pause() { paused += 1; return this; },
@@ -1335,11 +1328,6 @@ describe("the HubSpot projection is bounded", () => {
     assert.equal(paused, 1, "the stalled stream was not paused");
     assert.ok(!handlers.data && !handlers.end,
       "the data/end listeners were left attached after the timeout");
-
-    /* And the late events, which have already fired by now, changed
-       nothing: still 400, still no row, still no HubSpot call. */
-    assert.equal(res.statusCode, 400, "a late end() re-answered the request");
-    assert.equal(calls.length, 0, "a late end() wrote a ledger row");
   });
 
   /* ---- 5. THE RE-OPT-IN PATH IS BOUNDED THE SAME WAY --------------- */
@@ -1484,7 +1472,20 @@ describe("readFormBody time bound", () => {
   });
 
   /* ---- A NORMAL STREAMED BODY -------------------------------------- */
-  test("an ordinary streamed body resolves, and leaves no timer or listeners behind", async () => {
+  /* THE NAME MATTERS HERE. This test used to be called "…leaves no timer
+     or listeners behind", which was FALSE and contradicted the source:
+     readFormBody() DELIBERATELY retains the `error` listener after it
+     settles, because a stream can emit `error` afterwards and an `error`
+     with no listener is THROWN by EventEmitter — which on a serverless
+     runtime kills the invocation after it has already answered.
+
+     So the invariant is not "nothing behind". It is: the timer is
+     cleared, `data` and `end` are removed, `error` is retained and
+     NEUTRALISED, and a late error changes neither the settled result nor
+     the process. That is what is asserted. The retained listener is a
+     design decision, not an oversight, and the test now says so rather
+     than being quietly wrong about it. */
+  test("an ordinary streamed body resolves: timer cleared, data/end removed, error listener retained and inert", async () => {
     const req = fakeReq();
     const p = settle(readFormBody(req, { timeoutMs: 5000 }));
     req.emit("data", Buffer.from(FORM.slice(0, 10), "utf8"));
@@ -1497,17 +1498,31 @@ describe("readFormBody time bound", () => {
     assert.equal(out.v.From, "+14195550123");
     assert.equal(out.v.Body, "STOP");
 
-    /* THE TIMER MUST NOT FIRE AFTER SUCCESS. If it were still armed it
-       would reject an already-resolved promise — invisible — and keep the
-       handle alive. Nothing is destroyed or paused on success. */
+    /* Nothing is destroyed or paused on success. */
     assert.equal(req.destroyCount, 0, "a successful read destroyed the stream");
     assert.equal(req.pauseCount, 0, "a successful read paused the stream");
+
+    /* The two body listeners go. */
     assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
     assert.equal(req.listenerCount("end"), 0, "the end listener was left attached");
 
-    /* Wait past the original bound: a surviving timer would settle again. */
+    /* THE ERROR LISTENER STAYS, ON PURPOSE. Asserted as an invariant so
+       that removing it — which would make the old test name true — fails
+       here instead of failing in production as an uncaught 'error'. */
+    assert.ok(req.listenerCount("error") > 0,
+      "the error listener was removed - a later stream error would be thrown, not absorbed");
+
+    /* AND IT IS INERT: a late error neither throws nor re-settles. */
+    req.emit("error", new Error("ECONNRESET"));
+    assert.equal(out.ok, true, "a late error changed the settled result");
+    assert.equal(out.v.MessageSid, "SM1");
+
+    /* THE TIMER MUST NOT FIRE AFTER SUCCESS. If it were still armed it
+       would reject an already-resolved promise — invisible — and keep the
+       handle alive. Waiting past the original bound would expose it. */
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(out.ok, true);
+    assert.equal(out.v.MessageSid, "SM1", "the settled value changed after the bound elapsed");
   });
 
   /* ---- OVERSIZE STILL WINS ----------------------------------------- */
