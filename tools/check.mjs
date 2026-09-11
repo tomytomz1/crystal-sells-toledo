@@ -1012,6 +1012,64 @@ for (const file of pages) {
       if (/\bBody\b/.test(m[1]))
         fail(webhookRel, "logs the inbound message body - the consent ledger stores it as evidence, a log line is not evidence and is not access-controlled");
 
+    /* 3b. THE PROJECTION IS BOUNDED, AND THE BOUND IS HARD. The webhook's
+           per-contact HubSpot loop runs AFTER the ledger has committed and
+           inside a 15 s maxDuration shared with Twilio's own ~15 s webhook
+           timeout. Unbounded — which it was until 11 September 2026 — a
+           number held by 100 contacts is 100 sequential requests and the
+           function is killed before it can answer.
+
+           Anchored to projectToHubSpot()'s BODY, not to the file. A guard
+           that searched the whole source would be satisfied by the
+           constants merely being declared at the top while the loop that
+           is supposed to honour them no longer did — the shape proved by
+           mutation to be worthless in guard 5 on 10 September 2026. */
+    const projStart = src.indexOf("async function projectToHubSpot");
+    if (projStart === -1)
+      fail(webhookRel, "has no projectToHubSpot - the suppression would reach no contact");
+    else {
+      const nextFn = src.indexOf("\nasync function ", projStart + 1);
+      const projBody = src.slice(projStart, nextFn === -1 ? src.length : nextFn);
+
+      /* THE DEADLINE MUST REACH THE REQUESTS. Checking the clock only
+         between requests bounds when a write may START and says nothing
+         about when it ends: a write beginning a moment before the deadline
+         runs on under HubSpot's own 8 s timeout. Both calls must carry a
+         per-request timeout derived from the remaining budget. */
+      for (const call of ["findContactsByPhone(", "writeSuppressionProperties("]) {
+        const at = projBody.indexOf(call);
+        if (at === -1)
+          fail(webhookRel, `projectToHubSpot does not call ${call}…) - the projection cannot do its job`);
+        else if (!/timeoutMs:\s*requestMs\(\)/.test(projBody.slice(at, at + 220)))
+          fail(webhookRel, `${call}…) in projectToHubSpot is not given \`timeoutMs: requestMs()\` - the deadline would be checked only BETWEEN requests, so a request starting just inside it would run on under HubSpot's own timeout`);
+      }
+
+      /* THE BUDGET MUST BE ABSOLUTE. Derived from handler entry, so the
+         ledger append and the body read spend the same budget rather than
+         stacking on top of a projection-local one. */
+      if (!/const\s+deadline\s*=\s*entry\s*\+\s*PROJECTION_DEADLINE_MS/.test(projBody))
+        fail(webhookRel, "projectToHubSpot does not derive its deadline from handler entry - a projection-local budget stacks on top of the ledger append and the two together can outlive the function");
+      if (!/\bstartedAt\b/.test(projBody))
+        fail(webhookRel, "projectToHubSpot ignores startedAt - its deadline would not be measured from handler entry");
+
+      /* THE REQUEST COUNT MUST BE CAPPED. A phone can match up to 100
+         contacts; the time bound alone would spend the whole budget on
+         them and leave the endpoint no room to answer. */
+      if (!/attempted\s*>=\s*MAX_PROJECTION_CONTACTS/.test(projBody))
+        fail(webhookRel, "projectToHubSpot does not cap attempted writes at MAX_PROJECTION_CONTACTS - up to 100 sequential HubSpot requests would run inside a 15 s function");
+
+      /* EVERY CONTACT LANDS IN EXACTLY ONE BUCKET. The buckets must sum to
+         the contacts found, or the log line quietly loses a contact — the
+         defect this endpoint shipped with, and the one #24 found in the
+         operator action. A bucket that is never incremented is a bucket
+         that does not exist. */
+      for (const bucket of ["written", "unchanged", "failed", "skipped"])
+        if (!new RegExp(`\\b${bucket}\\s*\\+=\\s*1`).test(projBody))
+          fail(webhookRel, `projectToHubSpot never increments \`${bucket}\` - the projection tally would not sum to the contacts found, and a contact would vanish from the record`);
+      if (!/contacts:\s*contacts\.length[\s\S]{0,160}skipped/.test(projBody))
+        fail(webhookRel, "the projection_done log line does not report the population alongside the skipped count - a partial projection could not be told from a complete one");
+    }
+
     /* 4. THE WEBSITE PATH STILL WRITES NO SUPPRESSION. The separation is
           the point: different path, different credential, different
           authority. */
