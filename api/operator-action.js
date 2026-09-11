@@ -98,7 +98,7 @@ import {
 import {
   findContactsByPhone, writeSuppressionProperties, isConfigured, HUBSPOT_TIMEOUT_MS,
 } from "./_lib/hubspot.mjs";
-import { readFormBody, parseFormParams } from "./_lib/twilio.mjs";
+import { readFormBody, parseFormParams, bodyErrorReason } from "./_lib/twilio.mjs";
 import { escapeHtml } from "./_lib/mail.mjs";
 import { log } from "./_lib/log.mjs";
 
@@ -420,11 +420,24 @@ async function handlePost(req, res) {
 
   let params;
   try {
+    /* THE MODULE DEFAULT, 5 s, and taken deliberately rather than by
+       omission. This function has a 30 s maxDuration and no third-party
+       timeout beside it, and its documented worst case is ledger 3 s +
+       projection 12 s + under 1 s of non-I/O ≈ 16 s; 5 s of body read
+       gives ~21 s of 30 and keeps about 9 s of that headroom.
+
+       It is FIVE and not the webhook's three because the sender here is a
+       human on whatever signal she has, and a false timeout costs her the
+       note she typed. Arithmetic: api/_lib/twilio.mjs, BODY_READ_TIMEOUT_MS. */
     params = await readFormBody(req);
   } catch (err) {
-    log("operator.action.refused", {
-      reason: err?.message === "PAYLOAD_TOO_LARGE" ? "too_large" : "unreadable",
-    });
+    /* NOTHING IS WRITTEN, and nothing can be: this returns before the
+       confirmation literal, the scope, the token and the ledger are so
+       much as looked at. A timed-out body is refused whole — never
+       partially parsed — so there is no half-read form to act on.
+       `bodyErrorReason()` yields one of three fixed strings and never
+       touches the body or the operator's note. */
+    log("operator.action.refused", { reason: bodyErrorReason(err) });
     return notice(res, 400, "Not recorded",
       "That submission could not be read. Nothing was recorded.");
   }

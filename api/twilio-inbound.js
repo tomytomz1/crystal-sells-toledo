@@ -81,7 +81,7 @@
 
 import {
   verifyTwilioSignature, readFormBody, optOutType, OPT_OUT_TYPE,
-  twilioConfigured, TWILIO_NOT_CONFIGURED,
+  twilioConfigured, TWILIO_NOT_CONFIGURED, bodyErrorReason,
 } from "./_lib/twilio.mjs";
 import { classifyInbound, classificationLogShape } from "./_lib/optout.mjs";
 import {
@@ -106,6 +106,11 @@ import {
   findContactsByPhone, writeSuppressionProperties, isConfigured, HUBSPOT_TIMEOUT_MS,
 } from "./_lib/hubspot.mjs";
 import { log } from "./_lib/log.mjs";
+
+/* The webhook's own body-read bound. See the call site for why this is
+   tighter than api/_lib/twilio.mjs's default, and that module's
+   BODY_READ_TIMEOUT_MS comment for the full arithmetic. */
+export const WEBHOOK_BODY_TIMEOUT_MS = 3000;
 
 /* Twilio expects TwiML or an empty 200. An empty <Response/> tells it we
    handled the message and want no auto-reply of our own — Twilio's own
@@ -185,17 +190,19 @@ const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>
    sit inside Twilio's 15 s and outside our own clock. It is not spare
    capacity to spend.
 
-   AND WHAT IT DOES NOT BOUND, said out loud because the arithmetic above
-   would otherwise read as a guarantee about the whole function:
-   readFormBody() is bounded in SIZE (MAX_WEBHOOK_BYTES) and NOT IN TIME.
-   A request that stalls mid-body leaves it pending until the platform
-   kills the function, and no deadline here can shorten that. What this
-   bound does guarantee is that such a request costs only itself: the
-   projection is measured from handler entry, so a body read that has
-   already spent the budget leaves nothing for HubSpot and the projection
-   says so, instead of starting a fresh 10 s on top of it. That is not a
-   hypothetical branch — it is the only way `budget_exhausted` below is
-   reached, and tests/suppression.test.mjs reaches it.
+   THE BODY READ IS NOW BOUNDED TOO, and this paragraph used to say the
+   opposite. Until 11 September 2026 readFormBody() was bounded in SIZE
+   and not in time, so a request that stalled mid-body ran until the
+   platform killed the function — and that was the only way
+   `budget_exhausted` below could be reached. It now rejects at
+   WEBHOOK_BODY_TIMEOUT_MS, which this handler turns into a 400 before a
+   single field is interpreted.
+
+   MEASURING FROM HANDLER ENTRY IS STILL LOAD-BEARING, for a different
+   reason than before: it is what keeps the two bounds from STACKING. A
+   projection-local budget would hand a request that had already spent 3 s
+   on its body a fresh 10 s on top of it. Absolute, the body read simply
+   leaves less room, and what is left is reported rather than hidden.
 
    THE BOUND IS HARD, which means the remaining budget is passed INTO each
    HubSpot request and the socket is ABORTED when it runs out — covering
@@ -220,15 +227,24 @@ export const MIN_WRITE_MS = 500;
    aborted mid-flight and reported as a projection failure, which is not
    what happened. An exhausted budget is said out loud instead.
 
-   HOW THIS BRANCH IS ACTUALLY REACHED, since guessing wrong about that is
-   how a "defensive" branch rots. NOT through the ledger: that append is
-   capped at LEDGER_TIMEOUT_MS (3 s) and a hang is cut there and answers
-   503 before this function runs — LEDGER_TIMEOUT_MS + MIN_SEARCH_MS <
-   PROJECTION_DEADLINE_MS, which tests/suppression.test.mjs asserts rather
-   than trusting this sentence to stay true. It is reached through the
-   UNBOUNDED-IN-TIME body read described above: a request that dribbles
-   its body for longer than the deadline arrives here with nothing left to
-   spend. */
+   THIS BRANCH IS NOW UNREACHABLE THROUGH EITHER PRECEDING PHASE, and that
+   is an arithmetic claim rather than a hope. Both are capped, and their
+   caps plus a searchable minimum fit inside this deadline:
+
+     WEBHOOK_BODY_TIMEOUT_MS 3 s + LEDGER_TIMEOUT_MS 3 s + MIN_SEARCH_MS 1 s
+       = 7 s  <  PROJECTION_DEADLINE_MS 10 s
+
+   so the projection always starts with at least 3 s in hand. A hanging
+   ledger is cut at its own timeout and answers 503 before this function
+   runs; a stalled body is refused with a 400 before anything is
+   classified. tests/suppression.test.mjs asserts that inequality rather
+   than trusting this sentence to stay true — change any of the four
+   constants in the wrong direction and it fails.
+
+   THE BRANCH STAYS, because "unreachable by arithmetic" is a property of
+   four numbers that a later change can alter, and the honest answer to an
+   exhausted budget is to say so rather than to start a search that will
+   be aborted in flight and logged as a HubSpot failure. */
 export const MIN_SEARCH_MS = 1000;
 
 function reply(res, status, body = "") {
@@ -312,9 +328,22 @@ export default async function handler(req, res) {
 
   let params;
   try {
-    params = await readFormBody(req);
+    /* THREE SECONDS, not the module default of five. This function has a
+       15 s maxDuration AND Twilio's own ~15 s clock, which starts before
+       ours. The binding path is the UNCLASSIFIED one below: a 3 s body
+       read plus the notification's 8 s deadline plus rendering is about
+       12 s of 15, leaving room for the cold start and the network legs
+       Twilio counts and we do not. At the 5 s default that path would
+       reach ~14 s before Twilio's clock is considered at all.
+       Full arithmetic: api/_lib/twilio.mjs, BODY_READ_TIMEOUT_MS. */
+    params = await readFormBody(req, { timeoutMs: WEBHOOK_BODY_TIMEOUT_MS });
   } catch (err) {
-    log("twilio.inbound.body_rejected", { reason: err?.message === "PAYLOAD_TOO_LARGE" ? "too_large" : "unreadable" });
+    /* FAIL CLOSED, AND INTERPRET NOTHING. A body that never arrived is
+       not a message: it is not classified, not verified, not recorded and
+       not projected — this returns before the signature check, so no
+       field has been read, let alone acted on. `bodyErrorReason()` yields
+       one of three fixed strings and never touches the body. */
+    log("twilio.inbound.body_rejected", { reason: bodyErrorReason(err) });
     return reply(res, 400);
   }
 
