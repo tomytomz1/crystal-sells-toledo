@@ -371,7 +371,18 @@ and `api/_lib/optout.mjs`:
   seconds after HANDLER ENTRY** covering the contact search and every write.
   A phone can match up to 100 contacts and the loop was previously
   unbounded, which could run past the endpoint's 15 s `maxDuration` *after*
-  the ledger commit — costing Twilio its answer, never the suppression. The
+  the ledger commit — costing Twilio its answer, and leaving an arbitrary,
+  **uncounted** subset of contacts unmarked. It could never unwrite the
+  ledger row, which is what the durable record is. **The CRM flags are
+  best-effort operational state, not the evidence** — and, until gate 8, they
+  are the only suppression signal any code here reads at all: `api/lead.js`
+  folds a submission onto a contact's existing flags so a ticked box cannot
+  grant through a suppression, and nothing in `api/` calls
+  `get_suppression_state()`. Two conditions keep an incomplete projection from
+  being a live exposure today — the consent feature is **off in Production**,
+  so even that read does not happen there, and **no automated outbound sender
+  exists**. Neither is a property of this code, which is why **gate 8 must
+  precede activation of any automated outbound SMS or AI voice**. The
   remaining budget is passed **into** each HubSpot request and the socket is
   aborted when it runs out, covering the response **body** and not only its
   headers. The deadline is measured from handler entry rather than from the

@@ -1,9 +1,9 @@
 # Bounding the inbound webhook's HubSpot suppression projection
 
-**11 September 2026.** `api/twilio-inbound.js` only. No environment variable,
-no external system, no database or migration change. The endpoint remains
-**inert**: no Twilio number points at it and `TWILIO_AUTH_TOKEN` is set in no
-environment.
+**11 September 2026.** `api/twilio-inbound.js`, its static guards and its tests.
+No environment variable, no external system, no database or migration change. The
+endpoint remains **inert**: no Twilio number points at it and `TWILIO_AUTH_TOKEN`
+is set in no environment.
 
 ## What was wrong
 
@@ -18,13 +18,46 @@ in the form more than once — is therefore up to 100 sequential requests inside
 function whose `maxDuration` is **15 seconds** (`vercel.json`), sitting behind
 Twilio's own **~15 second** webhook timeout.
 
-**What that costs is not compliance.** The projection runs *after* the ledger
-append has committed, and enforcement resolves suppression by phone number
-against the ledger, so the suppression is already durable and already effective
-when the loop starts. What an overrun costs is **the answer to Twilio**: the
-platform kills the function, Twilio records a webhook failure for a message that
-was in fact handled correctly, and — once webhook retry is configured, which is
-a live-activation prerequisite — redelivers it.
+**What an overrun costs, stated as narrowly as the facts allow.** The projection
+runs *after* the ledger append has committed, so when the loop starts the
+suppression is **durably recorded** — appended to `communication_consent_events`,
+keyed by phone number, and beyond this application's power to amend or delete. An
+overrun cannot unwrite that row, so the **evidence** is not what is at risk.
+
+What *is* at risk is **the answer to Twilio**: the platform kills the function,
+Twilio records a webhook failure for a message that was in fact handled
+correctly, and — once webhook retry is configured, which is a live-activation
+prerequisite — redelivers it. And the **CRM projection itself**: an unbounded
+loop that is killed leaves an arbitrary, **uncounted** subset of contacts
+unmarked.
+
+**What is deliberately not claimed here.** Not that an incomplete projection
+cannot matter. The contract as it actually stands today is:
+
+- a successful ledger append means the suppression or revocation is **durably
+  recorded** — that, and not more;
+- the HubSpot `cst_*` flags are **best-effort operational state**, not the
+  evidence;
+- **gate 8 will make the ledger authoritative at send time**, by resolving
+  suppression through `get_suppression_state()` before anything is sent;
+- **until gate 8 exists, nothing in the application reads that ledger state
+  before sending.** Nothing in `api/` calls `get_suppression_state()`, and the
+  `EXECUTE`-only sender credential is in no environment. The CRM flags are
+  therefore the only suppression signal any code here reads at all —
+  `api/lead.js` folds a submission onto a contact's existing flags so a ticked
+  box cannot grant through a suppression, and that read is of the **flags**,
+  never of the ledger;
+- **because no automated outbound sender is active today** — nothing sends an
+  SMS, nothing places an AI voice call — this is **not a live messaging
+  exposure**. There is no send for an unread suppression to leak past. The
+  consent feature is also **off in Production**, so the flag read above does
+  not happen there either. Both are conditions of the current deployment, not
+  properties of this code;
+- **gate 8 must be in place before outbound automated communications are
+  activated.**
+
+The bound does not change any of that. What it changes is that the shortfall in
+the CRM copy is now **counted and stated** rather than silent.
 
 A second, quieter defect sat in the same loop. An already-suppressed contact
 produces an **empty** property patch; `writeSuppressionProperties()` answers
@@ -102,11 +135,13 @@ step (503 when the append fails); the projection is still best-effort and still
 answers **200 with the empty `<Response/>`** whatever it manages, because by then
 the suppression is durable.
 
-## What the pre-handoff adversarial review found
+## What the reviews found
 
-One material defect, in this pull request's **own first draft**, and it is worth
-recording because it is exactly the failure mode `docs/WORKFLOW.md`'s second
-question asks about.
+**Two material truthfulness defects, both in this pull request's own prose, and
+neither of them in the projection's behaviour.** The implementation shipped at
+`ec5b04f` was not redesigned by either finding.
+
+### 1. Found by the pre-handoff adversarial review, before `ec5b04f`
 
 The source asserted, in prose, that the `budget_exhausted` branch was
 **unreachable** — reasoning that the only phase before the projection which
@@ -126,6 +161,43 @@ The review found nothing further material; the correction delta was re-reviewed
 once, which produced one robustness change in the new test's stream stub and no
 source change.
 
+### 2. Found by independent review of `ec5b04f`, after it was pushed
+
+**The pull request repeatedly claimed that a successful ledger append made the
+suppression "already effective" or "already enforced", and that a projection
+failure could therefore "cost visibility, not compliance". That is false in the
+CURRENT system.**
+
+A successful append makes the suppression **durably recorded**. It does not make
+it *enforced*, because nothing enforces anything yet: gate 8 has not begun,
+nothing in `api/` calls `get_suppression_state()`, the `EXECUTE`-only sender
+credential is in no environment, and no automated outbound sender exists. The
+ledger row is durable, authoritative **evidence**; it is not yet an enforcement
+lookup. Nor can a projection failure be said to cost *only* visibility, since the
+`cst_*` flags are in fact the only suppression signal any code here reads today.
+
+**Root cause:** the claim was inherited. It has been in `api/twilio-inbound.js`'s
+header since the gate 7 SMS implementation merged in
+[#20](https://github.com/tomytomz1/crystal-sells-toledo/pull/20), was repeated
+into the new comments and into every document describing this change, and was
+never checked against what `api/` actually contains — even though this same pull
+request states the true position correctly, in its own answer to the first of
+`docs/WORKFLOW.md`'s two questions. A document contradicting itself is the
+strongest evidence available that the comfortable half was never verified.
+
+Corrected throughout: four statements in `api/twilio-inbound.js` (including the
+pre-existing header claim, since it is a current-design statement in the file
+under review), the `docs/CURRENT-STATE.md` addition, this document, the pull
+request description and the PULSE HANDOFF. **Wording only — no behavioural change
+and no change to the projection implementation**, which the independent review
+explicitly found sound.
+
+**`api/operator-action.js` carries the same inherited claim** — *"once step 2
+succeeds the suppression is already effective and a step 3 failure costs
+visibility, not compliance"* — and is **deliberately NOT changed here.** It is a
+separate merged file outside this change's scope. It is recorded as a follow-up,
+alongside the `readFormBody()` time bound.
+
 ### The two questions, answered
 
 **"If an independent security or compliance reviewer wanted to block this, what
@@ -137,15 +209,20 @@ send-time enforcement is gate 8 and has not begun. So the only suppression signa
 an ordinary lead submission consults is the HubSpot `cst_*` flags, and a contact
 the projection did not reach does not carry them. On a number held by more than
 25 contacts, a later form submission folding consent onto such a contact would
-not see the suppression.
+not see the suppression — with the consent feature on. It is off in Production,
+and no automated outbound sender exists, so neither today nor in either version
+is there a live messaging exposure.
 
 The answer is that this is **strictly better than what it replaces**, not a new
 exposure: unbounded, the function was killed mid-loop, so *more* contacts went
 unwritten and none of them was counted anywhere. The ledger row — the durable
-record, and the one the designed enforcement path reads — is complete and
-unaffected either way, and the shortfall is now **counted and logged**. The real
-fix is gate 8, which is deliberately out of scope here. Which 25 contacts are
-written is HubSpot's search order and is not prioritised.
+record, and the one gate 8's enforcement path is **designed** to read, though
+nothing reads it today — is complete and unaffected either way, and the shortfall
+is now **counted and logged**. No automated outbound sender is active, so there
+is no live messaging exposure in either version. The real fix is gate 8, which is
+deliberately out of scope here and **must precede activation of any automated
+outbound communications**. Which 25 contacts are written is HubSpot's search
+order and is not prioritised.
 
 **"What guarantee does the prose claim that the code does not actually
 guarantee?"**
@@ -227,7 +304,17 @@ Seven new behavioural tests and six new guard-mutation tests. What they prove:
   anything real.
 - **`readFormBody()` is still unbounded in time.** Deliberately left alone — it
   is shared with the signature-verification path and is outside this change's
-  scope. Recorded as a decision for the operator, not as an oversight.
+  scope. Recorded as a **separate follow-up decision for the operator**, not as
+  an oversight, and deliberately not folded into this pull request.
+- **`api/operator-action.js` still carries the inherited "already effective /
+  costs visibility, not compliance" claim**, corrected here only in
+  `api/twilio-inbound.js` and the documents describing this change. A separate
+  follow-up; that file is outside this change's scope.
+- **Gate 8 remains the thing that makes the ledger authoritative at send time,
+  and it has not begun.** Nothing in `api/` reads suppression state before
+  sending. No automated outbound sender exists today, so this is not a live
+  exposure — and **gate 8 must be in place before any automated outbound SMS or
+  AI voice is activated.**
 
 ## What a human must still do
 
@@ -244,6 +331,6 @@ confirmed. All absent today.
 Twilio not activated · no environment variable added or changed · no HubSpot,
 Neon, Retell or Vercel configuration touched · gate 8 not begun · unsuppression
 not designed · `readFormBody()` not bounded in time · `api/operator-action.js`
-not refactored, and its projection not shared with this one — the budgets
+not corrected and not refactored, and its projection not shared with this one — the budgets
 genuinely differ, and rewriting a heavily reviewed inert path for symmetry alone
 is risk without a return.

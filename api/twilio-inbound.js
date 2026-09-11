@@ -15,18 +15,38 @@
  * ---------------------------------------------------------------------
  *   1. verify the signature      — before ANY interpretation of the body
  *   2. classify                  — Twilio's OptOutType if present, else ours
- *   3. append to the ledger      — the durable record, and the enforcement
- *                                  source of truth
+ *   3. append to the ledger      — the durable record, and the DESIGNED
+ *                                  enforcement source of truth; nothing
+ *                                  reads it at send time yet (gate 8)
  *   4. project into HubSpot      — best-effort, for the operator's eyes,
  *                                  and HARD-BOUNDED in both the number of
  *                                  requests and the wall clock
  *
- * Step 3 before step 4 is load-bearing. Enforcement resolves suppression by
- * PHONE NUMBER against the ledger, so once step 3 succeeds the suppression
- * is already effective and a step 4 failure costs visibility, not
- * compliance. That is the only reason this endpoint may answer 200 when
- * HubSpot fails — and it is why it must NEVER answer 200 when the ledger
- * fails.
+ * Step 3 before step 4 is load-bearing, and the reason has to be stated
+ * precisely rather than comfortably.
+ *
+ * Once step 3 succeeds the suppression is DURABLY RECORDED: it is in the
+ * append-only ledger, keyed by phone number, and nothing in this
+ * application can amend or delete it. Step 4 is BEST-EFFORT OPERATIONAL
+ * STATE for the operator's eyes in the CRM.
+ *
+ * WHAT THAT DOES NOT YET MEAN. The ledger is not consulted before sending
+ * anything, because nothing in `api/` calls `get_suppression_state()` —
+ * send-time enforcement is GATE 8 and has NOT BEGUN, and the EXECUTE-only
+ * sender credential is in no environment. So the ledger row is durable,
+ * authoritative EVIDENCE today; it is not yet an enforcement lookup.
+ *
+ * WHY THIS IS NOT A LIVE MESSAGING EXPOSURE. No automated outbound sender
+ * exists: nothing here sends an SMS and nothing places an AI voice call.
+ * There is no send for an unread suppression to leak past.
+ *
+ * GATE 8 MUST BE IN PLACE BEFORE OUTBOUND AUTOMATED COMMUNICATIONS ARE
+ * ACTIVATED. Until it is, the guarantee this endpoint offers is the
+ * durable record and nothing beyond it.
+ *
+ * That is why this endpoint may answer 200 when HubSpot fails — the
+ * evidence is durable and the CRM copy is not the evidence — and why it
+ * must NEVER answer 200 when the ledger fails.
  *
  * ---------------------------------------------------------------------
  * RESPONSE POLICY
@@ -98,9 +118,34 @@ const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>
    findContactsByPhone() returns up to 100 contacts and each write is a
    separate HubSpot request. Run unbounded — which is what this endpoint
    did until now — that is far more work than the 15 s maxDuration allows,
-   and it happens AFTER the ledger append has already committed. So what
-   an overrun costs is not compliance: the suppression is durable and
-   enforcement resolves by number. It costs THE ANSWER TO TWILIO.
+   and it happens AFTER the ledger append has already committed.
+
+   WHAT AN OVERRUN COSTS, stated as narrowly as the facts allow. The
+   durable record is already written and an overrun cannot unwrite it, so
+   the evidence is not at risk. What IS at risk is THE ANSWER TO TWILIO:
+   the function is killed, Twilio records a webhook failure for a message
+   that was in fact handled, and once webhook retry is configured it
+   redelivers. What is also at risk is the CRM projection itself, which is
+   best-effort operational state — an unbounded loop that is killed leaves
+   an arbitrary, UNCOUNTED subset of contacts unmarked, while the bounded
+   loop leaves a counted and stated one.
+
+   NOT SAID HERE, because it would not be true: that an incomplete
+   projection cannot matter. The `cst_*` suppression flags are the only
+   suppression signal any code in this repository reads at all — api/lead.js
+   folds a submission onto a contact's existing state so a ticked box cannot
+   grant through a suppression, and that read is of the FLAGS, never of the
+   ledger. Send-time enforcement against the ledger is GATE 8 and has not
+   begun.
+
+   Two things keep that from being a live exposure today, and both are
+   conditions rather than properties of this code: the consent feature is
+   OFF in Production, so even that read does not happen there; and no
+   automated outbound sender exists, so there is no send for an unread
+   suppression to leak past. Neither is a reason the projection does not
+   matter — they are reasons GATE 8 MUST PRECEDE ACTIVATION. The bound
+   makes the shortfall explicit instead of silent, which is the whole
+   improvement here.
 
    WHY THIS IS NOT api/operator-action.js's 12 SECONDS. That endpoint has
    a 30 s maxDuration and one human waiting for a page. This one has:
@@ -479,8 +524,10 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
 
 /**
  * Flag every contact holding this number. Never throws: by the time this
- * runs the suppression is already durable and already enforced, so a
- * HubSpot outage must not turn into a Twilio retry loop.
+ * runs the suppression is DURABLY RECORDED in the ledger, and this CRM
+ * copy is best-effort operational state rather than the evidence — so a
+ * HubSpot outage must not turn into a Twilio retry loop. It is not yet
+ * read by any send-time enforcement path; that is gate 8.
  *
  * Bounded by MAX_PROJECTION_CONTACTS requests and by an absolute deadline
  * PROJECTION_DEADLINE_MS after handler entry — see the bound above.
@@ -521,9 +568,9 @@ async function projectToHubSpot({ decision, from, occurredAt, shape, startedAt }
   try {
     const contacts = await findContactsByPhone(from, { timeoutMs: requestMs() });
     if (!contacts.length) {
-      /* Nobody in the CRM holds this number. The suppression is recorded
-         and effective regardless — enforcement resolves by number, not by
-         contact. */
+      /* Nobody in the CRM holds this number. The suppression is durably
+         recorded regardless — the ledger is keyed by phone number, not by
+         contact, so an absent contact costs the record nothing. */
       log("twilio.inbound.projection_no_contacts", shape);
       return;
     }
