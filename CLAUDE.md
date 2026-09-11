@@ -66,7 +66,7 @@ Full rationale for 1–12: `docs/PHASE-1-HANDOFF.md` §6 — read it only if a r
 ## Engineering rules earned the hard way
 
 These govern *how* a claim is proved, not what the site says. Each was paid for
-by a defect this project actually shipped; the reasoning behind each one is in
+by a real defect in this project; the reasoning behind each one is in
 `docs/ENGINEERING-LESSONS.md`, which names the incident. **Read that file's
 relevant entry when working in the area it describes — not otherwise.**
 

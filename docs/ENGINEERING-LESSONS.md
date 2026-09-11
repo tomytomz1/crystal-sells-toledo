@@ -44,10 +44,13 @@ promote only what survives them.
 ## 2026-09-11 — Green CI proves the assertions, not the invariant
 
 **Failure**
-[#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28) shipped a time
-bound for `readFormBody()` with `req.destroy()` on every failure path. CI was
-**green**. Against a real socket the client received `ECONNRESET` and never the
-400 the handler believed it had sent.
+An intermediate revision of
+[#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28) — head
+`15443b3`, **never merged to `main`** — added a time bound to `readFormBody()`
+and called `req.destroy()` on every failure path. CI was **green** on that
+revision. Against a real socket the client received `ECONNRESET` and never the
+400 the handler believed it had sent. It was caught by independent review before
+merge; what reached `main` (`6bdb507`) is the corrected version.
 
 **Why it mattered**
 Every refusal the webhook and the operator action make — a stalled body, an
@@ -198,37 +201,73 @@ One match, live: see the entry below.
 ## 2026-09-11 — A material defect triggers a repo-wide pattern search
 
 **Failure**
-After the `req.destroy()` defect was understood, a search for the same
-behavioural pattern found `api/_lib/security.mjs`, which calls `req.destroy()`
-on its oversize path — on **`api/lead.js`, the live lead endpoint**. By the same
-measurement, an oversize lead body cannot deliver its refusal either; the
-visitor gets a connection reset.
+After the `req.destroy()` defect was understood, a search for it found
+`api/_lib/security.mjs`, used by **`api/lead.js`, the live lead endpoint**.
+
+Then the rule failed on its own first outing. The search actually run was
+`grep -rn "\.destroy()" api/` — **an identifier grep**, which is precisely what
+the rule it was documenting forbids. It found the identifier and stopped. A
+second, behavioural pass — prompted by independent review, not by the rule —
+found a second live match in the same function that the identifier grep could
+never have surfaced, because the defect has no identifier in common with the
+first.
 
 **Why it mattered**
-The same defect had been sitting on the **live** path, unexamined, while
-attention was on the inert one. Without the search it would have stayed there.
+Two distinct defects sat on the **live** path while attention was on the inert
+one. And a rule written to prevent exactly this was satisfied *textually* by a
+search that did not do what the rule describes — a green tick over an unmet
+invariant, in the process layer this time instead of the test layer.
 
 **Why existing evidence missed it**
-Nothing looked for it. The defect was treated as belonging to the file it was
-found in.
+Nothing looked for it. The first defect was treated as belonging to the file it
+was found in; the search that corrected that scoped itself to the token the
+first defect happened to use.
 
 **Permanent invariant**
 A material defect is not isolated until the repository has been searched for the
-same **behavioural** pattern — the shape, not the identifier.
+same **behavioural** pattern — the shape, not the identifier. Name the shape in
+words first, then choose queries that could find it written differently. One
+defect can carry more than one shape; enumerate them.
 
 **Required proof**
-A recorded search (the query and its result). Matches outside the current scope
-are **named and sequenced**, never silently folded in: widening a reviewed change
-is how an unrelated regression arrives with a green tick.
+A recorded search: the shape stated in words, the queries, and the result.
+Matches outside the current scope are **named and sequenced**, never silently
+folded in — widening a reviewed change is how an unrelated regression arrives
+with a green tick.
 
 **Repo-wide search result**
-`grep -rn "\.destroy()" api/` → two matches: `api/_lib/twilio.mjs` (fixed in
-#28) and **`api/_lib/security.mjs:143`, live, outstanding**.
+Two shapes, stated in words before querying:
+
+1. *A helper tears down a resource its caller still needs.*
+   `grep -rn "\.destroy()" api/` → `api/_lib/twilio.mjs` (corrected in #28) and
+   **`api/_lib/security.mjs:143`** — live, outstanding.
+2. *An external stream is read to completion with no deadline.* Found by reading
+   every request-body reader in `api/` rather than by token: `readBody()`'s
+   streaming fallback in `api/_lib/security.mjs` registers `data`/`end`/`error`
+   and waits indefinitely. Size-bounded, time-unbounded — the same shape #28
+   fixed in `readFormBody()`. **Live, outstanding, and missed by search 1.**
+
+The claim is narrowed to what was measured. `readBody()` has **three** oversize
+refusal paths — declared `Content-Length`, an already-parsed `req.body`, and
+streaming accumulation — and **only the streaming one** calls `req.destroy()`.
+The two fast paths reject before any teardown and are **not** claimed to be
+defective. Whether Vercel Production reaches the streaming fallback for
+`api/lead.js` at all is **unproven**; it has not been measured, and this file
+does not assert it.
 
 **Promoted rule**
-`CLAUDE.md` § Repo-wide anti-pattern search rule. **`security.mjs` is recorded in
-`docs/CURRENT-STATE.md` as the immediate next runtime task and is deliberately
-not fixed by the process change that created this file.**
+`CLAUDE.md` rule 17 — sharpened to "search the shape, not the identifier",
+because the identifier grep is the failure mode actually observed. **No new
+permanent rule was promoted for the unbounded-read shape.** It is already
+covered: `docs/WORKFLOW.md`'s adversarial-review attack list carries *Timeout
+boundaries* and *Late async work*, and `CLAUDE.md` rule 14 already requires
+real-boundary evidence for it. Adding a rule here would have made the ruleset longer
+without changing a single future decision — which the promotion bar in
+`docs/WORKFLOW.md` § Lesson promotion exists to refuse.
+
+**Both `security.mjs` defects are recorded in `docs/CURRENT-STATE.md` as the
+immediate next runtime task and are deliberately not fixed by the process change
+that created this file.**
 
 ---
 

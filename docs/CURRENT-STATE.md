@@ -601,21 +601,49 @@ function and the sender role; `db/001` is unchanged.
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested, but nothing sends or calls, so nothing calls it in production.
 
-## Known defect on the LIVE lead path — the immediate next runtime task
+## Known defects on the LIVE lead path — the immediate next runtime task
 
-**`api/_lib/security.mjs:143` calls `req.destroy()` on its oversize branch**, and
-`api/lead.js` uses it. That is the same pattern
-[#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28) measured and
-fixed in `api/_lib/twilio.mjs`: `req` and `res` share one socket, so destroying
-the request destroys the response — `res.end()` still succeeds and reports the
-response as ended, while the client receives `ECONNRESET`. An oversize lead
-submission therefore **cannot deliver its refusal**; the visitor gets a
-connection reset and the log records a response that never arrived.
+`api/lead.js` uses `readBody()` from `api/_lib/security.mjs`. That function has
+**three** oversize refusal paths, and they do not behave the same way. Only one
+of them carries the `#28` defect.
 
-**Found by the repo-wide pattern search that #28's defect triggered. Deliberately
-not fixed there, and not fixed by the process change that introduced
-`docs/ENGINEERING-LESSONS.md`.** It is the **immediate next runtime pull
-request**. Unlike the gate 7 endpoints, this one is **live**.
+| Path in `readBody()` | Rejects | Calls `req.destroy()` |
+|---|---|---|
+| declared `Content-Length` over the cap, checked before reading | yes | **no** |
+| an already-parsed `req.body` (the platform supplied it) over the cap | yes | **no** |
+| **streaming accumulation crossing the cap mid-read** | yes | **yes — the defect** |
+
+**Defect 1 — the streaming oversize branch destroys the response.**
+`api/_lib/security.mjs:143` calls `req.destroy()` after rejecting. That is the
+same pattern [#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28)
+measured and fixed in `api/_lib/twilio.mjs`: `req` and `res` share one socket, so
+destroying the request destroys the response — `res.end()` still succeeds and
+reports the response as ended, while the client receives `ECONNRESET`. On this
+path, and **only** this path, the refusal is lost on the wire while the log
+records a delivered response.
+
+The two fast paths reject before any socket teardown and are **not** claimed to
+have this defect. Nothing has measured them as broken, and nothing should say
+they are.
+
+**Defect 2 — the streaming fallback has no time bound.** It registers `data`,
+`end` and `error` and then waits indefinitely. A client that opens a request,
+sends a partial body and stalls holds the invocation until the platform's own
+timeout ends it. This is the size-bounded-but-time-unbounded shape that #28
+fixed in `readFormBody()`; `readBody()` never received the equivalent bound.
+
+**Reachability is unproven.** Whether Vercel's Node runtime populates `req.body`
+for `api/lead.js` in Production — and therefore whether the streaming fallback is
+exercised there at all — **has not been measured**. It is a real code path with
+two real defects; how often production reaches it is an open question, not a
+claim. Treat the fix as correctness work, not as an incident.
+
+**Both were found by repo-wide pattern searches that #28's defect triggered** —
+defect 1 by the resource-ownership search, defect 2 by the unbounded-read search
+that the first pass missed (see `docs/ENGINEERING-LESSONS.md`). Deliberately not
+fixed in #28, and deliberately not fixed by the process change that introduced
+`docs/ENGINEERING-LESSONS.md`. They are the **immediate next runtime pull
+request**. Unlike the gate 7 endpoints, this path is **live**.
 
 ## Where the detail lives
 
