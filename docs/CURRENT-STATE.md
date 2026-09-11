@@ -367,6 +367,27 @@ and `api/_lib/optout.mjs`:
   acted upon**. An invalid signature answers 403 with no field interpreted
   and nothing written. Idempotent by `MessageSid`.
 - **The HubSpot projection** of the suppression flags onto the contact.
+  **HARD-bounded since 11 September 2026: 25 contacts, and a deadline 10
+  seconds after HANDLER ENTRY** covering the contact search and every write.
+  A phone can match up to 100 contacts and the loop was previously
+  unbounded, which could run past the endpoint's 15 s `maxDuration` *after*
+  the ledger commit — costing Twilio its answer, never the suppression. The
+  remaining budget is passed **into** each HubSpot request and the socket is
+  aborted when it runs out, covering the response **body** and not only its
+  headers. The deadline is measured from handler entry rather than from the
+  projection's own start, so the ledger append and the body read spend the
+  same budget instead of stacking on top of it — this is **not** the
+  operator action's 12 seconds, which sits inside a 30 s function with no
+  Twilio timeout beside it. **Every contact found lands in exactly one of
+  four buckets** — written, unchanged, failed, not reached — which always
+  sum to the contacts found; an already-marked contact was previously
+  counted in none of them and vanished from the log line. Six new static
+  guards in `tools/check.mjs`, anchored to the projection's own body.
+  **`api/_lib/twilio.mjs`'s `readFormBody()` remains bounded in SIZE and not
+  in TIME** — a stalled request body can still outlive the function, and the
+  projection's absolute deadline contains its consequence rather than
+  removing its cause. See
+  `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md`.
 
 So `reason_code`, `evidence_text`, `metadata` and the `all` channel are **in use
 by merged code**, not reserved. The claim that depended on them — that this work
