@@ -283,9 +283,9 @@ live matches for either.**
 [#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30) fixed
 `readBody()` so a refusal actually reached the client, and proved it **from the
 client's side** with a real `node:http` server and client. Every assertion was
-about what the visitor received, and every one of them was true.
+about what the client received, and every one of them was true.
 
-It still shipped a protocol defect. Measured on the reviewed revision:
+The revision under review still carried a protocol defect. Measured on it:
 
 ```
 partial body  + 408  ->  Connection: keep-alive, socket left open

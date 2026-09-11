@@ -616,11 +616,16 @@ Two defects lived there, both **live**, and
 
 **What was wrong.** The streaming oversize branch called `req.destroy()`. `req`
 and `res` share one socket, so that destroyed the response the handler still had
-to send: `res.end()` succeeded, `res.writableEnded` became true, and **the
-visitor received `ECONNRESET` while the log recorded a 413 that never left the
-building.** Separately, the streaming fallback registered `data`/`end`/`error`
-with no deadline, so a client that sent part of a body and stalled held the
-invocation until the platform ended it.
+to send: `res.end()` succeeded and `res.writableEnded` became true, so the
+handler was told nothing. **When this branch is exercised against a real local
+`node:http` boundary, the client receives `ECONNRESET` instead of the intended
+refusal**, while the handler logs a 413 it never delivered. Separately, the
+streaming fallback registered `data`/`end`/`error` with **no code-level
+deadline**: if that path was exercised and the client stalled, the read could
+remain pending until an outside/platform limit intervened.
+
+**Both were present in the live endpoint's CODE PATH; neither is claimed to have
+been observed in Production.** See the reachability note below.
 
 **The bound is 5 s**, derived from this endpoint's own budget — 30 s
 `maxDuration`, no third-party clock, a 16 KB cap that a poor mobile uplink

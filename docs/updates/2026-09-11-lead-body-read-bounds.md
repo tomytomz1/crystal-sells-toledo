@@ -43,9 +43,14 @@ req.destroy()  ->  req.destroyed = true AND socket.destroyed = true
                    the client receives ECONNRESET, never the status
 ```
 
-So a visitor whose submission was too long received a **connection reset**, while
-the server logged a `413` it had never delivered. An endpoint that reports
-refusals it did not make is worse than one that fails loudly.
+**When this branch is exercised against a real local `node:http` boundary, the
+client receives `ECONNRESET` while `res.end()` reports success** — so the handler
+logs a `413` it never delivered. An endpoint that reports refusals it did not
+make is worse than one that fails loudly.
+
+**That measurement is local.** It says what the branch does when reached; it does
+**not** say that Vercel Production ever reached it, and **no production visitor is
+claimed to have encountered it.** See the reachability note above.
 
 This is the same defect [#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28)
 measured and fixed in `api/_lib/twilio.mjs`. It was found on the live lead path
@@ -55,9 +60,13 @@ by the repo-wide behavioural search that #28's defect triggered, recorded in
 ### Defect 2 — the streaming read had no deadline
 
 The streaming fallback registered `data`, `end` and `error` and then waited
-indefinitely. A client that opened a request, sent part of a body and stalled
-held the invocation until the platform ended it. `readBody()` had **no
-code-level bound of its own**, only a size bound.
+indefinitely. `readBody()` had **no code-level deadline of its own**, only a size
+bound: **if that path was exercised and the client stalled, the read could remain
+pending until an outside/platform limit intervened.**
+
+Stated that way deliberately. No production invocation is claimed to have stalled
+on it — what is proven is the absence of a bound in code, and that the path was
+present in the live endpoint.
 
 ### Why the existing test suite was green over both
 

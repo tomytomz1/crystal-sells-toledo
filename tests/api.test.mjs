@@ -733,17 +733,23 @@ describe("privacy: visitor-facing failures say what to do (F01)", () => {
 /* =====================================================================
    readBody() AGAINST A REAL node:http SOCKET
    =====================================================================
-   THE TWO DEFECTS THIS SECTION EXISTS TO HAVE CAUGHT, both on the LIVE
-   lead path, both merged and live until #30:
+   THE TWO DEFECTS THIS SECTION EXISTS TO HAVE CAUGHT. Both were
+   PRESENT IN THE LIVE LEAD ENDPOINT'S CODE PATH and merged until #30.
+   WHETHER VERCEL PRODUCTION EVER EXERCISED THE STREAMING BRANCH IS
+   UNPROVEN — the platform may populate req.body first, and that has not
+   been measured — so nothing below claims a production visitor met
+   either one:
 
      1. the streaming oversize branch called req.destroy(). `req` and
         `res` share ONE socket, so that destroyed the response with the
         request. res.end() still succeeds and res.writableEnded still
-        becomes true, so THE HANDLER IS TOLD NOTHING — it logged a 413
-        the visitor never received. The client got ECONNRESET.
-     2. the streaming fallback had no time bound at all. A client that
-        opened a request, sent part of a body and stalled held the
-        invocation until the platform killed it.
+        becomes true, so THE HANDLER IS TOLD NOTHING. When this branch is
+        exercised against a real local node:http boundary, the client
+        receives ECONNRESET instead of the intended refusal, while the
+        handler logs a 413 it never delivered.
+     2. the streaming fallback had no code-level deadline at all. If that
+        path was exercised and the client stalled, the read could remain
+        pending until an outside/platform limit intervened.
 
    WHY THE WHOLE EXISTING SUITE WAS BLIND TO BOTH. tests/helpers.mjs
    mockReq() sets `req.body`, so EVERY pre-existing test in this file
@@ -897,7 +903,7 @@ describe("readBody over a real socket", () => {
     });
 
     assert.equal(seen.clientError, null,
-      `the visitor got ${seen.clientError} instead of a refusal - this is the live lead path`);
+      `the client got ${seen.clientError} instead of a refusal - this is the live lead endpoint's code path`);
     assert.equal(seen.clientStatus, 413);
     assert.equal(JSON.parse(seen.clientBody).code, "PAYLOAD_TOO_LARGE");
   });

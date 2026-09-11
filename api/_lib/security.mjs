@@ -338,9 +338,16 @@ export function readBody(req, { timeoutMs = BODY_READ_TIMEOUT_MS } = {}) {
 
            req.pause()    ->  socket intact, CLIENT GETS THE RESPONSE
 
-         On the live lead path that meant a visitor whose submission was
-         too long received a connection reset while the log recorded a
-         413 that never left the building. pause() is chosen over doing
+         This branch was PRESENT IN THE LIVE LEAD ENDPOINT'S CODE PATH.
+         What is proven is what the measurement above says: when the
+         branch is exercised against a real local node:http boundary, the
+         client receives ECONNRESET while res.end() reports success, so
+         the log records a 413 that never left the building. WHETHER
+         VERCEL PRODUCTION EVER EXERCISED IT IS UNPROVEN — the platform
+         may populate req.body first, and that has not been measured. No
+         production visitor is claimed to have hit it.
+
+         pause() is chosen over doing
          nothing because it stops the flow EXPLICITLY rather than relying
          on the listener removal above having been the last `data`
          listener; the byte cap is unaffected either way.
