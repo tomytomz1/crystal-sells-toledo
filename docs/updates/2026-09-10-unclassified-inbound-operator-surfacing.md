@@ -412,6 +412,11 @@ at send time exactly as a keyword STOP does and **no migration is needed.**
 - **The ledger is authoritative; HubSpot is the projection.** A CRM failure costs
   visibility, not compliance, and never changes the response — and the result page
   states the **actual** outcome, including a partial one.
+
+> **CORRECTED 11 September 2026.** The sentence above is left as written, because a stale claim that survived a merge is worth seeing. It is **false in the current system** and must not be carried forward. A successful ledger append means the suppression or revocation is **durably recorded** — that, and not more. It is not "already effective" or "already enforced": **gate 8 has not begun**, nothing in `api/` calls `get_suppression_state()`, and the `EXECUTE`-only sender credential is in no environment. The HubSpot `cst_*` flags are **best-effort operational state**, not the evidence — and, until gate 8, they are the only suppression signal any code here reads at all. **No automated outbound sender is active today**, so this is not a live messaging exposure; it is why **gate 8 must be in place before outbound automated communications are activated**. See [#26](https://github.com/tomytomz1/crystal-sells-toledo/pull/26) and `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md`.
+>
+> *"The ledger is authoritative"* is true of the **evidence** and is the designed basis for send-time enforcement; it is not true of enforcement today. That a CRM failure never changes the response is unchanged and still correct.
+
 - **The endpoint is inert unless `OPERATOR_ACTION_SECRET` is at least 32 bytes.**
   A short secret is indistinguishable from an absent one.
 

@@ -34,13 +34,33 @@
  * ---------------------------------------------------------------------
  *   1. unseal and validate the token   — nothing is trusted before this
  *   2. append to the ledger            — the durable record, and the
- *                                        enforcement source of truth
+ *                                        DESIGNED enforcement source of
+ *                                        truth; nothing reads it at send
+ *                                        time yet (gate 8)
  *   3. project into HubSpot            — best-effort, for the operator's
  *                                        eyes only
  *
- * Enforcement resolves suppression BY PHONE NUMBER against the ledger, so
- * once step 2 succeeds the suppression is already effective and a step 3
- * failure costs visibility, not compliance.
+ * Step 2 before step 3 is load-bearing, and the reason has to be stated
+ * precisely rather than comfortably.
+ *
+ * Once step 2 succeeds the OPT-OUT is DURABLY RECORDED: it is in the
+ * append-only ledger, keyed by phone number, and nothing in this
+ * application can amend or delete it. Step 3 is BEST-EFFORT OPERATIONAL
+ * STATE for the operator's eyes in the CRM.
+ *
+ * WHAT THAT DOES NOT YET MEAN. The ledger is not consulted before sending
+ * anything, because nothing in `api/` calls `get_suppression_state()` —
+ * send-time enforcement is GATE 8 and has NOT BEGUN, and the EXECUTE-only
+ * sender credential is in no environment. So the ledger row is durable,
+ * authoritative EVIDENCE today; it is not yet an enforcement lookup.
+ *
+ * WHY THIS IS NOT A LIVE MESSAGING EXPOSURE. No automated outbound sender
+ * exists: nothing here sends an SMS and nothing places an AI voice call.
+ * There is no send for an unread opt-out to leak past.
+ *
+ * GATE 8 MUST BE IN PLACE BEFORE OUTBOUND AUTOMATED COMMUNICATIONS ARE
+ * ACTIVATED. Until it is, the guarantee this endpoint offers the operator
+ * is the durable record and nothing beyond it.
  *
  * ---------------------------------------------------------------------
  * WHAT THIS ENDPOINT CANNOT DO
@@ -88,25 +108,61 @@ import { log } from "./_lib/log.mjs";
 export const CONFIRM_LITERAL = "RECORD_OPT_OUT";
 
 /* The three scopes, with NO DEFAULT anywhere in this file. A default here
-   would be the endpoint making the judgement the human is here to make. */
+   would be the endpoint making the judgement the human is here to make.
+
+   ---------------------------------------------------------------------
+   TWO STRINGS PER SCOPE, AND THEY MUST NOT BE MERGED BACK INTO ONE
+   ---------------------------------------------------------------------
+   These strings are rendered in TWO contexts that are true at different
+   times, and a single sentence cannot be true in both:
+
+     beforeRecording  the confirmation page, BEFORE anything is written.
+                      The operator has chosen nothing yet, so this
+                      describes an ACTION SHE MAY TAKE — "Record an SMS
+                      opt-out."
+     afterRecording   the result page, AFTER the ledger append committed.
+                      The decision exists now, so this states WHAT WAS
+                      RECORDED and then tells her WHAT TO DO ABOUT IT.
+
+   One string was used for both until 11 September 2026, and on the result
+   page it rendered as "Recorded. Stop sending SMS." — which reads either
+   as an instruction to Crystal or as a claim that the system has already
+   stopped sending. The second reading is FALSE: send-time enforcement is
+   gate 8 and has not begun, nothing in `api/` calls
+   get_suppression_state(), and no automated outbound sender exists.
+
+   SO afterRecording IS DELIBERATELY AN OPERATOR INSTRUCTION — "Do not
+   send SMS to this number" — addressed to the human reading the page. It
+   must never be rewritten into a claim that anything automated is now
+   enforcing it. When gate 8 lands, THAT is the change that earns a
+   different sentence here; nothing before it does.
+
+   The channel restriction is carried in BOTH, because "which channels
+   this does not cover" is equally true before and after. */
 const SCOPES = Object.freeze({
   sms: {
     channel: CHANNEL.SMS,
     hubspot: SUPPRESSION_SCOPE.SMS,
     label: "Text messages only",
-    detail: "Stop sending SMS. Automated calls are unaffected.",
+    beforeRecording: "Record an SMS opt-out. Automated calls are unaffected.",
+    afterRecording: "SMS opt-out recorded. Do not send SMS to this number. " +
+      "Automated calls are unaffected.",
   },
   ai_voice: {
     channel: CHANNEL.AI_VOICE,
     hubspot: SUPPRESSION_SCOPE.VOICE,
     label: "Automated calls only",
-    detail: "Stop placing automated voice calls. Texts are unaffected.",
+    beforeRecording: "Record an automated-call opt-out. Text messages are unaffected.",
+    afterRecording: "Automated-call opt-out recorded. Do not place automated voice " +
+      "calls to this number. Text messages are unaffected.",
   },
   all: {
     channel: CHANNEL.ALL,
     hubspot: SUPPRESSION_SCOPE.GLOBAL,
     label: "Everything",
-    detail: "Stop all automated contact — texts and automated calls alike.",
+    beforeRecording: "Record an opt-out for both text messages and automated calls.",
+    afterRecording: "Opt-out recorded for text messages and automated calls. Do not " +
+      "send SMS or place automated voice calls to this number.",
   },
 });
 
@@ -128,9 +184,30 @@ const MAX_NOTE_CHARS = 280;
    findContactsByPhone() returns up to 100 contacts, and each write is a
    separate HubSpot request. Run unbounded, that is far more work than the
    30 s maxDuration allows — and it happens AFTER the ledger append has
-   already committed, so what it costs is not compliance but THE
-   OPERATOR'S ANSWER: a platform timeout instead of the page telling her
-   the suppression was recorded.
+   already committed.
+
+   WHAT AN OVERRUN COSTS, stated as narrowly as the facts allow. The
+   durable record is already written and an overrun cannot unwrite it, so
+   the evidence is not at risk. What IS at risk is THE OPERATOR'S ANSWER:
+   a platform timeout instead of the page telling her the record was
+   written — which invites her to record it a second time, and a second
+   scope is a second permanent entry. What is also at risk is the CRM
+   projection itself, which is best-effort operational state.
+
+   NOT SAID HERE, because it would not be true: that an incomplete
+   projection cannot matter. The `cst_*` flags are the only suppression
+   signal any code in this repository reads at all — api/lead.js folds a
+   submission onto a contact's existing flags so a ticked box cannot grant
+   through a suppression, and that read is of the FLAGS, never of the
+   ledger. Send-time enforcement against the ledger is GATE 8 and has not
+   begun.
+
+   Two things keep that from being a live exposure today, and both are
+   conditions of the deployment rather than properties of this code: the
+   consent feature is OFF in Production, so even that read does not happen
+   there; and no automated outbound sender exists, so there is no send for
+   an unread opt-out to leak past. Neither is a reason the projection
+   does not matter — they are reasons GATE 8 MUST PRECEDE ACTIVATION.
 
    A FIRST ATTEMPT AT THIS WAS NOT ACTUALLY A DEADLINE. It checked the
    clock BETWEEN writes, which bounds when a write may START and says
@@ -239,7 +316,7 @@ function notice(res, status, title, body) {
 function confirmationPage(payload, token) {
   const choices = Object.entries(SCOPES).map(([value, s]) => `
         <label><input type="radio" name="scope" value="${escapeHtml(value)}" required> ${escapeHtml(s.label)}</label>
-        <p class="detail">${escapeHtml(s.detail)}</p>`).join("");
+        <p class="detail">${escapeHtml(s.beforeRecording)}</p>`).join("");
 
   return shell("Record an opt-out", `
     <p>This message was not recognised as an opt-out automatically. If the person
@@ -461,9 +538,15 @@ async function handlePost(req, res) {
   /* ---- BEST-EFFORT, AFTER THE RECORD IS ALREADY DURABLE ------------- */
   const projection = await projectToHubSpot({ scope, phone: payload.phone, occurredAt, shape });
 
+  /* `afterRecording` is rendered whole and unsplit: it already opens with
+     what was recorded, so a "Recorded." prefix in front of it would both
+     stutter and re-introduce the ambiguity that wording exists to remove.
+     The <h1> is still "Recorded". The CRM outcome is a SEPARATE sentence
+     below — projectionSentence() — and must stay separate, because this
+     line is true whatever HubSpot did. */
   return page(res, 200, shell("Recorded", `
     <div class="ok">
-      <p><strong>Recorded.</strong> ${escapeHtml(scope.detail)}</p>
+      <p><strong>${escapeHtml(scope.afterRecording)}</strong></p>
       <p class="meta">Recording <strong>${escapeHtml(scope.label.toLowerCase())}</strong>
          again from this email changes nothing — it is the same entry, not a second one.
          Choosing a <strong>different</strong> option records a <strong>separate</strong>
@@ -538,9 +621,11 @@ function projectionSentence(projection) {
 
 /**
  * Flag every contact holding this number. NEVER THROWS: by the time this
- * runs the suppression is already durable and already enforced, so a
- * HubSpot outage must not turn a recorded opt-out into an error page that
- * invites the operator to record it twice.
+ * runs the opt-out is DURABLY RECORDED in the ledger, and this CRM copy
+ * is best-effort operational state rather than the evidence — so a HubSpot
+ * outage must not turn a recorded opt-out into an error page that invites
+ * the operator to record it twice. It is not yet read by any send-time
+ * enforcement path; that is gate 8.
  */
 async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
   if (!consentStateEnabled()) {

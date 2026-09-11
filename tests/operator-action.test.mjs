@@ -2102,3 +2102,132 @@ describe("the operator-action static guards", () => {
     }
   });
 });
+
+/* =====================================================================
+   9  THE PAGE TEXT — true BEFORE recording, true AFTER recording
+   =====================================================================
+   Operator-directed, 11 September 2026.
+
+   `SCOPES` carried ONE string per scope, rendered in two contexts that
+   are true at different times. On the result page it came out as
+   "Recorded. Stop sending SMS." — which reads either as an instruction to
+   Crystal or as a claim that the system has already stopped sending. The
+   second reading is false: gate 8 has not begun, nothing in `api/` calls
+   get_suppression_state(), and no automated outbound sender exists.
+
+   Two strings per scope now. These tests assert the RENDERED TEXT
+   exactly, in both contexts, for all three scopes — the previous suite
+   asserted only /Recorded/ and pinned none of this copy, which is why it
+   could drift in the first place.
+   ===================================================================== */
+describe("the operator-facing page text", () => {
+  /* Written out here rather than imported from the module under test. An
+     assertion that reads its expectation from the thing it is testing
+     passes whatever that thing says, which is no assertion at all. */
+  const BEFORE = {
+    sms: "Record an SMS opt-out. Automated calls are unaffected.",
+    ai_voice: "Record an automated-call opt-out. Text messages are unaffected.",
+    all: "Record an opt-out for both text messages and automated calls.",
+  };
+  const AFTER = {
+    sms: "SMS opt-out recorded. Do not send SMS to this number. " +
+      "Automated calls are unaffected.",
+    ai_voice: "Automated-call opt-out recorded. Do not place automated voice " +
+      "calls to this number. Text messages are unaffected.",
+    all: "Opt-out recorded for text messages and automated calls. Do not " +
+      "send SMS or place automated voice calls to this number.",
+  };
+
+  const getPage = () => callOperator({
+    method: "GET", url: `${ACTION_PATH}?t=${tokenFor()}`, headers: {},
+  });
+
+  /* ---- BEFORE: the confirmation page ------------------------------- */
+  test("the confirmation page offers all three scopes as an ACTION, not a result", async () => {
+    const calls = captureLedger();
+    const res = await getPage();
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 0, "rendering the choices touched the ledger");
+
+    for (const [scope, text] of Object.entries(BEFORE))
+      assert.ok(res.body.includes(text),
+        `the confirmation page does not render the ${scope} choice exactly: ${JSON.stringify(text)}`);
+
+    /* NOTHING HAS BEEN RECORDED YET, so no past-tense wording may appear
+       on this page — the whole hazard is a page that reads as though the
+       decision is already made. */
+    for (const [scope, text] of Object.entries(AFTER))
+      assert.ok(!res.body.includes(text),
+        `the confirmation page renders the ${scope} AFTER-recording wording before anything was recorded`);
+    assert.ok(!/opt-out recorded/i.test(res.body),
+      "the confirmation page claims an opt-out was recorded before one was");
+  });
+
+  /* ---- AFTER: the result page, per scope --------------------------- */
+  for (const scope of ["sms", "ai_voice", "all"]) {
+    test(`recording the ${scope} scope renders its own AFTER wording and no other`, async () => {
+      const calls = captureLedger();
+      const res = await callOperator(validPost({ scope }));
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.length, 1, "the row was not written");
+
+      assert.ok(res.body.includes(AFTER[scope]),
+        `the result page does not render the ${scope} outcome exactly: ${JSON.stringify(AFTER[scope])}`);
+
+      /* THE THREE SCOPES STAY DISTINCT. A page that shows another scope's
+         sentence tells the operator she recorded something she did not. */
+      for (const other of ["sms", "ai_voice", "all"]) {
+        if (other === scope) continue;
+        assert.ok(!res.body.includes(AFTER[other]),
+          `recording ${scope} also rendered the ${other} outcome`);
+      }
+
+      /* And the BEFORE wording is gone: the choice has been made. */
+      assert.ok(!res.body.includes(BEFORE[scope]),
+        `the result page still offers ${scope} as a choice after recording it`);
+
+      /* The heading the failure path is checked against stays put. */
+      assert.ok(res.body.includes(">Recorded<"),
+        "the result page lost its Recorded heading");
+    });
+  }
+
+  /* ---- THE CLAIM THAT MUST NOT COME BACK --------------------------- */
+  test("the result page never claims sending has already been stopped", async () => {
+    captureLedger();
+    const res = await callOperator(validPost({ scope: "sms" }));
+    assert.equal(res.statusCode, 200);
+
+    /* The exact rendering that caused this change. "Recorded." followed
+       by a bare imperative is the ambiguity; the fix is that the sentence
+       now says WHAT WAS RECORDED first and addresses the instruction to
+       the operator. */
+    assert.ok(!res.body.includes("<strong>Recorded.</strong> Stop sending SMS"),
+      "the old ambiguous rendering is back");
+    for (const claim of ["has been stopped", "will be blocked", "is now blocked",
+                         "no longer receive", "automatically stopped"])
+      assert.ok(!res.body.includes(claim),
+        `the result page claims active enforcement: ${JSON.stringify(claim)}`);
+  });
+
+  /* ---- THE STRUCTURE THAT KEEPS BOTH TRUE -------------------------- */
+  test("every scope carries BOTH strings, and they are not the same string", async () => {
+    /* One string reused in both contexts is exactly what was wrong. This
+       reads the module's own table so that a scope added later cannot
+       quietly ship with one string, or with the same text in both. */
+    const src = readFileSync(join(REPO, "api/operator-action.js"), "utf8");
+    const scopes = src.slice(src.indexOf("const SCOPES = Object.freeze({"),
+      src.indexOf("const MAX_NOTE_CHARS"));
+    const befores = [...scopes.matchAll(/beforeRecording:\s*([\s\S]*?),\n\s*afterRecording:/g)];
+    const afters = [...scopes.matchAll(/afterRecording:\s*([\s\S]*?),\n\s*\},/g)];
+    assert.equal(befores.length, 3, "not every scope has a beforeRecording string");
+    assert.equal(afters.length, 3, "not every scope has an afterRecording string");
+    for (let i = 0; i < 3; i += 1)
+      assert.notEqual(befores[i][1].trim(), afters[i][1].trim(),
+        "a scope uses the same string before and after recording - the two contexts are true at different times");
+    /* And the result page must not reach for the pre-recording wording. */
+    assert.ok(!/shell\("Recorded"[\s\S]*?scope\.beforeRecording/.test(src),
+      "the result page renders the BEFORE-recording wording");
+  });
+});
