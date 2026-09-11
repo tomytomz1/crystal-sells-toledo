@@ -394,11 +394,15 @@ and `api/_lib/optout.mjs`:
   sum to the contacts found; an already-marked contact was previously
   counted in none of them and vanished from the log line. Six new static
   guards in `tools/check.mjs`, anchored to the projection's own body.
-  **`api/_lib/twilio.mjs`'s `readFormBody()` remains bounded in SIZE and not
-  in TIME** — a stalled request body can still outlive the function, and the
-  projection's absolute deadline contains its consequence rather than
-  removing its cause. See
-  `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md`.
+  **`api/_lib/twilio.mjs`'s `readFormBody()` is now bounded in TIME as well
+  as in size, since 11 September 2026** — 3 s for the webhook, a 5 s default
+  for the operator action, rejecting with `BODY_READ_TIMED_OUT` and
+  cancelling the read rather than letting a stalled body outlive the
+  function. With both preceding phases capped, the projection's
+  `budget_exhausted` branch is now unreachable by arithmetic
+  (3 + 3 + 1 < 10) and is retained deliberately. See
+  `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md` and
+  `docs/updates/2026-09-11-readformbody-time-bound.md`.
 
 So `reason_code`, `evidence_text`, `metadata` and the `all` channel are **in use
 by merged code**, not reserved. The claim that depended on them — that this work

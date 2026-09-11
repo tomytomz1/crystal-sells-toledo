@@ -26,6 +26,8 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { createHmac } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { pathToFileURL } from "node:url";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -35,6 +37,8 @@ import {
   parseFormParams, optOutType, twilioConfigured,
   TWILIO_TOKEN_VAR, TWILIO_NOT_CONFIGURED, TWILIO_SIGNATURE_MISSING,
   TWILIO_SIGNATURE_INVALID, TWILIO_URL_UNRESOLVABLE,
+  readFormBody, bodyErrorReason, BODY_READ_TIMEOUT_MS, BODY_READ_TIMED_OUT,
+  MAX_WEBHOOK_BYTES,
 } from "../api/_lib/twilio.mjs";
 import {
   classifyInbound, normalise, classificationLogShape, OPT_OUT_RULES, STOP_KEYWORDS,
@@ -55,8 +59,10 @@ import {
 import { phoneSearchVariants, HUBSPOT_TIMEOUT_MS } from "../api/_lib/hubspot.mjs";
 import { SUPPRESSION_SCOPE, applySuppression, canSendSms, canPlaceAutomatedVoiceCall } from "../api/_lib/permission.mjs";
 import { SUPPRESSION_REASON, FEATURE_FLAG } from "../api/_lib/consent.mjs";
+import { NOTIFICATION_DEADLINE_MS } from "../api/_lib/mail.mjs";
 import inboundHandler, {
   MAX_PROJECTION_CONTACTS, PROJECTION_DEADLINE_MS, MIN_WRITE_MS, MIN_SEARCH_MS,
+  WEBHOOK_BODY_TIMEOUT_MS,
 } from "../api/twilio-inbound.js";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1185,6 +1191,12 @@ describe("the HubSpot projection is bounded", () => {
   test("the ledger's own cap always leaves the projection a searchable budget", () => {
     assert.ok(LEDGER_TIMEOUT_MS + MIN_SEARCH_MS < PROJECTION_DEADLINE_MS,
       `a ${LEDGER_TIMEOUT_MS}ms ledger append plus a ${MIN_SEARCH_MS}ms minimum search does not fit inside the ${PROJECTION_DEADLINE_MS}ms projection deadline - the projection could start with no budget`);
+    /* AND SO DOES THE BODY READ, since 11 September 2026. Both phases
+       before the projection are capped now, so `budget_exhausted` is
+       unreachable by arithmetic rather than by hope — and this is the
+       assertion that notices if any of the four constants moves. */
+    assert.ok(WEBHOOK_BODY_TIMEOUT_MS + LEDGER_TIMEOUT_MS + MIN_SEARCH_MS < PROJECTION_DEADLINE_MS,
+      `a ${WEBHOOK_BODY_TIMEOUT_MS}ms body read plus a ${LEDGER_TIMEOUT_MS}ms ledger append plus a ${MIN_SEARCH_MS}ms minimum search does not fit inside the ${PROJECTION_DEADLINE_MS}ms projection deadline`);
     /* And the whole endpoint still fits its function budget, which is the
        reason the deadline is 10 s here and 12 s in the operator action. */
     assert.ok(PROJECTION_DEADLINE_MS + 1000 < 15000,
@@ -1222,32 +1234,31 @@ describe("the HubSpot projection is bounded", () => {
       `the handler took ${elapsed}ms - the ledger cap did not bound it below the projection deadline`);
   });
 
-  /* SO WHAT DOES REACH IT: THE BODY READ, which is bounded in SIZE
-     (MAX_WEBHOOK_BYTES) and NOT IN TIME. readFormBody() resolves when the
-     stream ends, and a request that dribbles its body holds it open for as
-     long as it likes.
+  /* THE BODY READ IS NOW BOUNDED TOO, AND THIS TEST RECORDS THE CHANGE.
 
-     THIS IS THE REGRESSION FOR A DEFECT IN THIS PULL REQUEST'S OWN FIRST
-     DRAFT, found by the pre-handoff review: the source asserted in prose
-     that `budget_exhausted` was unreachable because the ledger was capped,
-     having never checked whether anything ELSE before the projection was
-     bounded in time. It is not. The prose claimed a guarantee the code did
-     not make — the exact failure docs/WORKFLOW.md's second question asks
-     about — and the branch is reachable, which is what this proves.
+     Until 11 September 2026 readFormBody() was bounded in SIZE and not in
+     time, and a request that dribbled its body was the ONLY way to reach
+     `budget_exhausted`. The test that stood here proved exactly that.
 
-     It is also what makes the ABSOLUTE deadline load-bearing rather than
-     merely tidy: a projection-local budget would hand a stalled request a
-     fresh 10 s on top of the time it had already burned. */
-  test("a request that stalls its body past the deadline skips the search and says so", async () => {
+     It no longer can, and that is the point: the body read is refused at
+     WEBHOOK_BODY_TIMEOUT_MS, long before the projection deadline, so the
+     handler answers 400 having interpreted nothing. What this test asserts
+     is the new, stronger behaviour — a stalled body costs the request and
+     NOTHING ELSE: no classification, no ledger row, no HubSpot call. */
+  test("a request that stalls its body is refused, and nothing is classified or written", async () => {
     const raw = new URLSearchParams({
       MessageSid: SID, From: PHONE, Body: "STOP", AccountSid: "AC1",
     }).toString();
 
-    /* A request whose body arrives only after the deadline has passed.
-       `body` is deliberately absent so readFormBody() takes its streaming
-       path, and the stream is fed once the LAST listener is attached. */
+    /* The body arrives only LONG after the body-read bound — and, for the
+       avoidance of doubt, after the projection deadline too, so a failure
+       to bound the read would show up as the old behaviour rather than as
+       a timeout. `body` is absent so readFormBody() takes its streaming
+       path. */
     const stallMs = PROJECTION_DEADLINE_MS + 500;
     const handlers = {};
+    let fed = false;
+    let destroyed = 0;
     const stalling = {
       method: "POST",
       url: "/api/twilio-inbound",
@@ -1260,27 +1271,26 @@ describe("the HubSpot projection is bounded", () => {
       },
       on(ev, cb) {
         handlers[ev] = cb;
-        /* Scheduled once, on the FIRST listener, rather than on a
-           particular one: readFormBody() attaches data, end and error in
-           the same tick, and keying the timer to the last of them by name
-           would silently never fire — and hang this test rather than fail
-           it — if that order ever changed. */
-        if (!this._fed) {
-          this._fed = true;
-          setTimeout(() => {
+        if (!fed) {
+          fed = true;
+          const t = setTimeout(() => {
             assert.ok(handlers.data && handlers.end,
               "readFormBody no longer streams - this test would prove nothing");
+            /* LATE EVENTS, fired deliberately after the timeout has already
+               answered. If the listeners were still attached, or if the
+               promise could settle twice, this is what would expose it. */
             handlers.data(Buffer.from(raw, "utf8"));
             handlers.end();
           }, stallMs);
+          if (typeof t.unref === "function") t.unref();
         }
         return this;
       },
-      destroy() {},
+      off(ev) { delete handlers[ev]; return this; },
+      destroy() { destroyed += 1; this.destroyed = true; },
     };
 
     const calls = captureExecutor();
-    /* Any HubSpot call at all is the failure this test looks for. */
     let reached = 0;
     globalThis.fetch = async () => {
       reached += 1;
@@ -1288,22 +1298,43 @@ describe("the HubSpot projection is bounded", () => {
     };
 
     const res = mockRes();
+    const started = Date.now();
     const { parsed } = await projectionLines(() => inboundHandler(stalling, res));
+    const elapsed = Date.now() - started;
 
-    /* The message was still classified and the suppression still recorded:
-       the budget costs the projection and nothing above it. */
-    assert.equal(calls.length, 1, "the durable record was lost to a slow body read");
-    assert.equal(res.statusCode, 200, "an exhausted budget changed what Twilio was told");
+    /* BOUNDED, and bounded at the BODY read rather than at anything later. */
+    assert.ok(elapsed < WEBHOOK_BODY_TIMEOUT_MS + 1500,
+      `the handler took ${elapsed}ms against a ${WEBHOOK_BODY_TIMEOUT_MS}ms body-read bound`);
+    assert.ok(elapsed < PROJECTION_DEADLINE_MS,
+      `the handler took ${elapsed}ms - it outlived the projection deadline, so the body read is not bounded`);
 
-    assert.equal(reached, 0, "a search was started with no budget left to run it");
-    const skipped = skipLine(parsed);
-    assert.ok(skipped, "no projection_skipped line was logged");
-    assert.equal(skipped.reason, "budget_exhausted",
-      "an exhausted budget was reported as something else");
-    /* AND NOT AS A HUBSPOT FAILURE, which is the wrong story about the
-       same facts: nothing was asked of HubSpot, so nothing declined. */
-    assert.ok(!parsed.some((o) => o && o.event === "twilio.inbound.projection_failed"),
-      "an exhausted budget was reported as a HubSpot failure");
+    /* FAIL CLOSED, AND INTERPRET NOTHING. */
+    assert.equal(res.statusCode, 400, "a stalled body was not refused");
+    assert.equal(calls.length, 0, "a ledger row was written from a body that never arrived");
+    assert.equal(reached, 0, "HubSpot was called for a body that never arrived");
+    assert.ok(!parsed.some((o) => o && String(o.event || "").startsWith("twilio.inbound.projection")),
+      "a projection ran on a timed-out body");
+    assert.ok(!parsed.some((o) => o && o.event === "twilio.inbound.ledger_appended"),
+      "something was classified and recorded from a timed-out body");
+
+    /* The refusal says WHY, in a fixed vocabulary, and carries no body. */
+    const rejected = parsed.find((o) => o && o.event === "twilio.inbound.body_rejected");
+    assert.ok(rejected, "no body_rejected line was logged");
+    assert.equal(rejected.reason, "timed_out",
+      "a timed-out body was reported as something else");
+
+    /* THE READ WAS ACTUALLY CANCELLED, not merely ignored: the stream was
+       destroyed, and the listeners were removed so the late data/end above
+       reached nothing. A test that only checked the status code would pass
+       against an implementation that left the stream running forever. */
+    assert.equal(destroyed, 1, "the stalled stream was never destroyed");
+    assert.ok(!handlers.data && !handlers.end,
+      "the data/end listeners were left attached after the timeout");
+
+    /* And the late events, which have already fired by now, changed
+       nothing: still 400, still no row, still no HubSpot call. */
+    assert.equal(res.statusCode, 400, "a late end() re-answered the request");
+    assert.equal(calls.length, 0, "a late end() wrote a ledger row");
   });
 
   /* ---- 5. THE RE-OPT-IN PATH IS BOUNDED THE SAME WAY --------------- */
@@ -1347,5 +1378,239 @@ describe("the HubSpot projection is bounded", () => {
     assert.equal(calls.length, 1, "the durable record was lost to a projection failure");
     assert.match(res.body, /<Response><\/Response>/,
       "the empty TwiML Twilio expects was not returned");
+  });
+});
+
+/* =====================================================================
+   8  readFormBody() IS BOUNDED IN TIME, NOT ONLY IN SIZE
+   =====================================================================
+   Carried forward from PR #26 and PR #27, and a prerequisite for Twilio
+   activation. The streaming path used to resolve only on the stream's own
+   `end`, so a client that stalled held the promise pending until the
+   platform killed the function.
+
+   THE FAKE REQUEST IS A REAL EventEmitter, deliberately. A hand-rolled
+   stub would let listener removal and the "error with no listener throws"
+   rule be whatever the test wanted them to be — and those are two of the
+   things most worth proving here.
+   ===================================================================== */
+describe("readFormBody time bound", () => {
+  const FORM = "MessageSid=SM1&From=%2B14195550123&Body=STOP";
+
+  /** A request whose body never arrives unless this test makes it. */
+  function fakeReq({ contentLength = Buffer.byteLength(FORM) } = {}) {
+    const req = new EventEmitter();
+    req.method = "POST";
+    req.url = "/api/twilio-inbound";
+    req.headers = {
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": String(contentLength),
+    };
+    req.destroyed = false;
+    req.destroyCount = 0;
+    req.destroy = function destroy() {
+      this.destroyCount += 1;
+      this.destroyed = true;
+    };
+    return req;
+  }
+
+  const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e }));
+
+  /* ---- A STREAM THAT NEVER ENDS ------------------------------------ */
+  test("a body that never arrives is rejected, not awaited forever", async () => {
+    const req = fakeReq();
+    const started = Date.now();
+    const out = await settle(readFormBody(req, { timeoutMs: 120 }));
+    const elapsed = Date.now() - started;
+
+    assert.equal(out.ok, false, "a body that never arrived resolved");
+    assert.equal(out.e.token, BODY_READ_TIMED_OUT);
+    assert.equal(bodyErrorReason(out.e), "timed_out");
+    assert.ok(elapsed < 1000, `took ${elapsed}ms - the bound did not fire`);
+
+    /* CANCELLED, not merely ignored. */
+    assert.equal(req.destroyCount, 1, "the stalled stream was never destroyed");
+    assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
+    assert.equal(req.listenerCount("end"), 0, "the end listener was left attached");
+  });
+
+  /* ---- SOME BYTES, THEN A STALL ------------------------------------ */
+  test("a body that starts and then stalls is rejected, and nothing partial is returned", async () => {
+    const req = fakeReq();
+    const p = settle(readFormBody(req, { timeoutMs: 120 }));
+    req.emit("data", Buffer.from("MessageSid=SM1&Bo", "utf8"));
+    const out = await p;
+
+    assert.equal(out.ok, false, "a half-arrived body resolved");
+    assert.equal(out.e.token, BODY_READ_TIMED_OUT);
+    /* CLAUDE.md rule 11: reject, never truncate. Nothing partial escapes. */
+    assert.equal(out.v, undefined);
+    assert.equal(req.destroyCount, 1);
+  });
+
+  /* ---- LATE EVENTS AFTER THE TIMEOUT ------------------------------- */
+  test("data and end arriving after the timeout change nothing and throw nothing", async () => {
+    const req = fakeReq();
+    const out = await settle(readFormBody(req, { timeoutMs: 60 }));
+    assert.equal(out.e.token, BODY_READ_TIMED_OUT);
+
+    /* The stream keeps going, as a real stalled socket might. None of this
+       may resurrect the request, double-settle, or throw. */
+    req.emit("data", Buffer.from(FORM, "utf8"));
+    req.emit("end");
+    /* An `error` with no listener THROWS on an EventEmitter, which on a
+       serverless runtime takes the invocation down after the answer has
+       been sent. The absorbing listener is why this does not. */
+    assert.ok(req.listenerCount("error") > 0,
+      "no error listener remains - a post-timeout stream error would throw");
+    req.emit("error", new Error("ECONNRESET"));
+
+    await new Promise((r) => setImmediate(r));
+    assert.equal(req.destroyCount, 1, "destroy() ran more than once");
+  });
+
+  /* ---- A NORMAL STREAMED BODY -------------------------------------- */
+  test("an ordinary streamed body resolves, and leaves no timer or listeners behind", async () => {
+    const req = fakeReq();
+    const p = settle(readFormBody(req, { timeoutMs: 5000 }));
+    req.emit("data", Buffer.from(FORM.slice(0, 10), "utf8"));
+    req.emit("data", Buffer.from(FORM.slice(10), "utf8"));
+    req.emit("end");
+    const out = await p;
+
+    assert.equal(out.ok, true, "a complete body was rejected");
+    assert.equal(out.v.MessageSid, "SM1");
+    assert.equal(out.v.From, "+14195550123");
+    assert.equal(out.v.Body, "STOP");
+
+    /* THE TIMER MUST NOT FIRE AFTER SUCCESS. If it were still armed it
+       would reject an already-resolved promise — invisible — and keep the
+       handle alive. The stream is NOT destroyed on success. */
+    assert.equal(req.destroyCount, 0, "a successful read destroyed the stream");
+    assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
+    assert.equal(req.listenerCount("end"), 0, "the end listener was left attached");
+
+    /* Wait past the original bound: a surviving timer would settle again. */
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(out.ok, true);
+  });
+
+  /* ---- OVERSIZE STILL WINS ----------------------------------------- */
+  test("oversize is still refused, by declared length and by actual bytes", async () => {
+    const declared = await settle(readFormBody(
+      fakeReq({ contentLength: MAX_WEBHOOK_BYTES + 1 }), { timeoutMs: 5000 }));
+    assert.equal(declared.ok, false);
+    assert.equal(declared.e.token, "PAYLOAD_TOO_LARGE");
+    assert.equal(bodyErrorReason(declared.e), "too_large");
+
+    /* And when the declared length lies, the running total still catches
+       it — before the time bound, and without waiting for it. */
+    const req = fakeReq();
+    const p = settle(readFormBody(req, { timeoutMs: 5000 }));
+    req.emit("data", Buffer.alloc(MAX_WEBHOOK_BYTES + 1));
+    const actual = await p;
+    assert.equal(actual.ok, false);
+    assert.equal(actual.e.token, "PAYLOAD_TOO_LARGE");
+    assert.equal(req.destroyCount, 1, "an oversize stream was not stopped");
+    assert.equal(req.listenerCount("data"), 0);
+  });
+
+  /* ---- THE FAST PATHS ARE NOT DELAYED ------------------------------ */
+  test("a pre-parsed string or object body resolves immediately and arms no timer", async () => {
+    const asString = fakeReq();
+    asString.body = FORM;
+    const s = Date.now();
+    const outString = await readFormBody(asString, { timeoutMs: 1 });
+    /* timeoutMs: 1 is the proof. If the fast path armed a timer at all,
+       a 1 ms bound would race it and this would be flaky-to-failing. */
+    assert.equal(outString.MessageSid, "SM1");
+    assert.ok(Date.now() - s < 50);
+    assert.equal(asString.listenerCount("data"), 0, "the fast path attached a stream listener");
+
+    const asObject = fakeReq();
+    asObject.body = { MessageSid: "SM2", From: "+14195550123", Empty: null };
+    const outObject = await readFormBody(asObject, { timeoutMs: 1 });
+    assert.equal(outObject.MessageSid, "SM2");
+    assert.equal(outObject.Empty, "", "a null value was not flattened to an empty string");
+    assert.equal(asObject.listenerCount("data"), 0);
+
+    /* An oversize pre-parsed string is still refused. */
+    const big = fakeReq();
+    big.body = "x".repeat(MAX_WEBHOOK_BYTES + 1);
+    const outBig = await settle(readFormBody(big, { timeoutMs: 5000 }));
+    assert.equal(outBig.e.token, "PAYLOAD_TOO_LARGE");
+  });
+
+  /* ---- A STREAM ERROR STILL REJECTS -------------------------------- */
+  test("a stream error rejects and is not reported as a timeout", async () => {
+    const req = fakeReq();
+    const p = settle(readFormBody(req, { timeoutMs: 5000 }));
+    req.emit("error", new Error("ECONNRESET"));
+    const out = await p;
+    assert.equal(out.ok, false);
+    assert.notEqual(out.e.token, BODY_READ_TIMED_OUT);
+    assert.equal(bodyErrorReason(out.e), "unreadable");
+  });
+
+  /* ---- THE MUTATION PROOF ------------------------------------------ */
+  /* The assertions above pass against the fixed module. This proves they
+     would NOT pass against the code they replaced — run against a
+     THROWAWAY COPY of the tree with the bound removed, never against the
+     deployment candidate, and never by breaking the working tree. */
+  test("without the bound, the same stalled request never settles", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cst-body-bound-"));
+    try {
+      const lib = join(dir, "twilio.mjs");
+      const src = readFileSync(join(REPO, "api/_lib/twilio.mjs"), "utf8");
+
+      /* TWO EDITS, and both are stated rather than hidden.
+
+         1. The timer that arms the bound — the mutation under test.
+         2. The `twilio` package import, which cannot resolve from a
+            temp directory outside the repo. It is used ONLY by
+            verifyTwilioSignature(), which this test never calls, and the
+            reference lives inside a function body so the module still
+            loads. readFormBody() itself is byte-identical to the real
+            one apart from edit 1, which is the whole point. */
+      const TIMER = "const timer = setTimeout(() => finish(bodyError(BODY_READ_TIMED_OUT)), Math.max(1, timeoutMs));";
+      const IMPORT = 'import twilio from "twilio";';
+      assert.ok(src.includes(TIMER),
+        "the bound's timer moved - this mutation would prove nothing");
+      assert.ok(src.includes(IMPORT), "the twilio import moved");
+      const mutated = src
+        .replace(TIMER, "const timer = { unref() {} };")
+        .replace(IMPORT, "const twilio = { validateRequest() { throw new Error('not used here'); } };");
+      assert.notEqual(mutated, src, "the mutation changed nothing");
+      /* The ONLY difference inside readFormBody is the disarmed timer. */
+      const fn = (t) => t.slice(t.indexOf("export function readFormBody"),
+        t.indexOf("/* ---------------------------------------------------------------------\n   OptOutType"));
+      assert.equal(fn(mutated), fn(src).replace(TIMER, "const timer = { unref() {} };"),
+        "the copy differs from the real readFormBody by more than the timer");
+      writeFileSync(lib, mutated);
+
+      const { readFormBody: unbounded } = await import(pathToFileURL(lib).href);
+
+      const req = fakeReq();
+      const race = await Promise.race([
+        settle(unbounded(req, { timeoutMs: 60 })),
+        new Promise((r) => setTimeout(() => r("STILL_PENDING"), 400)),
+      ]);
+      assert.equal(race, "STILL_PENDING",
+        "the pre-fix implementation settled - the bound is not what makes the fixed one settle");
+      assert.equal(req.destroyCount, 0, "the pre-fix implementation cancelled the read");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /* ---- THE CALL SITE THE WEBHOOK ACTUALLY USES --------------------- */
+  test("the webhook's bound is tighter than the module default, and fits its budget", () => {
+    assert.ok(WEBHOOK_BODY_TIMEOUT_MS < BODY_READ_TIMEOUT_MS,
+      "the webhook no longer overrides the default - it shares Twilio's ~15 s clock and needs the tighter bound");
+    /* The unclassified path is the binding one: body + notification +
+       rendering must leave room inside a 15 s maxDuration. */
+    assert.ok(WEBHOOK_BODY_TIMEOUT_MS + NOTIFICATION_DEADLINE_MS + 1000 < 15000,
+      `a ${WEBHOOK_BODY_TIMEOUT_MS}ms body read plus a ${NOTIFICATION_DEADLINE_MS}ms notification does not leave room inside the 15 s maxDuration`);
   });
 });

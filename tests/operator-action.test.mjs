@@ -30,6 +30,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -54,7 +55,8 @@ import {
   NOTIFICATION_SUBJECT_PREFIX, NOTIFICATION_DEADLINE_MS, NOTIFICATION_TIMED_OUT,
 } from "../api/_lib/mail.mjs";
 import { SUPPRESSION_REASON, FEATURE_FLAG } from "../api/_lib/consent.mjs";
-import { TWILIO_TOKEN_VAR } from "../api/_lib/twilio.mjs";
+import { TWILIO_TOKEN_VAR, BODY_READ_TIMEOUT_MS } from "../api/_lib/twilio.mjs";
+import { LEDGER_TIMEOUT_MS } from "../api/_lib/consent-ledger.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -2229,5 +2231,118 @@ describe("the operator-facing page text", () => {
     /* And the result page must not reach for the pre-recording wording. */
     assert.ok(!/shell\("Recorded"[\s\S]*?scope\.beforeRecording/.test(src),
       "the result page renders the BEFORE-recording wording");
+  });
+});
+
+/* =====================================================================
+   10  A TIMED-OUT POST BODY WRITES NOTHING
+   =====================================================================
+   readFormBody() gained a hard time bound on 11 September 2026. This
+   endpoint is its OTHER caller, and the requirement here is different
+   from the webhook's: not "fail closed before classifying" but "fail
+   closed before WRITING". A suppression cannot be undone, so a body that
+   never arrived must not produce one.
+
+   This endpoint takes the module default rather than the webhook's
+   tighter override, so the test waits the real 5 s — the point is the
+   behaviour of the shipped configuration, not of an injected one.
+   ===================================================================== */
+describe("a POST whose body never arrives", () => {
+  /** A POST that attaches its stream listeners and then simply stalls. */
+  function stallingReq() {
+    const req = new EventEmitter();
+    req.method = "POST";
+    req.url = ACTION_PATH;
+    req.headers = {
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": "120",
+    };
+    req.destroyed = false;
+    req.destroyCount = 0;
+    req.destroy = function destroy() {
+      this.destroyCount += 1;
+      this.destroyed = true;
+    };
+    return req;
+  }
+
+  test("nothing is written, nothing is projected, and the refusal says why", async () => {
+    const calls = captureLedger();
+    let reached = 0;
+    globalThis.fetch = async () => {
+      reached += 1;
+      throw new Error("NETWORK_NOT_ALLOWED_IN_TESTS");
+    };
+
+    const req = stallingReq();
+    const started = Date.now();
+    const { result: res, text } = await capturingLogs(() => callOperator(req));
+    const elapsed = Date.now() - started;
+
+    /* BOUNDED by the module default, and nowhere near the 30 s
+       maxDuration this endpoint is given. */
+    assert.ok(elapsed >= BODY_READ_TIMEOUT_MS - 250,
+      `answered in ${elapsed}ms - faster than the ${BODY_READ_TIMEOUT_MS}ms bound, so something else refused it`);
+    assert.ok(elapsed < BODY_READ_TIMEOUT_MS + 2000,
+      `took ${elapsed}ms against a ${BODY_READ_TIMEOUT_MS}ms bound`);
+
+    /* THE INVARIANT THAT MATTERS: a suppression cannot be undone, so a
+       body that never arrived must not have produced one. */
+    assert.equal(calls.length, 0, "a ledger row was written from a body that never arrived");
+    assert.equal(reached, 0, "HubSpot was called for a body that never arrived");
+
+    assert.equal(res.statusCode, 400, "a timed-out POST was not refused");
+    assert.match(res.body, /Not recorded/);
+    assert.ok(!/>Recorded</.test(res.body), "the success page was rendered for a timed-out body");
+
+    /* A fixed refusal vocabulary, and no body in the log. */
+    assert.match(text, /"reason":"timed_out"/,
+      "a timed-out body was not reported as timed_out");
+
+    /* The read was cancelled rather than left running. */
+    assert.equal(req.destroyCount, 1, "the stalled stream was never destroyed");
+    assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
+
+    /* Late events cannot resurrect it. */
+    req.emit("data", Buffer.from("t=x&scope=all&confirm=" + CONFIRM_LITERAL, "utf8"));
+    req.emit("end");
+    await new Promise((r) => setImmediate(r));
+    assert.equal(calls.length, 0, "a late end() wrote a ledger row");
+    assert.equal(res.statusCode, 400, "a late end() re-answered the request");
+  });
+
+  /* THE ARITHMETIC, asserted rather than left in a comment. This endpoint
+     takes the 5 s default; the webhook overrides to 3 s because it shares
+     Twilio's ~15 s clock. Both numbers have to fit their own function
+     budget, and this is the half the webhook's suite cannot check. */
+  test("the body bound fits inside this endpoint's 30 s budget, with headroom left", () => {
+    const worstCase = BODY_READ_TIMEOUT_MS + LEDGER_TIMEOUT_MS + PROJECTION_BUDGET_MS + 1000;
+    assert.ok(worstCase < 30000,
+      `body ${BODY_READ_TIMEOUT_MS}ms + ledger ${LEDGER_TIMEOUT_MS}ms + projection ${PROJECTION_BUDGET_MS}ms + rendering = ${worstCase}ms, which does not fit the 30 s maxDuration in vercel.json`);
+    /* The headroom is the point, per the projection bound's own comment:
+       spending it all would make the sum a prediction rather than a bound. */
+    assert.ok(30000 - worstCase >= 8000,
+      `only ${30000 - worstCase}ms of headroom remains against the 30 s maxDuration`);
+  });
+
+  test("an ordinary streamed POST still works", async () => {
+    const calls = captureLedger();
+    const body = new URLSearchParams({
+      t: tokenFor(), scope: "sms", confirm: CONFIRM_LITERAL,
+    }).toString();
+
+    const req = stallingReq();
+    req.headers["content-length"] = String(Buffer.byteLength(body));
+    const p = callOperator(req);
+    /* Fed on the next tick, the way a real stream would arrive. */
+    setImmediate(() => {
+      req.emit("data", Buffer.from(body, "utf8"));
+      req.emit("end");
+    });
+    const res = await p;
+
+    assert.equal(res.statusCode, 200, "a normally streamed POST was refused");
+    assert.equal(calls.length, 1, "the row was not written");
+    assert.equal(req.destroyCount, 0, "a successful read destroyed the stream");
   });
 });
