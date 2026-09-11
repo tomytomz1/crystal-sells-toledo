@@ -182,6 +182,68 @@ export const MAX_WEBHOOK_BYTES = 16 * 1024;
    --------------------------------------------------------------------- */
 export const BODY_READ_TIMEOUT_MS = 5000;
 
+/* ---------------------------------------------------------------------
+   IS THERE BODY THIS SERVER HAS NOT CONSUMED?
+   ---------------------------------------------------------------------
+   A PURE PREDICATE. It reads `req` and changes nothing — not the
+   request, not the response, not the socket. That is deliberate and is
+   the whole reason it can live beside readFormBody() without repeating
+   the resource-ownership error #28 paid for: it ANSWERS A QUESTION about
+   the request, and the caller's RESPONSE BOUNDARY decides what to do
+   with the answer.
+
+   WHY THE ANSWER MATTERS. Both gate 7 endpoints can answer while a
+   declared request body is still outstanding — before the read (a wrong
+   method, an unconfigured endpoint, a token in the query string) and on
+   a refusal part-way through it. Measured on the live lead path in #30
+   and measured again for BOTH gate 7 endpoints on a raw socket before
+   this predicate existed: the response went out carrying
+   `Connection: keep-alive` and the socket survived, so the response's
+   own framing metadata advertises a connection this server may never
+   serve — it becomes usable again only once the client sends the rest of
+   the body it declared, which on a stalled read is by definition what it
+   did not do. A client that pools connections, which is all of them, can
+   reuse one that will not be served.
+
+   THE SIGNAL IS THE REQUEST'S OWN STATE, NOT WHICH BRANCH REFUSED.
+   `req.complete` answers "has this whole request been received?" and
+   needs no caller to know how or why the body read ended.
+
+   `=== false` AND NOT `!req.complete`. `undefined` means UNKNOWN — a
+   mock, a platform object, a runtime that does not set it — and an
+   unknown keeps today's behaviour rather than closing on a guess.
+
+   AND `complete === false` ALONE IS TOO BLUNT. Measured in #30: a
+   BODYLESS request reports `complete === false` at handler entry too,
+   simply because Node has not yet emitted the end of a body that does
+   not exist. Closing on that alone disables keep-alive for every scanner
+   probe and every ordinary GET. So the question asked is the narrower
+   one that actually matters, and it has two affirmative answers:
+   a chunked body, whose end is wherever the terminating chunk turns out
+   to be; or a declared, non-empty `Content-Length`.
+
+   THE CONSERVATIVE EDGE, inherited from #30 with its reasoning intact.
+   On the already-parsed `req.body` path the platform may have consumed
+   the stream before the handler ran, in which case nothing is
+   outstanding. THIS CODE CANNOT TRUTHFULLY KNOW THAT, and Vercel's
+   behaviour there is unmeasured. One avoidable teardown on a refused
+   submission is cheap; advertising reuse over bytes nobody read is a
+   lie.
+
+   `api/lead.js` DELIBERATELY KEEPS ITS OWN COPY of this rule. The live
+   lead path was fixed and proven in #30 and is not refactored to share
+   this one — see docs/updates/2026-09-11-gate-7-connection-lifecycle.md.
+   --------------------------------------------------------------------- */
+export function bodyStillOutstanding(req) {
+  /* Not known to be incomplete -> nothing is outstanding. */
+  if (req?.complete !== false) return false;
+  /* Chunked: an unconsumed chunked body always has something outstanding. */
+  if (String(req.headers?.["transfer-encoding"] || "")) return true;
+  /* Otherwise only a declared, non-empty body can still be in flight. */
+  const declared = Number(req.headers?.["content-length"] || 0);
+  return Number.isFinite(declared) && declared > 0;
+}
+
 /** Stable, PII-free. Never carries a byte of the body. */
 export const BODY_READ_TIMED_OUT = "BODY_READ_TIMED_OUT";
 export const PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE";
@@ -351,12 +413,25 @@ export function readFormBody(req, { timeoutMs = BODY_READ_TIMEOUT_MS } = {}) {
          socket is still alive afterwards. So a client that stalls or
          overruns gets its refusal and MAY HOLD THE CONNECTION OPEN.
 
-         That is a resource question, not a correctness one, and it is
-         bounded outside this function: the platform ends the invocation
-         at maxDuration whatever the socket does. Closing it deliberately
-         means setting `Connection: close` and tearing down after the
-         response has flushed — which requires `res`, which this function
-         does not have and must not be given.
+         THAT SENTENCE USED TO END "a resource question, not a
+         correctness one". IT WAS WRONG, and the misclassification — not
+         merely the wording — was overturned by independent review of #30
+         and corrected here on 11 September 2026. The response's own
+         framing metadata is FALSE for exactly the case it is sent in: it
+         advertises a reusable connection that becomes usable again only
+         once the client sends the rest of the body it declared, which on
+         a stalled or refused read is by definition what it did not do.
+         That is protocol correctness, and maxDuration bounds the cost
+         without making the header true.
+
+         THE FIX IS NOT IN HERE, and that is the point. Closing the
+         connection means setting `Connection: close` on the response and
+         letting Node flush and close — which requires `res`, which this
+         function does not have and MUST NOT BE GIVEN. The decision
+         belongs at the caller's RESPONSE BOUNDARY, which is where both
+         gate 7 endpoints now make it, using the pure
+         `bodyStillOutstanding()` predicate above. `api/lead.js` has made
+         the same decision in its own `send()` since #30.
 
          THE RULE, stated so it is not re-derived wrongly: this function
          reads a body. IT DOES NOT OWN THE SOCKET — the caller does,
