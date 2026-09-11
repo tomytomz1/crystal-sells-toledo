@@ -660,6 +660,11 @@ dropdown option and no new scope**: `crm.objects.contacts.read` and
   (`get_suppression_state()`), never against HubSpot. So a failed projection costs
   **visibility, not compliance** — the same sentence the webhook's header comment
   already uses, and the same reason it may answer 200 when HubSpot fails.
+
+> **CORRECTED 11 September 2026.** The sentence above is left as written, because a stale claim that survived a merge is worth seeing. It is **false in the current system** and must not be carried forward. A successful ledger append means the suppression or revocation is **durably recorded** — that, and not more. It is not "already effective" or "already enforced": **gate 8 has not begun**, nothing in `api/` calls `get_suppression_state()`, and the `EXECUTE`-only sender credential is in no environment. The HubSpot `cst_*` flags are **best-effort operational state**, not the evidence — and, until gate 8, they are the only suppression signal any code here reads at all. **No automated outbound sender is active today**, so this is not a live messaging exposure; it is why **gate 8 must be in place before outbound automated communications are activated**. See [#26](https://github.com/tomytomz1/crystal-sells-toledo/pull/26) and `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md`.
+>
+> Note what this bullet records about itself: it adopted the claim *because the webhook's header comment already used it*. That is the propagation path, written down at the moment it happened — the claim was inherited, never verified, and copying a sentence forward is not verification.
+
 - The POST therefore reports **success once the ledger append is confirmed**, and
   says on the result page whether the CRM projection also succeeded. A partial
   outcome is shown, not hidden — but it is not a failure.

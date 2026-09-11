@@ -64,6 +64,10 @@ suppression is already effective and a step 4 failure costs visibility, not
 compliance. That is the only reason the endpoint may answer 200 when HubSpot
 fails — and exactly why it must never answer 200 when the ledger fails.
 
+> **CORRECTED 11 September 2026.** The sentence above is left as written, because a stale claim that survived a merge is worth seeing. It is **false in the current system** and must not be carried forward. A successful ledger append means the suppression or revocation is **durably recorded** — that, and not more. It is not "already effective" or "already enforced": **gate 8 has not begun**, nothing in `api/` calls `get_suppression_state()`, and the `EXECUTE`-only sender credential is in no environment. The HubSpot `cst_*` flags are **best-effort operational state**, not the evidence — and, until gate 8, they are the only suppression signal any code here reads at all. **No automated outbound sender is active today**, so this is not a live messaging exposure; it is why **gate 8 must be in place before outbound automated communications are activated**. See [#26](https://github.com/tomytomz1/crystal-sells-toledo/pull/26) and `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md`.
+>
+> The ordering rule and the response policy are unchanged and still right; `api/twilio-inbound.js`'s own header was corrected at `17f689f`. Step 3 in the table above is better read as *"the durable record, and what enforcement **will** read"*.
+
 Both orderings are pinned by static guards that were run against a deliberately
 broken copy of the tree, not merely written.
 

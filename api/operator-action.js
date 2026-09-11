@@ -34,13 +34,33 @@
  * ---------------------------------------------------------------------
  *   1. unseal and validate the token   — nothing is trusted before this
  *   2. append to the ledger            — the durable record, and the
- *                                        enforcement source of truth
+ *                                        DESIGNED enforcement source of
+ *                                        truth; nothing reads it at send
+ *                                        time yet (gate 8)
  *   3. project into HubSpot            — best-effort, for the operator's
  *                                        eyes only
  *
- * Enforcement resolves suppression BY PHONE NUMBER against the ledger, so
- * once step 2 succeeds the suppression is already effective and a step 3
- * failure costs visibility, not compliance.
+ * Step 2 before step 3 is load-bearing, and the reason has to be stated
+ * precisely rather than comfortably.
+ *
+ * Once step 2 succeeds the OPT-OUT is DURABLY RECORDED: it is in the
+ * append-only ledger, keyed by phone number, and nothing in this
+ * application can amend or delete it. Step 3 is BEST-EFFORT OPERATIONAL
+ * STATE for the operator's eyes in the CRM.
+ *
+ * WHAT THAT DOES NOT YET MEAN. The ledger is not consulted before sending
+ * anything, because nothing in `api/` calls `get_suppression_state()` —
+ * send-time enforcement is GATE 8 and has NOT BEGUN, and the EXECUTE-only
+ * sender credential is in no environment. So the ledger row is durable,
+ * authoritative EVIDENCE today; it is not yet an enforcement lookup.
+ *
+ * WHY THIS IS NOT A LIVE MESSAGING EXPOSURE. No automated outbound sender
+ * exists: nothing here sends an SMS and nothing places an AI voice call.
+ * There is no send for an unread opt-out to leak past.
+ *
+ * GATE 8 MUST BE IN PLACE BEFORE OUTBOUND AUTOMATED COMMUNICATIONS ARE
+ * ACTIVATED. Until it is, the guarantee this endpoint offers the operator
+ * is the durable record and nothing beyond it.
  *
  * ---------------------------------------------------------------------
  * WHAT THIS ENDPOINT CANNOT DO
@@ -128,9 +148,30 @@ const MAX_NOTE_CHARS = 280;
    findContactsByPhone() returns up to 100 contacts, and each write is a
    separate HubSpot request. Run unbounded, that is far more work than the
    30 s maxDuration allows — and it happens AFTER the ledger append has
-   already committed, so what it costs is not compliance but THE
-   OPERATOR'S ANSWER: a platform timeout instead of the page telling her
-   the suppression was recorded.
+   already committed.
+
+   WHAT AN OVERRUN COSTS, stated as narrowly as the facts allow. The
+   durable record is already written and an overrun cannot unwrite it, so
+   the evidence is not at risk. What IS at risk is THE OPERATOR'S ANSWER:
+   a platform timeout instead of the page telling her the record was
+   written — which invites her to record it a second time, and a second
+   scope is a second permanent entry. What is also at risk is the CRM
+   projection itself, which is best-effort operational state.
+
+   NOT SAID HERE, because it would not be true: that an incomplete
+   projection cannot matter. The `cst_*` flags are the only suppression
+   signal any code in this repository reads at all — api/lead.js folds a
+   submission onto a contact's existing flags so a ticked box cannot grant
+   through a suppression, and that read is of the FLAGS, never of the
+   ledger. Send-time enforcement against the ledger is GATE 8 and has not
+   begun.
+
+   Two things keep that from being a live exposure today, and both are
+   conditions of the deployment rather than properties of this code: the
+   consent feature is OFF in Production, so even that read does not happen
+   there; and no automated outbound sender exists, so there is no send for
+   an unread opt-out to leak past. Neither is a reason the projection
+   does not matter — they are reasons GATE 8 MUST PRECEDE ACTIVATION.
 
    A FIRST ATTEMPT AT THIS WAS NOT ACTUALLY A DEADLINE. It checked the
    clock BETWEEN writes, which bounds when a write may START and says
@@ -538,9 +579,11 @@ function projectionSentence(projection) {
 
 /**
  * Flag every contact holding this number. NEVER THROWS: by the time this
- * runs the suppression is already durable and already enforced, so a
- * HubSpot outage must not turn a recorded opt-out into an error page that
- * invites the operator to record it twice.
+ * runs the opt-out is DURABLY RECORDED in the ledger, and this CRM copy
+ * is best-effort operational state rather than the evidence — so a HubSpot
+ * outage must not turn a recorded opt-out into an error page that invites
+ * the operator to record it twice. It is not yet read by any send-time
+ * enforcement path; that is gate 8.
  */
 async function projectToHubSpot({ scope, phone, occurredAt, shape }) {
   if (!consentStateEnabled()) {
