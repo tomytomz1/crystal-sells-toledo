@@ -108,25 +108,61 @@ import { log } from "./_lib/log.mjs";
 export const CONFIRM_LITERAL = "RECORD_OPT_OUT";
 
 /* The three scopes, with NO DEFAULT anywhere in this file. A default here
-   would be the endpoint making the judgement the human is here to make. */
+   would be the endpoint making the judgement the human is here to make.
+
+   ---------------------------------------------------------------------
+   TWO STRINGS PER SCOPE, AND THEY MUST NOT BE MERGED BACK INTO ONE
+   ---------------------------------------------------------------------
+   These strings are rendered in TWO contexts that are true at different
+   times, and a single sentence cannot be true in both:
+
+     beforeRecording  the confirmation page, BEFORE anything is written.
+                      The operator has chosen nothing yet, so this
+                      describes an ACTION SHE MAY TAKE — "Record an SMS
+                      opt-out."
+     afterRecording   the result page, AFTER the ledger append committed.
+                      The decision exists now, so this states WHAT WAS
+                      RECORDED and then tells her WHAT TO DO ABOUT IT.
+
+   One string was used for both until 11 September 2026, and on the result
+   page it rendered as "Recorded. Stop sending SMS." — which reads either
+   as an instruction to Crystal or as a claim that the system has already
+   stopped sending. The second reading is FALSE: send-time enforcement is
+   gate 8 and has not begun, nothing in `api/` calls
+   get_suppression_state(), and no automated outbound sender exists.
+
+   SO afterRecording IS DELIBERATELY AN OPERATOR INSTRUCTION — "Do not
+   send SMS to this number" — addressed to the human reading the page. It
+   must never be rewritten into a claim that anything automated is now
+   enforcing it. When gate 8 lands, THAT is the change that earns a
+   different sentence here; nothing before it does.
+
+   The channel restriction is carried in BOTH, because "which channels
+   this does not cover" is equally true before and after. */
 const SCOPES = Object.freeze({
   sms: {
     channel: CHANNEL.SMS,
     hubspot: SUPPRESSION_SCOPE.SMS,
     label: "Text messages only",
-    detail: "Stop sending SMS. Automated calls are unaffected.",
+    beforeRecording: "Record an SMS opt-out. Automated calls are unaffected.",
+    afterRecording: "SMS opt-out recorded. Do not send SMS to this number. " +
+      "Automated calls are unaffected.",
   },
   ai_voice: {
     channel: CHANNEL.AI_VOICE,
     hubspot: SUPPRESSION_SCOPE.VOICE,
     label: "Automated calls only",
-    detail: "Stop placing automated voice calls. Texts are unaffected.",
+    beforeRecording: "Record an automated-call opt-out. Text messages are unaffected.",
+    afterRecording: "Automated-call opt-out recorded. Do not place automated voice " +
+      "calls to this number. Text messages are unaffected.",
   },
   all: {
     channel: CHANNEL.ALL,
     hubspot: SUPPRESSION_SCOPE.GLOBAL,
     label: "Everything",
-    detail: "Stop all automated contact — texts and automated calls alike.",
+    beforeRecording: "Record an opt-out for both text messages and automated calls.",
+    afterRecording: "Opt-out recorded for text messages and automated calls. Do not " +
+      "send SMS or place automated voice calls to this number.",
   },
 });
 
@@ -280,7 +316,7 @@ function notice(res, status, title, body) {
 function confirmationPage(payload, token) {
   const choices = Object.entries(SCOPES).map(([value, s]) => `
         <label><input type="radio" name="scope" value="${escapeHtml(value)}" required> ${escapeHtml(s.label)}</label>
-        <p class="detail">${escapeHtml(s.detail)}</p>`).join("");
+        <p class="detail">${escapeHtml(s.beforeRecording)}</p>`).join("");
 
   return shell("Record an opt-out", `
     <p>This message was not recognised as an opt-out automatically. If the person
@@ -502,9 +538,15 @@ async function handlePost(req, res) {
   /* ---- BEST-EFFORT, AFTER THE RECORD IS ALREADY DURABLE ------------- */
   const projection = await projectToHubSpot({ scope, phone: payload.phone, occurredAt, shape });
 
+  /* `afterRecording` is rendered whole and unsplit: it already opens with
+     what was recorded, so a "Recorded." prefix in front of it would both
+     stutter and re-introduce the ambiguity that wording exists to remove.
+     The <h1> is still "Recorded". The CRM outcome is a SEPARATE sentence
+     below — projectionSentence() — and must stay separate, because this
+     line is true whatever HubSpot did. */
   return page(res, 200, shell("Recorded", `
     <div class="ok">
-      <p><strong>Recorded.</strong> ${escapeHtml(scope.detail)}</p>
+      <p><strong>${escapeHtml(scope.afterRecording)}</strong></p>
       <p class="meta">Recording <strong>${escapeHtml(scope.label.toLowerCase())}</strong>
          again from this email changes nothing — it is the same entry, not a second one.
          Choosing a <strong>different</strong> option records a <strong>separate</strong>
