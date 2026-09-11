@@ -3,7 +3,12 @@
 **Date** 11 September 2026
 **Pull request** [#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30)
 **Files** `api/_lib/security.mjs`, `api/lead.js`, `tests/api.test.mjs`,
-`tests/helpers.mjs`, `docs/CURRENT-STATE.md`, `docs/ENGINEERING-LESSONS.md`
+`tests/helpers.mjs`, `CLAUDE.md`, `docs/CURRENT-STATE.md`,
+`docs/ENGINEERING-LESSONS.md`, `docs/updates/2026-09-11-readformbody-time-bound.md`
+
+**Revised after independent review.** The first revision (`2416c375`) fixed two
+defects and introduced a third classification error; see *"Correction — the
+connection lifecycle"* below. Three defects are fixed in total.
 
 This document assumes no repository access and no memory of earlier sessions.
 
@@ -13,8 +18,14 @@ This document assumes no repository access and no memory of earlier sessions.
 
 `api/lead.js` is the only server-side entry point for website leads. It reads the
 request body through `readBody()` in `api/_lib/security.mjs`. That function had
-three ways to refuse an oversize body and one streaming fallback, and **two
-defects lived on the streaming path only**.
+three ways to refuse an oversize body and one streaming fallback. **Two defects
+were present in the streaming branch of that code path**, and a third — the
+connection lifecycle, covered further below — affected every early response the
+endpoint makes, streaming or not.
+
+Whether Vercel Production reaches the streaming fallback at all is **unproven**
+throughout this document, so the first two are described as present in the live
+endpoint's code path rather than as observed in Production.
 
 ### Defect 1 — the refusal was destroyed along with the request
 
@@ -151,8 +162,11 @@ an incomplete upload `BAD_REQUEST` tells the visitor — and anyone later readin
 the logs — that they sent something wrong, which is a claim this endpoint cannot
 support. `code` is machine-readable and is held to the same standard as prose.
 
-Returning here is safe: no body was read, so no lead was created, and a repeated
-submission duplicates nothing. `assets/js/main.js` treats every non-2xx alike —
+Returning here is safe: **no complete body was accepted**, so no lead was
+created, and a repeated submission duplicates nothing. (Bytes usually *have* been
+read on the timeout path — that is exactly what the tests exercise. What holds is
+that nothing is handed to the parser, the partial bytes are discarded, and no
+lead-processing step runs.) `assets/js/main.js` treats every non-2xx alike —
 it reads `code` for analytics and shows `message` — so **the visitor-facing
 behaviour is unchanged** and the form keeps their input either way. **This
 document makes no claim about how any particular browser or intermediary reacts
@@ -169,7 +183,7 @@ validate → consent evidence → ledger → HubSpot → acknowledgement.
 
 ## Test results
 
-`npm run test:unit` — **108 tests, 108 passing, 0 failing.**
+`npm run test:unit` — **119 tests, 119 passing, 0 failing.**
 
 The new section drives a **real `node:http` server and client** and asserts from
 the client's side, because the invariant is what the client receives and a stub
@@ -187,6 +201,22 @@ the client's side, because the invariant is what the client receives and a stub
 | oversize already-parsed `req.body` still refused | client |
 | **the real `api/lead.js` handler** stops at the body read and never reaches delivery | client |
 | **control:** a complete body over the same socket *does* reach delivery (503) | client |
+
+Connection-lifecycle proofs, added after independent review. These use a **raw
+socket** and observe for a fixed window with **nothing torn down**, because the
+earlier harness destroyed the connection as soon as the response was seen —
+which is precisely what must not be measured through:
+
+| Proof | Observed |
+|---|---|
+| partial body + 408 → complete refusal, `Connection: close`, server closes, nothing further dispatched | client |
+| chunked oversize + 413 → same | client |
+| declared-length oversize + 413 → same, whether the client sent the body or not | client |
+| pre-parsed refusal → closes, because this server did not consume the body | client |
+| **a bodyless refused request keeps keep-alive** — nothing is outstanding | client |
+| **an ordinary complete request keeps keep-alive and the connection is reused** (two requests, two responses) | client |
+| a pre-body refusal (405 with a declared body) also closes | client |
+| a stream error whose message spells a token answers **400**, not 413 | client |
 
 **How the streaming branch is actually reached**, measured against a real client
 on a throwaway copy of the tree with the two branches temporarily given distinct
@@ -256,6 +286,145 @@ wait** (`ms < 1000`). The stronger claim is verifiable by reading — both paths
 
 ---
 
+## Correction — the connection lifecycle (independent review of `2416c375`)
+
+### The finding
+
+The first revision fixed *delivery* and proved it from the client's side. It did
+not fix the **exchange**. Measured on `2416c375` with a raw socket:
+
+```
+partial body      + 408  ->  Connection: keep-alive, socket left open
+chunked oversize  + 413  ->  Connection: keep-alive, socket left open
+declared oversize + 413  ->  Connection: keep-alive, socket left open
+complete body     + 200  ->  Connection: keep-alive, and a second request
+                             on that connection IS served
+```
+
+The endpoint answered while part of the request body was still unread and still
+advertised a persistent connection. A further measurement shows the connection
+becomes usable again **only if the client subsequently sends the rest of the body
+it declared** — which, on the timeout path, is by definition what it did not do.
+
+So the response's own framing metadata was false for exactly the case it was sent
+in. A client that pools connections — all of them do — can reuse one the server
+will not serve and stall. **That is protocol correctness, not a resource leak**,
+and the previous revision classified it wrongly in the source, in
+`CURRENT-STATE`, in this document and in the pull-request description.
+
+**What was NOT reproduced.** Against Node's own parser, in both the `pause()` and
+the no-`pause()` variants, outstanding body bytes were **not** dispatched as a
+second request — Node counts them as body. **No smuggled request was observed
+here**, and none is claimed. The behaviour of any intermediary in front of this
+function has not been measured.
+
+**On the specification.** The current HTTP standard could not be retrieved from
+this environment — egress to `rfc-editor.org`, `datatracker.ietf.org` and
+`httpwg.org` is blocked by the network policy. **Nothing in this document is
+argued from quoted normative text**, and no such text is paraphrased as though it
+had been read. Everything above and below is measurement.
+
+### The fix, and where it belongs
+
+`readBody()` is **not** given `res`. Handing a body reader the caller's response
+is the precise resource-ownership error #28 paid for, and fixing one lifecycle
+defect by reintroducing the other would be no fix at all. The decision lives at
+the response boundary in `api/lead.js`, where `res` is already owned — in
+`send()`, which every response in the file goes through.
+
+| Situation | `Connection` |
+|---|---|
+| a body was declared and this server did not consume it | **`close`** |
+| the request was fully received, or had no body at all | keep-alive, unchanged |
+
+**The signal is the request's own state, not which branch refused.**
+`req.complete` answers "has this whole request been received?". Measured across
+every branch: false for the timeout, false for **both** oversize paths — including
+when the client had in fact sent every declared byte, because the header check
+refuses before the stream is consumed — and true for an ordinary complete request.
+
+**`req.complete === false` alone proved too blunt**, and the first draft of the
+rule used it. A bodyless request — the `GET` a scanner or link-preview fetcher
+sends, answered `405` — also reports `complete === false` at handler entry,
+because Node has not yet emitted the end of a body that does not exist. That
+draft disabled keep-alive for all of that traffic. The rule now also requires
+that a body was actually declared (`Transfer-Encoding` present, or a non-zero
+`Content-Length`).
+
+**The mechanism is `Connection: close` and nothing else.** Measured:
+
+| Mechanism | Header sent | Body delivered | Socket closed |
+|---|---|---|---|
+| nothing (the defect) | `keep-alive` | complete | **no** |
+| **`res.setHeader("Connection","close")`** | **`close`** | **complete, 354/354** | **yes, 3 ms after flush** |
+| `req.socket.end()` in `res.on("finish")` | `keep-alive` | complete | yes — but the header still lies |
+
+The third was rejected: it closes while still advertising reuse, which leaves the
+metadata false. Node flushes the whole response before closing, so nothing is
+truncated.
+
+### This covers six paths, not two
+
+`api/lead.js` answers before the body is consumed on **six** paths: `405`, `403`
+and `429` run before the read at all; `413`, `408` and `400` stop part-way
+through it. All six had the defect and all six are fixed by the one rule in
+`send()`. The change is contained to `api/lead.js`.
+
+### The conservative edge, measured and chosen
+
+On the already-parsed `req.body` path the platform may have consumed the stream
+before the handler ran, in which case keep-alive would be fine and the teardown
+is avoidable. **This code cannot truthfully know that.** Locally `req.complete`
+is false there because nothing read the stream, and **whether Vercel Production
+leaves it true has not been measured**. Rather than guess, the connection closes.
+The cost of being wrong this way is one extra connection setup on a refused
+oversize submission; the cost the other way is advertising reuse over bytes
+nobody read. The tradeoff is pinned by a test so that changing it is a decision
+rather than a drift.
+
+### 408, re-examined — and no `Retry-After`
+
+408 remains the truthful status: the request was not malformed, it never finished
+arriving. It is now paired with the connection lifecycle it requires, which is
+the part the first revision was missing — the status was never the whole answer.
+
+**No `Retry-After`.** This is not a rate limit and not backpressure: there is no
+interval the visitor should wait, and the right next action is to submit again.
+`429` does carry one, because there a real window exists to communicate.
+Inventing a number here would assert a delay this endpoint does not impose.
+(Argued from the endpoint's own behaviour; the specification text was
+unreachable, as noted above.)
+
+`400` was reconsidered and not restored: it would label an incomplete upload as a
+malformed one, which is the untruthful option.
+
+### Two prose defects corrected in the same pass
+
+**1. `bodyErrorReason()` said what the code did not do.** The comment read *"IT
+READS ONLY THE TOKEN, never the message"* while the implementation was
+`err?.token || err?.message`, and `api/lead.js` repeated the claim. Not merely
+untidy: every failure the reader raises deliberately carries `.token`, and the
+only error arriving without one is a genuine stream error whose `.message` is
+arbitrary text. With the fallback, such an error reading `PAYLOAD_TOO_LARGE`
+would have been answered as an oversize body — promoting an unknown transport
+failure into a specific claim about the visitor's submission. Every caller was
+searched first (`api/lead.js` and one test; the identically-named function in
+`api/_lib/twilio.mjs` is separate and untouched). It is now token-only, and
+tested: a stream error whose message spells a token answers **400**, not 413.
+`bodyError()` still sets `.message` too, because an `Error` needs one and older
+`.message` matching keeps working — the classifier simply does not read it.
+
+**2. "No body was read" was false.** The timeout path is tested with a **partial
+body that is read** before the stall, so "no body was read" and "a submission
+that never arrived" both overstated it. The true invariant is narrower: no
+*complete* body was accepted; nothing is handed to the parser; the partial bytes
+are discarded; no lead-processing step runs; no lead is created.
+
+Similarly, "both defects were live" is now "present in the live lead endpoint's
+code path" wherever the streaming fallback is meant, since **Production
+reachability of that fallback remains unproven** — the same caveat that governs
+the rest of this document.
+
 ## Repo-wide behavioural search
 
 Four shapes, named in words before any query was chosen (`CLAUDE.md` rule 17 —
@@ -268,9 +437,17 @@ matches across `api/`:**
 | an external stream read to completion with no total deadline | none — both body readers (`readBody`, `readFormBody`) now have one |
 | a promise executor able to settle twice | none — both readers use a `settled` guard |
 | an `unref()`'d bound | none |
+| **a server answers while the request body has not been consumed, leaving the connection persistent** | **six live paths in `api/lead.js`, all corrected here; the same shape is present in both inert gate 7 endpoints — recorded below, not widened into** |
 
 ### Out of scope, recorded and not fixed here
 
+0. **Both gate 7 endpoints carry the connection-lifecycle shape.**
+   `api/twilio-inbound.js` and `api/operator-action.js` answer after a
+   `readFormBody()` refusal without consuming the body and without deciding the
+   connection, exactly as `api/lead.js` did. **Both are inert** —
+   `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` are set in no environment.
+   Deliberately **not** fixed here: #28's document has been annotated with a dated
+   correction beside its original claim, and the repair is sequenced work.
 1. **`tests/suppression.test.mjs`** — #28's test *"an oversize body is refused AND
    the caller's 400 still reaches the client"* declares an oversize
    `Content-Length`, which takes the **header fast path**, not the streaming check
@@ -293,9 +470,28 @@ regression arrives with a green tick.
 
 ## Lesson promotion
 
-**Nothing was promoted, and that is the finding.**
+**One lesson promoted, by sharpening an existing rule rather than adding one.**
 
-Two candidates were considered and both are already represented:
+The connection-lifecycle finding clears the admission bar. It is material (the
+live endpoint advertised reusable connections it would not serve), reusable (it
+applies to every endpoint that can answer early, and this repository has three),
+likely to recur (the same shape is in both gate 7 endpoints today), and
+decision-changing — which is the load-bearing test here.
+
+It is decision-changing because **`CLAUDE.md` rule 15 was already being followed**
+and still missed it. The outcome *was* asserted from the observer's side; what
+was too narrow was the meaning of "the outcome" — the status line and the body,
+with nothing about the state the exchange left behind. So rule 15 is **widened**,
+not duplicated: the observable outcome now explicitly includes connection state,
+framing, and what the peer may do next, and a harness may not tear that down
+before it has been observed. A twenty-first rule beside rule 15 was considered
+and rejected as duplication.
+
+The rationale, and the harness defect that made the state structurally
+unobservable, are in `docs/ENGINEERING-LESSONS.md`.
+
+**Nothing was promoted for the two earlier findings**, and both candidates are
+already represented:
 
 - *"An assertion threshold loose enough to pass under the behaviour it rules
   out"* — this bit this very change (`ms < 2000`). It is already the attack-list
@@ -327,13 +523,11 @@ manufacturing one is itself a failure.
   defects — would be unreachable in Production. **Nothing here asserts either
   way**; the path is now correct if reached, and this was fixed as correctness
   work rather than as an incident.
-- **A measured residual.** `pause()` delivers the response but does not close the
-  socket: Node sends `Connection: keep-alive` and the connection survives, so a
-  refused client may hold it open. That is a resource question bounded by
-  `maxDuration`, not a correctness failure. Closing it deliberately would mean
-  `Connection: close` and tearing down after the response flushed, which requires
-  `res` — a resource `readBody()` does not have and must not be given. **No
-  `Connection: close` behaviour was added.**
+- **The connection lifecycle is fixed, not residual.** The first revision of this
+  work called the surviving keep-alive connection "a resource question, not a
+  correctness failure". **That was wrong** — see the section below. It is fixed
+  at the response boundary in `api/lead.js`, and `readBody()` is still never
+  given `res`.
 - **No gate 8 work, no Twilio activation, no unsuppression design, no consent or
   lead-workflow redesign, no CRM schema change.**
 - **The full suite is CI's job.** `npm run test:unit` was run locally; the

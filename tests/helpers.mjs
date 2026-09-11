@@ -3,6 +3,7 @@
 
 import { EventEmitter } from "node:events";
 import { createServer, request } from "node:http";
+import { createConnection } from "node:net";
 
 export function mockReq({ method = "POST", body = {}, headers = {}, ip = "203.0.113.1" } = {}) {
   const req = new EventEmitter();
@@ -162,4 +163,91 @@ export async function withHttpServer(handler, {
     await new Promise((r) => server.close(r));
   }
   return seen;
+}
+
+/* =====================================================================
+   A RAW SOCKET — for claims about the CONNECTION, not just the response
+   =====================================================================
+   withHttpServer() above proves what the client receives. It cannot
+   prove what state the server left the connection in, because its
+   `finally` destroys the client socket and calls closeAllConnections()
+   as soon as the response has been observed. That teardown is exactly
+   what a connection-lifecycle assertion must not be measured through.
+
+   So this one speaks HTTP/1.1 on a raw socket, observes for a fixed
+   window with NOTHING torn down, and only then cleans up. It reports
+   what was on the wire and what the SERVER did:
+
+     * the status line and the Connection header it actually sent;
+     * whether the response body arrived complete;
+     * whether the SERVER closed the socket, and when;
+     * how many requests the server dispatched on that one connection.
+
+   `afterResponse` bytes are written once a response head has been seen,
+   which is how a test asks "is this connection still usable?".
+   ===================================================================== */
+export async function withRawRequest(handler, {
+  /** Complete raw request bytes, headers included. */
+  request,
+  /** Written once a response head has been seen. Null writes nothing. */
+  afterResponse = null,
+  /** How long to watch the connection before tearing anything down. */
+  observeMs = 500,
+} = {}) {
+  const dispatched = [];
+  const server = createServer((req, res) => {
+    dispatched.push(`${req.method} ${req.url}`);
+    handler(req, res);
+  });
+  server.on("clientError", () => { /* observe only, never destroy */ });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address();
+
+  const sock = createConnection({ host: "127.0.0.1", port });
+  let raw = "";
+  let closedAt = null;
+  let clientError = null;
+  let wroteAfter = false;
+  const t0 = Date.now();
+
+  /* CLEANUP IS IN A `finally`, and it is not decoration. A listening
+     server and a live socket left behind do not fail a test — they hang
+     the whole run, which is a far worse failure than an assertion. This
+     harness already cost one debugging round to a missing import that
+     surfaced exactly that way. */
+  try {
+    await new Promise((resolve) => {
+      sock.on("data", (d) => {
+        raw += d;
+        if (!wroteAfter && afterResponse !== null && raw.includes("\r\n\r\n")) {
+          wroteAfter = true;
+          try { sock.write(afterResponse); } catch { /* already closed */ }
+        }
+      });
+      sock.on("close", () => { closedAt = Date.now() - t0; });
+      sock.on("error", (err) => { clientError = err.code || err.message; });
+      try { sock.write(request); } catch (err) { clientError = err.code || err.message; }
+      setTimeout(resolve, observeMs);
+    });
+  } finally {
+    /* AFTER the observation window, never before it: tearing the
+       connection down is what this harness exists to avoid doing early. */
+    sock.destroy();
+    server.closeAllConnections?.();
+    await new Promise((r) => server.close(r));
+  }
+
+  const head = raw.split("\r\n\r\n")[0] || "";
+  const body = raw.split("\r\n\r\n").slice(1).join("\r\n\r\n");
+  return {
+    raw,
+    status: Number((head.match(/^HTTP\/1\.\d (\d+)/) || [])[1]) || null,
+    connection: (head.match(/\r\nConnection: *(\S+)/i) || [])[1] || null,
+    body,
+    responseCount: (raw.match(/HTTP\/1\.\d \d\d\d/g) || []).length,
+    serverClosed: closedAt !== null,
+    closedAt,
+    clientError,
+    dispatched,
+  };
 }

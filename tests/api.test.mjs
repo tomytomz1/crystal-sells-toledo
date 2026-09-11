@@ -14,7 +14,9 @@ import {
   BODY_READ_TIMEOUT_MS, BODY_READ_TIMED_OUT, PAYLOAD_TOO_LARGE,
 } from "../api/_lib/security.mjs";
 import { safeShape } from "../api/_lib/log.mjs";
-import { mockReq, mockRes, validContact, validHomeValue, withHttpServer } from "./helpers.mjs";
+import {
+  mockReq, mockRes, validContact, validHomeValue, withHttpServer, withRawRequest,
+} from "./helpers.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -1033,5 +1035,285 @@ describe("readBody over a real socket", () => {
 
     assert.equal(seen.server.reason, "too_large");
     assert.equal(seen.clientStatus, 413);
+  });
+});
+
+/* =====================================================================
+   THE CONNECTION LIFECYCLE — what the server leaves behind
+   =====================================================================
+   THE DEFECT THIS SECTION EXISTS TO HAVE CAUGHT, found by independent
+   review of the previous revision of this pull request and measured
+   here before it was fixed:
+
+     partial body + 408    ->  Connection: keep-alive, socket left open
+     chunked oversize + 413->  Connection: keep-alive, socket left open
+     declared oversize+413 ->  Connection: keep-alive, socket left open
+
+   The connection becomes usable again ONLY if the client goes on to send
+   the rest of the body it declared — which, in the timeout case, is by
+   definition what it did not do. So the server advertised a persistent
+   connection it would not serve. A pooling client (all of them pool) can
+   reuse it and stall. The previous revision called this "a resource
+   question, not a correctness failure". That classification was wrong:
+   the response's own framing metadata was false.
+
+   WHAT WAS NOT REPRODUCED, so no test below claims it: against Node's
+   own parser, in both the pause() and no-pause variants, outstanding
+   body bytes were NOT dispatched as a second request. No smuggled
+   request was observed. The behaviour of any intermediary in front of
+   this handler has not been measured here.
+
+   These use withRawRequest(), not withHttpServer(): the latter's
+   teardown destroys the connection as soon as the response is seen,
+   which is precisely what must not be measured through.
+   ===================================================================== */
+describe("lead endpoint connection lifecycle", () => {
+  const POST = (extraHeaders) =>
+    "POST /api/lead HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n" + extraHeaders + "\r\n";
+  const SECOND = "GET /second HTTP/1.1\r\nHost: x\r\n\r\n";
+  const lead = async (req, res) => { await handler(req, res); };
+
+  /* ---- A. PARTIAL CONTENT-LENGTH, BODY TIMEOUT --------------------- */
+  test("A. a partial body that times out gets the full 408 and a closed connection", async () => {
+    _resetRateLimit();
+    /* THE WINDOW MUST OUTLAST THE BOUND. api/lead.js calls readBody()
+       with the default BODY_READ_TIMEOUT_MS and the exported handler
+       takes no override, so the 408 cannot arrive before then. An
+       earlier draft observed for 900 ms, saw nothing, and would have
+       reported a missing response as a lifecycle failure - and tearing
+       the client down early even reclassified the refusal as
+       "unreadable", because the teardown itself became the stream error.
+       This is the one deliberately slow test in the file. */
+    const seen = await withRawRequest(lead, {
+      request: POST("Content-Length: 200\r\n") + '{"form_type":"cont',
+      afterResponse: SECOND,
+      observeMs: BODY_READ_TIMEOUT_MS + 1200,
+    });
+
+    /* The refusal arrived, complete, and was not lost on the wire. */
+    assert.equal(seen.clientError, null, `the client got ${seen.clientError} instead of a response`);
+    assert.equal(seen.status, 408, "the client did not receive the timeout refusal");
+    const json = JSON.parse(seen.body);
+    assert.equal(json.code, "BODY_READ_TIMED_OUT");
+    assert.equal(json.ok, false);
+    assert.ok(json.message.length > 0, "the refusal body was truncated by the close");
+
+    /* And the connection was not advertised as reusable. */
+    assert.equal(seen.connection, "close",
+      `the server advertised '${seen.connection}' on a connection it will not serve`);
+    assert.equal(seen.serverClosed, true, "the server left the connection open after refusing");
+    assert.equal(seen.dispatched.length, 1,
+      `the server dispatched ${JSON.stringify(seen.dispatched)} - nothing may follow on this connection`);
+    assert.equal(seen.responseCount, 1);
+  });
+
+  /* ---- B. CHUNKED OVERSIZE — the streaming branch ------------------ */
+  test("B. a chunked oversize body gets 413 and a closed connection", async () => {
+    _resetRateLimit();
+    const seen = await withRawRequest(lead, {
+      /* No Content-Length, so the STREAMING size check is what refuses. */
+      request: POST("Transfer-Encoding: chunked\r\n") + "5000\r\n" + "x".repeat(0x5000) + "\r\n",
+      afterResponse: SECOND,
+      observeMs: 900,
+    });
+
+    assert.equal(seen.clientError, null);
+    assert.equal(seen.status, 413, "the streaming branch did not answer 413");
+    assert.equal(JSON.parse(seen.body).code, "PAYLOAD_TOO_LARGE");
+    assert.equal(seen.connection, "close");
+    assert.equal(seen.serverClosed, true);
+    assert.equal(seen.dispatched.length, 1);
+  });
+
+  /* ---- C. DECLARED-LENGTH FAST PATH -------------------------------- */
+  /* "Fast path" does NOT mean connection reuse is safe. This branch
+     refuses on the header, so the declared body is never consumed — and
+     the client may still have every one of those bytes outstanding.
+     Measured: req.complete is false here even when the client HAS sent
+     the whole body, because the stream was never read. */
+  test("C. the declared-length fast path also closes, body sent or not", async () => {
+    for (const [label, body] of [["no body sent", ""], ["whole body sent", "x".repeat(40000)]]) {
+      _resetRateLimit();
+      const seen = await withRawRequest(lead, {
+        request: POST("Content-Length: 40000\r\n") + body,
+        afterResponse: SECOND,
+        observeMs: 900,
+      });
+
+      assert.equal(seen.status, 413, `${label}: the fast path stopped refusing`);
+      assert.equal(JSON.parse(seen.body).code, "PAYLOAD_TOO_LARGE", label);
+      assert.equal(seen.connection, "close",
+        `${label}: advertised '${seen.connection}' after refusing without consuming the body`);
+      assert.equal(seen.serverClosed, true, label);
+    }
+  });
+
+  /* ---- D. PRE-PARSED req.body --------------------------------------
+     The platform may have consumed the body before the handler ran. The
+     code does not guess: it reads `req.complete`, which is the truthful
+     answer either way. Both states are pinned here.
+
+     THE TRADEOFF, recorded rather than assumed. Locally we cannot
+     reproduce a platform that both populates req.body AND consumes the
+     stream, so the first case below fakes req.body over an UNCONSUMED
+     stream and the connection is correctly closed; the second sends a
+     complete body as well, which is the shape a platform that really did
+     consume it would leave, and keep-alive is correctly retained.
+     Whether Vercel Production produces the second shape has NOT been
+     measured. Reading req.complete is what makes that question moot. */
+  test("D. a pre-parsed body over an UNCONSUMED stream still closes", async () => {
+    _resetRateLimit();
+    const big = JSON.stringify({ message: "x".repeat(MAX_BODY_BYTES + 64) });
+    const seen = await withRawRequest(async (req, res) => {
+      req.body = big;                       // what the platform would inject
+      await handler(req, res);
+    }, {
+      request: POST("Content-Length: 200\r\n") + '{"form_type":"cont',
+      observeMs: 700,
+    });
+
+    assert.equal(seen.status, 413);
+    assert.equal(seen.connection, "close",
+      "the stream was never consumed, so the connection must not be advertised reusable");
+    assert.equal(seen.serverClosed, true);
+  });
+
+  /* D2. THE CONSERVATIVE EDGE, PINNED DELIBERATELY. Even when every
+     declared byte has reached the socket, this server did not CONSUME
+     them - the pre-parsed branch returns before the stream is read - so
+     req.complete is false and the connection is closed.
+
+     This is the tradeoff, recorded rather than assumed: on Vercel the
+     platform may have consumed the body itself before the handler ran,
+     in which case keep-alive would have been fine and this teardown is
+     avoidable. WHETHER IT DOES HAS NOT BEEN MEASURED. The cost of being
+     wrong this way is one extra connection setup on a refused oversize
+     submission; the cost of the other way is advertising reuse over
+     bytes nobody read. The test pins the choice so that changing it is
+     a decision rather than a drift. */
+  test("D2. a pre-parsed refusal closes too, because this server did not consume the body", async () => {
+    _resetRateLimit();
+    const big = JSON.stringify({ message: "x".repeat(MAX_BODY_BYTES + 64) });
+    const seen = await withRawRequest(async (req, res) => {
+      req.body = big;
+      await handler(req, res);
+    }, {
+      request: POST("Content-Length: 2\r\n") + "{}",
+      observeMs: 900,
+    });
+
+    assert.equal(seen.status, 413, "the oversize pre-parsed body was not refused");
+    assert.equal(seen.connection, "close",
+      "the body was never consumed by this server, so reuse must not be advertised");
+    assert.equal(seen.serverClosed, true);
+  });
+
+  /* AND THE NARROWING THAT KEEPS THAT FROM OVER-REACHING. A bodyless
+     request reports complete === false at handler entry too - Node has
+     simply not yet emitted the end of a body that does not exist. A
+     first draft of the rule closed on that alone, which disabled
+     keep-alive for every scanner GET and link-preview fetch this
+     endpoint answers 405. Nothing is outstanding here, so nothing is
+     closed. */
+  test("a bodyless refused request keeps keep-alive - nothing is outstanding", async () => {
+    _resetRateLimit();
+    const seen = await withRawRequest(lead, {
+      request: "GET /api/lead HTTP/1.1\r\nHost: x\r\n\r\n",
+      afterResponse: SECOND,
+      observeMs: 700,
+    });
+
+    assert.equal(seen.status, 405, "a bodyless GET is still refused");
+    assert.notEqual(seen.connection, "close",
+      "a request with no body at all was closed - the rule is over-reaching");
+    assert.equal(seen.serverClosed, false);
+    assert.equal(seen.dispatched.length, 2,
+      `the connection was not reusable: ${JSON.stringify(seen.dispatched)}`);
+  });
+
+  /* ---- E. AN ORDINARY REQUEST KEEPS KEEP-ALIVE --------------------- */
+  /* The fix must not turn every lead request into Connection: close. */
+  test("E. a normal complete request keeps keep-alive and the connection is reused", async () => {
+    _resetRateLimit();
+    const body = JSON.stringify({
+      form_type: "contact", first_name: "Jane", last_name: "Doe",
+      email: "jane@example.com", phone: "4195551234", topic: "Selling my home",
+      message: "I would like to talk about selling.", page: "/contact", attribution: {},
+    });
+    const seen = await withRawRequest(lead, {
+      request: POST("Content-Length: " + Buffer.byteLength(body) + "\r\n") + body,
+      afterResponse: SECOND,
+      observeMs: 900,
+    });
+
+    /* 503 because HUBSPOT_ACCESS_TOKEN is absent here - it reached delivery. */
+    assert.equal(seen.status, 503, "the complete request did not reach the delivery stage");
+    assert.notEqual(seen.connection, "close",
+      "an ordinary complete request was closed - keep-alive must be preserved");
+    assert.equal(seen.serverClosed, false, "the server closed a connection it should have kept");
+    assert.equal(seen.dispatched.length, 2,
+      `the connection was not reused: ${JSON.stringify(seen.dispatched)}`);
+    assert.equal(seen.responseCount, 2);
+  });
+
+  /* ---- THE PRE-BODY REFUSALS HAVE THE SAME SHAPE ------------------- */
+  /* 405, 403 and 429 all answer before the body is read at all. They are
+     the same defect and are fixed by the same rule in send(). */
+  test("a pre-body refusal (405) also closes rather than advertising reuse", async () => {
+    _resetRateLimit();
+    const seen = await withRawRequest(lead, {
+      request: "PUT /api/lead HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+        + "Content-Length: 200\r\n\r\n" + '{"form_type":"cont',
+      observeMs: 700,
+    });
+
+    assert.equal(seen.status, 405);
+    assert.equal(seen.connection, "close",
+      "a refusal issued before the body was read still advertised a reusable connection");
+    assert.equal(seen.serverClosed, true);
+  });
+});
+
+/* =====================================================================
+   bodyErrorReason() READS THE TOKEN AND NOTHING ELSE
+   =====================================================================
+   The previous revision said "IT READS ONLY THE TOKEN, never the
+   message" while the code read `err?.token || err?.message`. */
+describe("bodyErrorReason classification", () => {
+  test("a stream error is 'unreadable' even when its message spells one of our tokens", () => {
+    /* A genuine stream error carries no token - only a message, which is
+       arbitrary text from Node or the platform. It must never be promoted
+       into a specific claim about the visitor's submission. */
+    assert.equal(bodyErrorReason(Object.assign(new Error(PAYLOAD_TOO_LARGE), {})), "unreadable");
+    assert.equal(bodyErrorReason(new Error(BODY_READ_TIMED_OUT)), "unreadable");
+    assert.equal(bodyErrorReason(new Error("ECONNRESET")), "unreadable");
+    assert.equal(bodyErrorReason(undefined), "unreadable");
+  });
+
+  test("a tokened error classifies by its token", () => {
+    const tooLarge = Object.assign(new Error(PAYLOAD_TOO_LARGE), { token: PAYLOAD_TOO_LARGE });
+    const timedOut = Object.assign(new Error(BODY_READ_TIMED_OUT), { token: BODY_READ_TIMED_OUT });
+    assert.equal(bodyErrorReason(tooLarge), "too_large");
+    assert.equal(bodyErrorReason(timedOut), "timed_out");
+    /* A token we do not recognise is not guessed at. */
+    assert.equal(bodyErrorReason(Object.assign(new Error("x"), { token: "SOMETHING_ELSE" })), "unreadable");
+  });
+
+  test("a stream error whose message spells a token answers 400, not 413", async () => {
+    _resetRateLimit();
+    const seen = await withHttpServer(async (req, res) => {
+      /* Emit a real stream error carrying a colliding message. */
+      setTimeout(() => req.emit("error", new Error(PAYLOAD_TOO_LARGE)), 30);
+      await handler(req, res);
+    }, {
+      headers: { "content-type": "application/json", "content-length": "200" },
+      write: '{"form_type":"cont',
+      end: false,
+      guardMs: 9000,
+    });
+
+    assert.equal(seen.clientStatus, 400,
+      "a stream error was promoted to an oversize refusal by its message");
+    assert.equal(JSON.parse(seen.clientBody).code, "BAD_REQUEST");
   });
 });

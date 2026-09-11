@@ -170,6 +170,20 @@ means setting `Connection: close` and tearing down after the response has
 flushed, which requires `res` — which `readFormBody()` does not have and must
 not be given. **Recorded as a residual, below.**
 
+> **Correction, 11 September 2026 (#30).** The sentence above — *"a resource
+> question rather than a correctness one"* — is **wrong**, and the original is
+> left unedited so the claim and its correction can both be seen. Answering
+> while part of the request body is unread, on a connection left persistent,
+> means the response advertises reuse the server may not honour: measured, the
+> connection becomes usable again only once the client sends the rest of the
+> body it declared, which on a timeout is exactly what it did not do. That is a
+> protocol-correctness problem, not only a resource one. `api/lead.js` was
+> corrected in [#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30)
+> at its response boundary. **The two gate 7 endpoints described in this
+> document still carry the original behaviour**; they are inert, and the
+> correction is recorded as sequenced follow-up work in
+> `docs/CURRENT-STATE.md` rather than folded into #30.
+
 **The rule, stated so it is not re-derived wrongly: `readFormBody()` reads a
 body. It does not own the socket — the caller does, because the caller still has
 to answer.**

@@ -277,6 +277,77 @@ live matches for either.**
 
 ---
 
+## 2026-09-11 — A delivered response is not the whole HTTP exchange
+
+**Failure**
+[#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30) fixed
+`readBody()` so a refusal actually reached the client, and proved it **from the
+client's side** with a real `node:http` server and client. Every assertion was
+about what the visitor received, and every one of them was true.
+
+It still shipped a protocol defect. Measured on the reviewed revision:
+
+```
+partial body  + 408  ->  Connection: keep-alive, socket left open
+chunked oversize+413 ->  Connection: keep-alive, socket left open
+declared oversize+413->  Connection: keep-alive, socket left open
+```
+
+The endpoint answered before the request body had been consumed and still
+advertised a persistent connection. It becomes usable again only if the client
+sends the rest of the body it declared — which, on the timeout path, is by
+definition what it did not do. A client that pools connections, which is all of
+them, can reuse one the server will not serve.
+
+**Why it mattered**
+The response's own framing metadata was false. Earlier prose called this "a
+resource question, not a correctness failure" and repeated that in the source,
+`CURRENT-STATE`, the update document and the pull-request description. The
+classification, not just the sentence, was wrong.
+
+**Why existing evidence missed it**
+`CLAUDE.md` rule 15 was **followed**: the outcome was asserted from the
+observer's side. The gap was in what "the outcome" was taken to mean — the
+status line and the body, and nothing about the state the exchange left behind.
+
+The harness made it structurally unobservable as well. Its `finally` destroyed
+the client socket and called `closeAllConnections()` as soon as the response had
+been seen, so the connection was always torn down by the test before any
+assertion about it could be made. **A teardown that runs before the observation
+is not a teardown; it is the experiment.**
+
+**Permanent invariant**
+For a protocol exchange, the observable outcome includes **what the exchange
+leaves behind** — connection state, framing, and what the peer is now entitled
+to do next — not only the message that arrived.
+
+**Required proof**
+Observe the connection **after** the response and **before** any teardown: what
+`Connection` was advertised, whether the server closed, and whether a subsequent
+request on that connection is actually served. Where a harness tears down to
+avoid hanging, that teardown must come after the observation window, not before.
+
+**Repo-wide search result**
+Shape: *a server answers while the request body has not been completely consumed
+and leaves the connection persistent.* Six live paths in `api/lead.js`
+(405/403/429 before the read; 413/408/400 on refusal) — all corrected in #30 by
+one rule at the response boundary. The same shape is present in both **inert**
+gate 7 endpoints around `readFormBody()`; recorded as sequenced follow-ups and
+deliberately not widened into.
+
+No smuggled second request was reproduced against Node's own parser, in either
+the `pause()` or the no-`pause()` variant. That is recorded as not reproduced
+rather than asserted.
+
+**Promoted rule**
+**Sharpens `CLAUDE.md` rule 15**, which previously read as being about the
+*message*. A new rule was considered and rejected: rule 15 was already the right
+rule and was already being followed — it was its **scope** that was too narrow,
+and widening the existing rule is what changes the next decision. Adding a
+twenty-first rule beside it would have duplicated it.
+
+---
+
 ## 2026-09-11 — Prose may not claim more than the evidence
 
 **Failure**

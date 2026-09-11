@@ -641,15 +641,56 @@ real socket, against a control that shows a complete body **does** reach deliver
 all remains UNPROVEN** — it has not been measured, and nothing here asserts it
 either way. The path is correct if reached.
 
-**A measured residual, recorded rather than smoothed over.** `pause()` delivers
-the response but does not close the socket: Node sends `Connection: keep-alive`
-and the connection survives, so a refused client may hold it open. That is a
-resource question bounded by `maxDuration`, not a correctness failure, and
-closing it deliberately would require `res`, which `readBody()` does not have and
-must not be given.
+**The connection lifecycle is part of the fix, not a residual.** An earlier
+revision of this work left `pause()`'s surviving connection described as "a
+resource question, not a correctness failure". **That classification was wrong**,
+and independent review caught it. Measured on that revision: a 408 or 413 issued
+while part of the request body was still unread went out carrying
+`Connection: keep-alive` on a connection that only becomes usable again if the
+client sends the rest of the body it declared — which, on the timeout path, is by
+definition what it did not do. The response was advertising reuse the server
+would not honour, and a pooling client can stall on it.
+
+`api/lead.js` now decides this at the **response boundary**, where `res` is
+owned, and `readBody()` is still never given the response:
+
+| Situation | `Connection` |
+|---|---|
+| a body was declared and this server did not consume it | **`close`** |
+| the request was fully received, or had no body at all | keep-alive, unchanged |
+
+The signal is `req.complete` together with the declared body length — never which
+branch refused. A bodyless `GET` reports `complete === false` at handler entry
+too, so the length test is what stops the rule closing every scanner probe. This
+covers all **six** paths that answer before the body is consumed: `405`, `403`
+and `429` before the read, and `413`, `408` and `400` on refusal.
+
+**Deliberately conservative at one edge, recorded rather than assumed.** On the
+already-parsed `req.body` path the platform may have consumed the stream before
+the handler ran, in which case keep-alive would have been fine. **This code
+cannot truthfully know that, and whether Vercel leaves `req.complete` true there
+has not been measured**, so the connection is closed. The cost is one avoidable
+teardown on a refused oversize submission; the alternative is advertising reuse
+over bytes nobody read.
+
+**What was NOT reproduced**, stated so the claim is not stronger than the
+evidence: against Node's own parser, in both the `pause()` and no-`pause()`
+variants, outstanding body bytes were **not** dispatched as a second request. No
+smuggled request was observed. The behaviour of any intermediary in front of this
+function has not been measured, and the current HTTP specification could not be
+retrieved from this environment (egress to the RFC sources is blocked), so
+nothing here is argued from quoted normative text.
 
 ### Sequenced follow-ups, none of them fixed in #30
 
+0. **Both gate 7 endpoints answer without deciding the connection.**
+   `api/twilio-inbound.js` and `api/operator-action.js` respond after a
+   `readFormBody()` refusal without consuming the body and without setting
+   `Connection`, exactly as `api/lead.js` did before #30. **Both are inert** —
+   `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` are set in no environment —
+   so nothing reaches them today. #28's update document now carries a dated
+   correction beside its original "resource question" claim; the code repair is
+   sequenced work and was deliberately not folded into #30.
 1. **`tests/suppression.test.mjs`** — #28's test *"an oversize body is refused AND
    the caller's 400 still reaches the client"* declares a `Content-Length` over
    the cap, which (measured 11 September 2026) takes the **header fast path**, not

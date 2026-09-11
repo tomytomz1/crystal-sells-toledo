@@ -197,12 +197,31 @@ function bodyError(token) {
 /**
  * One mapping from a body-read failure to a loggable reason.
  *
- * IT READS ONLY THE TOKEN, never the message, and returns one of three
- * fixed strings — so no caller can log a parser's error text with a
- * fragment of a visitor's message in it.
+ * IT READS ONLY `err.token`, AND THAT IS NOW TRUE. An earlier revision
+ * of this function said exactly this sentence while reading
+ * `err?.token || err?.message` — the prose and the code disagreed, and
+ * the prose was the one being believed.
+ *
+ * Reading the message was not merely untidy. Every failure this function
+ * raises deliberately goes through bodyError(), which sets `.token`. The
+ * ONLY error that arrives without one is a genuine stream error, whose
+ * `.message` is arbitrary text from Node or from the platform. With the
+ * fallback in place, such an error whose message happened to read
+ * `PAYLOAD_TOO_LARGE` would have been classified — and answered — as an
+ * oversize body, promoting an unknown transport failure into a specific
+ * claim about the visitor's submission. Token-only, it is `unreadable`,
+ * which is what it is.
+ *
+ * Returns one of three fixed strings, so no caller can log a parser's
+ * error text with a fragment of a visitor's message in it.
+ *
+ * `bodyError()` still sets `.message` as well as `.token`, because an
+ * Error needs a message and because callers that matched on `.message`
+ * before this change keep working. The CLASSIFIER simply does not read
+ * it.
  */
 export function bodyErrorReason(err) {
-  const token = err?.token || err?.message;
+  const token = err?.token;
   if (token === PAYLOAD_TOO_LARGE) return "too_large";
   if (token === BODY_READ_TIMED_OUT) return "timed_out";
   return "unreadable";
@@ -326,13 +345,28 @@ export function readBody(req, { timeoutMs = BODY_READ_TIMEOUT_MS } = {}) {
          on the listener removal above having been the last `data`
          listener; the byte cap is unaffected either way.
 
-         WHAT THIS DOES NOT DO, measured in #28 rather than assumed:
-         pause() does not close the connection. The response goes out
-         carrying `Connection: keep-alive` and the socket survives, so a
-         refused client MAY HOLD ITS CONNECTION OPEN. That is a resource
-         question bounded outside this function by maxDuration, not a
-         correctness failure — and closing it deliberately would need
-         `res`, which this function does not have and must not be given. */
+         WHAT THIS DOES NOT DO, and WHY THAT IS THE CALLER'S PROBLEM
+         RATHER THAN A NON-PROBLEM. pause() does not close the
+         connection: the response goes out and the socket survives. An
+         earlier revision of this comment called that "a resource
+         question, not a correctness failure". THAT CLASSIFICATION WAS
+         WRONG, and independent review caught it.
+
+         Answering while part of the request body is still unread, on a
+         connection left persistent, means the response advertises reuse
+         the server may not honour — measured: the connection becomes
+         usable again only once the client sends the rest of the body it
+         declared, which on the timeout path is precisely what it did
+         not do. The framing metadata is false, and a pooling client can
+         reuse a connection that will not be served.
+
+         IT IS STILL NOT THIS FUNCTION'S TO FIX. Closing correctly means
+         deciding the response's `Connection` header, and that needs
+         `res` — which this function does not have and MUST NOT BE
+         GIVEN, because handing a body reader the caller's response is
+         the exact resource-ownership error #28 paid for. The decision
+         belongs at the response boundary; api/lead.js makes it there,
+         from `req.complete` and the declared body length. */
       if (err && typeof req.pause === "function") {
         try { req.pause(); } catch { /* already torn down by the peer */ }
       }

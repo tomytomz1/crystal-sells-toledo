@@ -24,15 +24,115 @@ function submissionId() {
   return "csv_" + randomBytes(12).toString("hex");
 }
 
-function send(res, status, payload) {
+/* =====================================================================
+   EVERY RESPONSE GOES THROUGH HERE, AND SO DOES THE CONNECTION DECISION
+   =====================================================================
+   THE DEFECT THIS EXISTS TO PREVENT. This endpoint answers several times
+   BEFORE the request body has been completely received: the method,
+   origin and rate-limit refusals run before the body is read at all, and
+   the oversize and timeout refusals stop part-way through it. Until this
+   revision every one of those responses went out carrying Node's default
+   `Connection: keep-alive`.
+
+   MEASURED against a real client on 11 September 2026, on the previous
+   revision of this pull request:
+
+     partial body + 408   ->  Connection: keep-alive, socket left open
+     chunked oversize+413 ->  Connection: keep-alive, socket left open
+     declared oversize+413->  Connection: keep-alive, socket left open
+     complete body + 200  ->  Connection: keep-alive, and a second
+                              request on that connection IS served
+
+   The connection becomes reusable again ONLY if the client goes on to
+   transmit the rest of the body it declared. In the timeout case, by
+   definition, it does not. So the server was advertising a persistent
+   connection it would not serve — the response's own framing metadata
+   was false for exactly the case it was sent in, and a client that pools
+   connections (all of them do) can reuse it and stall.
+
+   That is a protocol-correctness problem, not a resource leak, and an
+   earlier revision of this work classified it as the latter. It is
+   ALSO the reason a partially-read body must not simply be abandoned on
+   a persistent connection: bytes the server never consumed sit in front
+   of whatever the client sends next.
+
+   WHAT WE DID NOT REPRODUCE, stated so the claim is not stronger than
+   the evidence: against Node's own parser, in both the pause() and the
+   no-pause variants, the outstanding bytes were NOT dispatched as a
+   second request — Node counts them as body. No smuggled request was
+   observed here. The behaviour of any intermediary in front of this
+   function has not been measured.
+
+   THE SIGNAL IS THE REQUEST'S OWN STATE, NOT WHICH BRANCH REFUSED.
+   `req.complete` answers "has this whole request been received?", is
+   owned by `req`, and needs no caller to know how the body was read or
+   why it failed. Measured across every branch: false for the timeout,
+   false for BOTH oversize paths — including when the client had in fact
+   sent every declared byte, because the header check refuses before the
+   stream is ever consumed — and true for an ordinary complete request.
+
+   BUT `req.complete === false` ALONE IS TOO BLUNT, and a first draft of
+   this rule used it. Measured: a bodyless request — the GET a scanner
+   or a link-preview fetcher sends, which this endpoint answers 405 —
+   also reports `complete === false` at handler entry, simply because
+   Node has not yet emitted the end of a body that does not exist. That
+   draft closed the connection on every one of those, disabling
+   keep-alive for traffic with nothing outstanding at all.
+
+   So the question asked is narrower and is the one that actually
+   matters: IS THERE BODY THIS SERVER HAS NOT CONSUMED?
+
+   `=== false` and not `!req.complete`: `undefined` means we do not know,
+   and an unknown keeps today's behaviour rather than closing on a guess.
+
+   THE CONSERVATIVE EDGE, measured and chosen deliberately. On the
+   already-parsed `req.body` path the platform may have consumed the
+   stream before the handler ran — in which case nothing is outstanding
+   and keep-alive would be fine. THIS CODE CANNOT TRUTHFULLY KNOW THAT.
+   Locally, `req.complete` is false there because nothing read the
+   stream, and whether Vercel Production leaves it true has NOT been
+   measured. Rather than guess, the connection is closed whenever a body
+   was declared and this server did not consume it. The cost is one
+   avoidable connection teardown on a refused oversize submission; the
+   alternative cost is advertising reuse on a connection with unread
+   bytes in front of it. The first is cheap and the second is a lie.
+
+   THE MECHANISM IS `Connection: close` AND NOTHING MORE. Measured, same
+   day: Node sends the header, flushes the COMPLETE response body, and
+   then closes the socket itself — 354 of 354 bytes delivered, socket
+   closed 3 ms later. Ending the socket by hand in `res.on("finish")`
+   also closes it but still advertises `keep-alive`, which leaves the
+   header lying; it was rejected for that reason.
+
+   `res` IS THE HANDLER'S, AND STAYS THE HANDLER'S. readBody() is not
+   given the response and cannot make this decision — that is the
+   resource-ownership rule #28 paid for, and the fix for one lifecycle
+   defect must not reintroduce the other.
+   ===================================================================== */
+function bodyStillOutstanding(req) {
+  /* Not known to be incomplete -> nothing is outstanding. */
+  if (req?.complete !== false) return false;
+  /* Chunked: the end is wherever the terminating chunk turns out to be,
+     so an unconsumed chunked body always has something outstanding. */
+  if (String(req.headers?.["transfer-encoding"] || "")) return true;
+  /* Otherwise only a declared, non-empty body can still be in flight. A
+     bodyless GET or HEAD reaches here with complete === false and has
+     nothing outstanding; it keeps keep-alive. */
+  const declared = Number(req.headers?.["content-length"] || 0);
+  return Number.isFinite(declared) && declared > 0;
+}
+
+function send(req, res, status, payload) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
+  if (bodyStillOutstanding(req)) res.setHeader("Connection", "close");
   res.end(JSON.stringify(payload));
 }
 
-const fail = (res, status, code, message) => send(res, status, { ok: false, code, message });
+const fail = (req, res, status, code, message) =>
+  send(req, res, status, { ok: false, code, message });
 
 const GENERIC_FAILURE =
   "We could not confirm your submission. Your details are still in the form. " +
@@ -50,12 +150,12 @@ export default async function handler(req, res) {
   /* --- method ---------------------------------------------------------- */
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
-    return fail(res, 405, "METHOD_NOT_ALLOWED", "Method not allowed.");
+    return fail(req, res, 405, "METHOD_NOT_ALLOWED", "Method not allowed.");
   }
 
   /* --- origin ---------------------------------------------------------- */
   if (!originAllowed(req))
-    return fail(res, 403, "FORBIDDEN_ORIGIN", "Request origin not allowed.");
+    return fail(req, res, 403, "FORBIDDEN_ORIGIN", "Request origin not allowed.");
 
   /* --- rate limit ------------------------------------------------------ */
   const ip = clientIp(req);
@@ -63,7 +163,7 @@ export default async function handler(req, res) {
   if (!limit.allowed) {
     res.setHeader("Retry-After", String(limit.retryAfter));
     log("lead.rate_limited", { retry_after: limit.retryAfter });
-    return fail(res, 429, "RATE_LIMITED",
+    return fail(req, res, 429, "RATE_LIMITED",
       "Please wait a few minutes before trying again, or contact Crystal directly.");
   }
 
@@ -74,18 +174,32 @@ export default async function handler(req, res) {
   } catch (err) {
     /* EVERY BODY-READ FAILURE ENDS THE REQUEST HERE. Nothing below this
        block runs: no JSON parse, no validation, no consent evidence, no
-       ledger append, no HubSpot write, no acknowledgement mail. There is
-       no body, so there is no lead, and none of those steps has anything
-       truthful to do with a submission that never arrived.
+       ledger append, no HubSpot write, no acknowledgement mail.
 
-       The reason is derived from the helper's stable token, never from
-       err.message — a message can carry parser text, and parser text can
-       carry a fragment of what the visitor typed. */
+       PRECISELY WHAT IS AND IS NOT TRUE HERE, because an earlier revision
+       of this comment overstated it. On the timeout path bytes usually
+       HAVE been read — that is exactly the case the tests exercise, a
+       partial body followed by a stall. What holds is narrower and is
+       what actually matters:
+
+         * no COMPLETE request body was accepted;
+         * nothing is handed to the parser — readBody() rejects rather
+           than returning what arrived (rule 11: reject, never truncate);
+         * the partial bytes are discarded, not stored, logged or parsed;
+         * no lead-processing step runs, and no lead is created.
+
+       "No body was read" and "a submission that never arrived" were both
+       stronger than that, and both are gone.
+
+       The reason comes from the helper's stable token. bodyErrorReason()
+       reads `err.token` and nothing else, so a stream error can never be
+       promoted into an oversize or timeout claim by whatever its message
+       happens to say. */
     const reason = bodyErrorReason(err);
     log("lead.body_failed", { reason });
 
     if (reason === "too_large")
-      return fail(res, 413, "PAYLOAD_TOO_LARGE",
+      return fail(req, res, 413, "PAYLOAD_TOO_LARGE",
         "That submission is too long to send. Please shorten your message and try again, " +
         "or contact Crystal directly.");
 
@@ -96,32 +210,43 @@ export default async function handler(req, res) {
        endpoint cannot support. `code` is machine-readable and is held to
        the same standard as prose.
 
-       Safe to return here: no body was read, so no lead was created, and
-       a repeated submission duplicates nothing. assets/js/main.js treats
-       every non-2xx alike - it reads `code` for analytics and shows
-       `message` - so the visitor-facing behaviour is unchanged and the
-       form keeps the visitor's input either way.
+       Safe to return here: no complete body was accepted, so no lead was
+       created, and a repeated submission duplicates nothing.
+       assets/js/main.js treats every non-2xx alike - it reads `code` for
+       analytics and shows `message` - so the visitor-facing behaviour is
+       unchanged and the form keeps the visitor's input either way.
+
+       NO Retry-After. This is not a rate limit and not a backpressure
+       signal: there is no interval the visitor should wait, and the
+       right next action is simply to submit again. 429 above does carry
+       one, because there a real window exists to communicate. Inventing
+       a number here would be a claim about a delay this endpoint does
+       not impose. (The current HTTP specification could not be retrieved
+       from this environment - egress to the RFC sources is blocked - so
+       this is argued from the endpoint's own behaviour rather than from
+       quoted normative text.)
 
        What this comment does NOT claim: how any particular intermediary
-       or browser reacts to a 408 on a POST. That has not been measured
-       here. The safety argument above does not depend on it - a repeat
-       of a submission that was never read is harmless whoever initiates
-       it. */
+       or browser reacts to a 408 on a POST. That has not been measured.
+       The safety argument above does not depend on it - a repeat of a
+       submission that was never accepted is harmless whoever initiates
+       it. The CONNECTION, separately, is not left advertised as
+       reusable; see send(). */
     if (reason === "timed_out")
-      return fail(res, 408, "BODY_READ_TIMED_OUT", TRANSPORT_FAILURE);
+      return fail(req, res, 408, "BODY_READ_TIMED_OUT", TRANSPORT_FAILURE);
 
-    return fail(res, 400, "BAD_REQUEST", TRANSPORT_FAILURE);
+    return fail(req, res, 400, "BAD_REQUEST", TRANSPORT_FAILURE);
   }
 
   const ct = String(req.headers["content-type"] || "");
   if (raw && ct && !ct.includes("application/json"))
-    return fail(res, 415, "UNSUPPORTED_MEDIA_TYPE", TRANSPORT_FAILURE);
+    return fail(req, res, 415, "UNSUPPORTED_MEDIA_TYPE", TRANSPORT_FAILURE);
 
   let body;
   try {
     body = JSON.parse(raw || "{}");
   } catch {
-    return fail(res, 400, "INVALID_JSON", TRANSPORT_FAILURE);
+    return fail(req, res, 400, "INVALID_JSON", TRANSPORT_FAILURE);
   }
 
   /* --- validate -------------------------------------------------------- */
@@ -135,13 +260,13 @@ export default async function handler(req, res) {
          validation failures stay visible in the metrics. */
       if (err.code === "REJECTED") {
         log("lead.honeypot", {});
-        return fail(res, 400, "REJECTED", "Submission rejected.");
+        return fail(req, res, 400, "REJECTED", "Submission rejected.");
       }
       log("lead.invalid", { code: err.code });
-      return fail(res, 422, err.code, err.message);
+      return fail(req, res, 422, err.code, err.message);
     }
     logError("lead.validate_error", err);
-    return fail(res, 400, "BAD_REQUEST", "Could not process that submission.");
+    return fail(req, res, 400, "BAD_REQUEST", "Could not process that submission.");
   }
 
   payload.meta.submission_id = submissionId();
@@ -237,7 +362,7 @@ export default async function handler(req, res) {
        outcome this system exists to prevent. The client keeps their input
        and offers phone, email and mailto recovery. */
     logError("lead.not_configured", new Error("HUBSPOT_ACCESS_TOKEN absent"), { submission_id: sid });
-    return fail(res, 503, "NOT_CONFIGURED", GENERIC_FAILURE);
+    return fail(req, res, 503, "NOT_CONFIGURED", GENERIC_FAILURE);
   }
 
   try {
@@ -278,9 +403,9 @@ export default async function handler(req, res) {
       log("lead.ack.failed", { submission_id: sid, reason: classifyMailError(mailErr) });
     }
 
-    return send(res, 200, { ok: true, submission_id: sid });
+    return send(req, res, 200, { ok: true, submission_id: sid });
   } catch (err) {
     logError("lead.delivery_failed", err, { submission_id: sid, ms: Date.now() - started });
-    return fail(res, 502, "DELIVERY_FAILED", GENERIC_FAILURE);
+    return fail(req, res, 502, "DELIVERY_FAILED", GENERIC_FAILURE);
   }
 }

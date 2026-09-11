@@ -83,7 +83,10 @@ relevant entry when working in the area it describes — not otherwise.**
 15. **Externally-observable outcomes are asserted from the observer's side**
     where practical. `res.statusCode = 400` is not "the client received 400";
     a built request body is not "HubSpot accepted it"; grant text is not "the
-    role cannot `SELECT`".
+    role cannot `SELECT`". **The outcome includes what the exchange leaves
+    behind** — connection state, framing, what the peer may now do next — not
+    only the message that arrived; and a harness may not tear that down before
+    it has been observed.
 16. **Resource ownership is explicit.** A helper may stop its own work. It must
     not destroy, close, release or mutate a resource the **caller** still needs —
     `readFormBody()` reads a body and does not own the response socket.
