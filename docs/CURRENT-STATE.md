@@ -397,8 +397,12 @@ and `api/_lib/optout.mjs`:
   **`api/_lib/twilio.mjs`'s `readFormBody()` is now bounded in TIME as well
   as in size, since 11 September 2026** — 3 s for the webhook, a 5 s default
   for the operator action, rejecting with `BODY_READ_TIMED_OUT` and
-  cancelling the read rather than letting a stalled body outlive the
-  function. With both preceding phases capped, the projection's
+  **pausing** the read rather than letting a stalled body outlive the
+  function. It **never destroys the request socket**: `req` and `res` share
+  one, so destroying it loses the caller's own 400 — measured against a real
+  `node:http` client, which received `ECONNRESET` while the handler's
+  `res.end()` reported success. `readFormBody()` reads a body and does not own
+  the socket; the caller does. With both preceding phases capped, the projection's
   `budget_exhausted` branch is now unreachable by arithmetic
   (3 + 3 + 1 < 10) and is retained deliberately. See
   `docs/updates/2026-09-11-twilio-inbound-projection-bounds.md` and

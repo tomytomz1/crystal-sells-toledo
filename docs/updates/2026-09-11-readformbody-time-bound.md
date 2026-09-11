@@ -125,9 +125,59 @@ all.
 | `clearTimeout()` on every exit | a timer that fires after success |
 | `off`/`removeListener` for `data` and `end` | late events after a timeout; unbounded `chunks` growth behind a bound meant to end it |
 | `chunks = []` on exit | the closure holding a body buffer alive |
-| `req.destroy()` on failure only, guarded by `req.destroyed` | a read merely *ignored* rather than cancelled; a pointless destroy on success |
+| `req.pause()` on failure only — **never `destroy()`** | a read merely *ignored* rather than stopped — while keeping the socket the caller still has to answer on (see below) |
 | the `error` listener **left attached** | `destroy()` making the stream emit `error` with no listener — which EventEmitter **throws**, taking the invocation down *after* it answered |
 | the timer **not** `unref()`'d | see below |
+
+### The defect found by independent review: `destroy()` loses the response
+
+The first pushed revision (`15443b3`) called `req.destroy()` on every failure
+path, and the oversize branch had called it since
+[#20](https://github.com/tomytomz1/crystal-sells-toledo/pull/20). **`req` and
+`res` share one socket.** Measured against a real `node:http` server and client
+on 11 September 2026:
+
+```
+req.destroy()   ->  req.destroyed = true AND socket.destroyed = true
+                    res.end() DOES NOT THROW
+                    res.writableEnded becomes true
+                    the client receives ECONNRESET, never the 400
+
+req.pause()     ->  socket intact, CLIENT RECEIVES 400
+(doing nothing) ->  socket intact, CLIENT RECEIVES 400
+```
+
+The handler is told nothing: `res.end()` succeeds and reports the response as
+ended, so the endpoint **logs a refusal it never delivered**. For the webhook
+that means Twilio records a connection reset for a request this endpoint
+believed it had answered; for the operator action, Crystal's browser gets a
+reset instead of *"Not recorded"*.
+
+`pause()` is chosen over doing nothing because it stops the flow explicitly
+rather than relying on the listener removal having been the last `data`
+listener. The size bound is unaffected — nothing further accumulates either way,
+and TCP back-pressure does the rest.
+
+**What it does not do, measured rather than assumed.** A draft of this document
+claimed Node closes the connection after the response because the body was never
+fully consumed. **It does not.** Measured the same day: the response carries
+`Connection: keep-alive`, `shouldKeepAlive` is true, and the socket is still
+alive afterwards. A client that stalls or overruns gets its refusal and **may
+hold the connection open**. That is a resource question rather than a
+correctness one, and it is bounded outside this function — the platform ends the
+invocation at `maxDuration` whatever the socket does. Closing it deliberately
+means setting `Connection: close` and tearing down after the response has
+flushed, which requires `res` — which `readFormBody()` does not have and must
+not be given. **Recorded as a residual, below.**
+
+**The rule, stated so it is not re-derived wrongly: `readFormBody()` reads a
+body. It does not own the socket — the caller does, because the caller still has
+to answer.**
+
+This is why the tests now drive a **real `node:http` server and client**. Every
+stub test passed against the broken version, and **two of them asserted
+`destroyCount === 1` as proof of correct cancellation** — they passed *because*
+they asserted the bug. A stub has no socket to lose.
 
 ### The defect found during implementation
 
@@ -193,9 +243,16 @@ same stalled request **never settles**.
 
 ## Still unproven
 
-- **No real stalled socket has ever met this code.** Every test drives an
-  `EventEmitter`. Node's real `IncomingMessage` destroy semantics — `aborted`,
-  `ERR_STREAM_PREMATURE_CLOSE` — are **not** exercised.
+- **A refused request may hold its connection open.** `pause()` delivers the
+  response but does not close the socket, and Node keeps it alive — measured.
+  Bounded by the platform's `maxDuration` rather than by this code. Closing it
+  deliberately is a change to both endpoints' response paths and is **not** made
+  here.
+- **A real stalled socket now does meet this code** — the new section drives a
+  real `node:http` server and client and asserts what the **client received**,
+  not what the handler believed it sent. What remains unexercised is a stall
+  over a real network path rather than loopback, and Vercel's own request
+  plumbing, which is not `node:http` verbatim.
 - **No Twilio request has ever reached the endpoint**, so the 3 s bound has never
   met real Twilio latency. A 16 KB form from a datacentre is milliseconds, but
   that is an expectation, not a measurement.

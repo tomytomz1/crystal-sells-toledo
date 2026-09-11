@@ -307,21 +307,63 @@ export function readFormBody(req, { timeoutMs = BODY_READ_TIMEOUT_MS } = {}) {
          until the request object is collected. */
       chunks = [];
 
-      /* THE ERROR LISTENER IS DELIBERATELY LEFT ATTACHED, and this is the
-         subtle one. `destroy()` below can make the stream emit `error`
-         (an aborted or already-destroyed stream does), and an `error`
-         event with NO listener does not go quietly — EventEmitter THROWS
-         it, which on a serverless runtime takes the whole invocation down
-         AFTER we have answered. onError is a no-op once `settled`, so
-         leaving it attached absorbs that harmlessly. It is one closure on
-         an object that is about to be discarded with the request. */
+      /* THE ERROR LISTENER IS DELIBERATELY LEFT ATTACHED. A stream can
+         emit `error` after we have stopped caring — an aborted request,
+         a reset connection — and an `error` event with NO listener does
+         not go quietly: EventEmitter THROWS it, which on a serverless
+         runtime takes the whole invocation down AFTER we have answered.
+         onError is a no-op once `settled`, so leaving it attached absorbs
+         that harmlessly. It is one closure on an object that is about to
+         be discarded with the request. */
 
-      /* Only now stop the stream, and only if it is still running: a
-         destroy() on the success path would be pointless, and on the
-         timeout path it is what actually ends the read rather than merely
-         ignoring it. */
-      if (err && typeof req.destroy === "function" && req.destroyed !== true) {
-        try { req.destroy(); } catch { /* already gone; nothing to stop */ }
+      /* ---------------------------------------------------------------
+         PAUSE. NEVER DESTROY. THE CALLER STILL HAS TO ANSWER.
+         ---------------------------------------------------------------
+         An earlier draft of this function called req.destroy() here, and
+         the oversize branch has called it since the gate 7 SMS work
+         merged in #20. MEASURED against a real node:http server and
+         client on 11 September 2026, that is a response-losing bug:
+
+           req.destroy()  ->  req.destroyed=true, AND socket.destroyed=true
+                              res.end() does not throw
+                              res.writableEnded becomes true
+                              THE CLIENT GETS ECONNRESET, never the 400
+
+         `req` and `res` share one socket. Destroying the request destroys
+         the response with it — and the handler is told nothing, because
+         res.end() succeeds and reports the response as ended. So the
+         endpoint logs a refusal it never actually delivered.
+
+           req.pause()    ->  socket intact, CLIENT GETS 400
+           (doing nothing) ->  socket intact, CLIENT GETS 400
+
+         pause() is chosen over doing nothing because it stops the flow
+         EXPLICITLY rather than relying on the removal above having been
+         the last `data` listener. The size bound is unaffected: nothing
+         further is accumulated either way, and TCP back-pressure does
+         the rest.
+
+         WHAT THIS DOES NOT DO, measured rather than assumed. An earlier
+         draft of this comment claimed Node closes the connection after
+         the response because the body was never fully consumed. IT DOES
+         NOT. Measured on the same day: the response goes out carrying
+         `Connection: keep-alive`, `shouldKeepAlive` is true, and the
+         socket is still alive afterwards. So a client that stalls or
+         overruns gets its refusal and MAY HOLD THE CONNECTION OPEN.
+
+         That is a resource question, not a correctness one, and it is
+         bounded outside this function: the platform ends the invocation
+         at maxDuration whatever the socket does. Closing it deliberately
+         means setting `Connection: close` and tearing down after the
+         response has flushed — which requires `res`, which this function
+         does not have and must not be given.
+
+         THE RULE, stated so it is not re-derived wrongly: this function
+         reads a body. IT DOES NOT OWN THE SOCKET — the caller does,
+         because the caller is the one that still has to answer. Killing
+         the socket from here is precisely the bug above. */
+      if (err && typeof req.pause === "function") {
+        try { req.pause(); } catch { /* already ended; nothing to pause */ }
       }
 
       if (err) reject(err);

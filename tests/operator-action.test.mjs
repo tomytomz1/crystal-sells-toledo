@@ -2259,10 +2259,12 @@ describe("a POST whose body never arrives", () => {
     };
     req.destroyed = false;
     req.destroyCount = 0;
+    req.pauseCount = 0;
     req.destroy = function destroy() {
       this.destroyCount += 1;
       this.destroyed = true;
     };
+    req.pause = function pause() { this.pauseCount += 1; return this; };
     return req;
   }
 
@@ -2299,8 +2301,14 @@ describe("a POST whose body never arrives", () => {
     assert.match(text, /"reason":"timed_out"/,
       "a timed-out body was not reported as timed_out");
 
-    /* The read was cancelled rather than left running. */
-    assert.equal(req.destroyCount, 1, "the stalled stream was never destroyed");
+    /* The read was STOPPED rather than left running — and the socket was
+       NOT destroyed. `req` and `res` share it, so destroying the request
+       destroys the response: measured against a real node:http client,
+       the 400 above never arrives and the client gets ECONNRESET instead.
+       This assertion previously required destroyCount === 1 and so passed
+       only because it asserted the bug. */
+    assert.equal(req.destroyCount, 0, "the socket was destroyed - the 'Not recorded' page would never arrive");
+    assert.equal(req.pauseCount, 1, "the stalled stream was not paused");
     assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
 
     /* Late events cannot resurrect it. */
@@ -2344,5 +2352,6 @@ describe("a POST whose body never arrives", () => {
     assert.equal(res.statusCode, 200, "a normally streamed POST was refused");
     assert.equal(calls.length, 1, "the row was not written");
     assert.equal(req.destroyCount, 0, "a successful read destroyed the stream");
+    assert.equal(req.pauseCount, 0, "a successful read paused the stream");
   });
 });

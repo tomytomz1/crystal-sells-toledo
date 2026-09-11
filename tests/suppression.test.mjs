@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { createServer, request as httpRequest } from "node:http";
 import { pathToFileURL } from "node:url";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -1259,6 +1260,7 @@ describe("the HubSpot projection is bounded", () => {
     const handlers = {};
     let fed = false;
     let destroyed = 0;
+    let paused = 0;
     const stalling = {
       method: "POST",
       url: "/api/twilio-inbound",
@@ -1288,6 +1290,7 @@ describe("the HubSpot projection is bounded", () => {
       },
       off(ev) { delete handlers[ev]; return this; },
       destroy() { destroyed += 1; this.destroyed = true; },
+      pause() { paused += 1; return this; },
     };
 
     const calls = captureExecutor();
@@ -1323,11 +1326,13 @@ describe("the HubSpot projection is bounded", () => {
     assert.equal(rejected.reason, "timed_out",
       "a timed-out body was reported as something else");
 
-    /* THE READ WAS ACTUALLY CANCELLED, not merely ignored: the stream was
-       destroyed, and the listeners were removed so the late data/end above
-       reached nothing. A test that only checked the status code would pass
-       against an implementation that left the stream running forever. */
-    assert.equal(destroyed, 1, "the stalled stream was never destroyed");
+    /* THE READ WAS ACTUALLY STOPPED, not merely ignored — and the socket
+       was NOT destroyed, because `res` shares it and the 400 above still
+       has to reach Twilio. A test that only checked the status code would
+       pass against an implementation that left the stream running, and one
+       that asserted destruction would pass against the bug. */
+    assert.equal(destroyed, 0, "the stalled stream was destroyed - that kills the 400");
+    assert.equal(paused, 1, "the stalled stream was not paused");
     assert.ok(!handlers.data && !handlers.end,
       "the data/end listeners were left attached after the timeout");
 
@@ -1408,10 +1413,12 @@ describe("readFormBody time bound", () => {
     };
     req.destroyed = false;
     req.destroyCount = 0;
+    req.pauseCount = 0;
     req.destroy = function destroy() {
       this.destroyCount += 1;
       this.destroyed = true;
     };
+    req.pause = function pause() { this.pauseCount += 1; return this; };
     return req;
   }
 
@@ -1429,8 +1436,13 @@ describe("readFormBody time bound", () => {
     assert.equal(bodyErrorReason(out.e), "timed_out");
     assert.ok(elapsed < 1000, `took ${elapsed}ms - the bound did not fire`);
 
-    /* CANCELLED, not merely ignored. */
-    assert.equal(req.destroyCount, 1, "the stalled stream was never destroyed");
+    /* STOPPED, not merely ignored — and NOT destroyed. Destroying `req`
+       destroys the socket `res` shares, which loses the caller's 400
+       entirely (measured; see the node:http section below). The earlier
+       version of this test asserted destroyCount === 1 and called it
+       proof of cancellation, so it PASSED BECAUSE IT ASSERTED THE BUG. */
+    assert.equal(req.destroyCount, 0, "the stalled stream was destroyed - that kills the caller's response");
+    assert.equal(req.pauseCount, 1, "the stalled stream was not paused, so it may still be flowing");
     assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
     assert.equal(req.listenerCount("end"), 0, "the end listener was left attached");
   });
@@ -1446,7 +1458,8 @@ describe("readFormBody time bound", () => {
     assert.equal(out.e.token, BODY_READ_TIMED_OUT);
     /* CLAUDE.md rule 11: reject, never truncate. Nothing partial escapes. */
     assert.equal(out.v, undefined);
-    assert.equal(req.destroyCount, 1);
+    assert.equal(req.destroyCount, 0, "the socket was destroyed - the caller's response would be lost");
+    assert.equal(req.pauseCount, 1);
   });
 
   /* ---- LATE EVENTS AFTER THE TIMEOUT ------------------------------- */
@@ -1467,7 +1480,7 @@ describe("readFormBody time bound", () => {
     req.emit("error", new Error("ECONNRESET"));
 
     await new Promise((r) => setImmediate(r));
-    assert.equal(req.destroyCount, 1, "destroy() ran more than once");
+    assert.equal(req.destroyCount, 0, "the socket was destroyed");
   });
 
   /* ---- A NORMAL STREAMED BODY -------------------------------------- */
@@ -1486,8 +1499,9 @@ describe("readFormBody time bound", () => {
 
     /* THE TIMER MUST NOT FIRE AFTER SUCCESS. If it were still armed it
        would reject an already-resolved promise — invisible — and keep the
-       handle alive. The stream is NOT destroyed on success. */
+       handle alive. Nothing is destroyed or paused on success. */
     assert.equal(req.destroyCount, 0, "a successful read destroyed the stream");
+    assert.equal(req.pauseCount, 0, "a successful read paused the stream");
     assert.equal(req.listenerCount("data"), 0, "the data listener was left attached");
     assert.equal(req.listenerCount("end"), 0, "the end listener was left attached");
 
@@ -1512,7 +1526,10 @@ describe("readFormBody time bound", () => {
     const actual = await p;
     assert.equal(actual.ok, false);
     assert.equal(actual.e.token, "PAYLOAD_TOO_LARGE");
-    assert.equal(req.destroyCount, 1, "an oversize stream was not stopped");
+    /* The oversize branch has destroyed the socket since #20. It stops the
+       stream the same way as the timeout now: paused, never destroyed. */
+    assert.equal(req.destroyCount, 0, "an oversize body destroyed the socket - the 400 would be lost");
+    assert.equal(req.pauseCount, 1, "an oversize stream was not stopped");
     assert.equal(req.listenerCount("data"), 0);
   });
 
@@ -1598,7 +1615,7 @@ describe("readFormBody time bound", () => {
       ]);
       assert.equal(race, "STILL_PENDING",
         "the pre-fix implementation settled - the bound is not what makes the fixed one settle");
-      assert.equal(req.destroyCount, 0, "the pre-fix implementation cancelled the read");
+      assert.equal(req.pauseCount, 0, "the pre-fix implementation stopped the read");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1612,5 +1629,225 @@ describe("readFormBody time bound", () => {
        rendering must leave room inside a 15 s maxDuration. */
     assert.ok(WEBHOOK_BODY_TIMEOUT_MS + NOTIFICATION_DEADLINE_MS + 1000 < 15000,
       `a ${WEBHOOK_BODY_TIMEOUT_MS}ms body read plus a ${NOTIFICATION_DEADLINE_MS}ms notification does not leave room inside the 15 s maxDuration`);
+  });
+});
+
+/* =====================================================================
+   9  AGAINST A REAL SOCKET — node:http, not a stub
+   =====================================================================
+   Everything in section 8 drives an EventEmitter. That proved the bound
+   fires and the listeners go, and it proved NOTHING about what the bound
+   does to the HTTP response — because a stub has no socket to lose.
+
+   THE DEFECT THIS SECTION EXISTS TO HAVE CAUGHT. readFormBody() called
+   req.destroy() on timeout, and the oversize branch had called it since
+   the gate 7 SMS work merged in #20. `req` and `res` share ONE socket, so
+   destroying the request destroyed the response with it. Measured here on
+   11 September 2026, before the fix:
+
+     req.destroy()  ->  socket.destroyed = true
+                        res.end() DOES NOT THROW
+                        res.writableEnded becomes true
+                        the client receives ECONNRESET, never the 400
+
+   The handler is told nothing. It logs a refusal it did not deliver —
+   which for the webhook means Twilio records a connection reset for a
+   request this endpoint believed it had answered.
+
+   The stub tests could not see any of it, and two of them asserted
+   `destroyCount === 1` as PROOF OF CORRECT CANCELLATION. They passed
+   because they asserted the bug.
+   ===================================================================== */
+describe("readFormBody against a real node:http socket", () => {
+  /**
+   * Run one request against a real server and report what the CLIENT saw.
+   * `handler` gets (req, res) and decides how to read and answer.
+   */
+  async function withServer(handler, { write = "MessageSid=SM1&Bo", contentLength = 200 } = {}) {
+    const seen = { server: {}, clientStatus: null, clientBody: "", clientError: null };
+    const server = createServer((req, res) => { handler(req, res, seen); });
+    /* RECORDED, NEVER DESTROYED. Node's default clientError handler
+       destroys the socket, and an earlier draft of this harness copied
+       that — which killed the very response under test and made the
+       fixed code look broken. The harness observes; it does not
+       intervene. */
+    server.on("clientError", (err) => { seen.serverClientError = err.code; });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address();
+
+    let clientReq;
+    try {
+      await new Promise((resolve) => {
+        let done = false;
+        let guard;
+        /* THE GUARD IS CLEARED ON THE WAY OUT, and an earlier draft of
+           this harness did not clear it. The stalled client never
+           finishes its body, so server.close() below waits on that
+           lingering connection — long enough for a still-armed 4 s guard
+           to fire and overwrite `clientError` with NO_ANSWER AFTER the
+           400 had already been received. The harness then reported a
+           delivered response as lost, and the fixed code looked broken.
+           An observation that can be rewritten after the fact is not an
+           observation. */
+        const fin = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(guard);
+          resolve();
+        };
+        clientReq = httpRequest({
+          host: "127.0.0.1", port, method: "POST", path: "/api/twilio-inbound",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": String(contentLength),
+          },
+        });
+        clientReq.on("response", (res) => {
+          seen.clientStatus = res.statusCode;
+          res.on("data", (d) => { seen.clientBody += d; });
+          res.on("end", fin);
+        });
+        clientReq.on("error", (err) => { seen.clientError = err.code || err.message; fin(); });
+        /* A partial body, and then nothing — ever. */
+        clientReq.write(write);
+        /* A ceiling so a regression fails the assertion, not the suite. */
+        guard = setTimeout(() => {
+          seen.clientError = seen.clientError || "NO_ANSWER";
+          fin();
+        }, 4000);
+      });
+    } finally {
+      /* The CLIENT's half is torn down here — never the server's socket,
+         which is what carries the response under test. Without this,
+         server.close() waits on a connection whose body never completes. */
+      try { clientReq?.destroy(); } catch { /* already gone */ }
+      /* The stalled request's body never completes, so its connection
+         lingers and server.close() alone never calls back — the test
+         would hang rather than fail. Every observation has already been
+         recorded by this point, so dropping the sockets here cannot
+         affect what was measured. */
+      server.closeAllConnections?.();
+      await new Promise((r) => server.close(r));
+    }
+    return seen;
+  }
+
+  /* ---- THE REGRESSION ---------------------------------------------- */
+  test("a stalled body times out AND the caller's 400 still reaches the client", async () => {
+    const seen = await withServer(async (req, res, out) => {
+      try {
+        await readFormBody(req, { timeoutMs: 150 });
+        out.server.reason = "resolved";
+      } catch (err) {
+        out.server.reason = err?.token;
+      }
+      /* Exactly what both endpoints do next. */
+      out.server.socketDestroyedBeforeAnswer = res.socket ? res.socket.destroyed : null;
+      res.statusCode = 400;
+      res.end("Not recorded");
+    });
+
+    assert.equal(seen.server.reason, BODY_READ_TIMED_OUT, "the bound did not fire");
+
+    /* THE ASSERTION THE STUBS COULD NOT MAKE. */
+    assert.equal(seen.server.socketDestroyedBeforeAnswer, false,
+      "the socket was already destroyed when the handler went to answer - the response cannot be delivered");
+    assert.equal(seen.clientError, null,
+      `the client got ${seen.clientError} instead of a response - the refusal was lost on the wire`);
+    assert.equal(seen.clientStatus, 400, "the client did not receive the 400");
+    assert.equal(seen.clientBody, "Not recorded");
+  });
+
+  /* ---- THE SAME FOR OVERSIZE, which has had this since #20 ---------- */
+  test("an oversize body is refused AND the caller's 400 still reaches the client", async () => {
+    const seen = await withServer(async (req, res, out) => {
+      try {
+        await readFormBody(req, { timeoutMs: 5000 });
+        out.server.reason = "resolved";
+      } catch (err) {
+        out.server.reason = err?.token;
+      }
+      out.server.socketDestroyedBeforeAnswer = res.socket ? res.socket.destroyed : null;
+      res.statusCode = 400;
+      res.end("Not recorded");
+      /* Declared length is honest here, so the refusal comes from the
+         running byte total rather than from the header check. */
+    }, { write: "x".repeat(MAX_WEBHOOK_BYTES + 64), contentLength: MAX_WEBHOOK_BYTES + 64 });
+
+    assert.equal(seen.server.reason, "PAYLOAD_TOO_LARGE", "an oversize body was not refused");
+    assert.equal(seen.server.socketDestroyedBeforeAnswer, false,
+      "the socket was destroyed on the oversize path - the response cannot be delivered");
+    assert.equal(seen.clientStatus, 400, "the client did not receive the oversize refusal");
+  });
+
+  /* ---- AND AN ORDINARY REQUEST IS UNAFFECTED ----------------------- */
+  test("a complete body over a real socket resolves and answers 200", async () => {
+    const body = "MessageSid=SM1&From=%2B14195550123&Body=STOP";
+    const seen = await withServer(async (req, res, out) => {
+      try {
+        const params = await readFormBody(req, { timeoutMs: 5000 });
+        out.server.reason = "resolved";
+        out.server.sid = params.MessageSid;
+        out.server.body = params.Body;
+      } catch (err) {
+        out.server.reason = err?.token || err?.message;
+      }
+      res.statusCode = 200;
+      res.end("ok");
+    }, { write: body, contentLength: Buffer.byteLength(body) });
+
+    assert.equal(seen.server.reason, "resolved", "a complete body was refused");
+    assert.equal(seen.server.sid, "SM1");
+    assert.equal(seen.server.body, "STOP");
+    assert.equal(seen.clientStatus, 200);
+    assert.equal(seen.clientBody, "ok");
+  });
+
+  /* ---- THE MUTATION PROOF, ON A REAL SOCKET ------------------------ */
+  /* Section 8's mutation disarmed the timer. This one restores the
+     destroy() and shows the client loses the response — run against a
+     THROWAWAY COPY of the tree, never the deployment candidate. */
+  test("restoring req.destroy() loses the response on the wire", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cst-destroy-"));
+    try {
+      const lib = join(dir, "twilio.mjs");
+      const src = readFileSync(join(REPO, "api/_lib/twilio.mjs"), "utf8");
+      const PAUSE = `      if (err && typeof req.pause === "function") {
+        try { req.pause(); } catch { /* already ended; nothing to pause */ }
+      }`;
+      assert.ok(src.includes(PAUSE), "the pause block moved - this mutation would prove nothing");
+      const mutated = src
+        .replace(PAUSE, `      if (err && typeof req.destroy === "function" && req.destroyed !== true) {
+        try { req.destroy(); } catch { /* already gone */ }
+      }`)
+        .replace('import twilio from "twilio";',
+          "const twilio = { validateRequest() { throw new Error('not used here'); } };");
+      assert.notEqual(mutated, src, "the mutation changed nothing");
+      writeFileSync(lib, mutated);
+      const { readFormBody: destroying } = await import(pathToFileURL(lib).href);
+
+      const seen = await withServer(async (req, res, out) => {
+        try { await destroying(req, { timeoutMs: 150 }); } catch (err) { out.server.reason = err?.token; }
+        out.server.socketDestroyedBeforeAnswer = res.socket ? res.socket.destroyed : null;
+        res.statusCode = 400;
+        /* res.end() does NOT throw here, which is exactly why the bug is
+           invisible from inside the handler. */
+        res.end("Not recorded");
+        out.server.writableEnded = res.writableEnded;
+      });
+
+      assert.equal(seen.server.reason, BODY_READ_TIMED_OUT);
+      assert.equal(seen.server.socketDestroyedBeforeAnswer, true,
+        "the pre-fix code did not destroy the socket - this mutation proves nothing");
+      /* The handler believes it answered... */
+      assert.equal(seen.server.writableEnded, true,
+        "res.end() reported failure - the bug would have been visible without this test");
+      /* ...and the client got nothing. */
+      assert.notEqual(seen.clientStatus, 400,
+        "the client received the 400 from the pre-fix code - the defect does not reproduce");
+      assert.ok(seen.clientError, "the client saw neither a response nor an error");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
