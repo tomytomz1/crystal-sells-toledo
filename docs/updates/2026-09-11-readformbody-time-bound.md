@@ -184,6 +184,19 @@ not be given. **Recorded as a residual, below.**
 > correction is recorded as sequenced follow-up work in
 > `docs/CURRENT-STATE.md` rather than folded into #30.
 
+> **Second correction, 11 September 2026 (gate 7 lifecycle repair).** The
+> sentence immediately above — *"the two gate 7 endpoints described in this
+> document still carry the original behaviour"* — **was true when it was
+> written and is no longer true.** Both are left unedited. `api/twilio-inbound.js`
+> and `api/operator-action.js` now make the same decision at their own response
+> boundaries — `reply()` and `page()` respectively, which every response in each
+> file goes through — using the shared pure predicate `bodyStillOutstanding()`
+> exported from `api/_lib/twilio.mjs`. `readFormBody()` is **still** not given
+> `res` and still does not own the socket; only the callers changed. The repair
+> covers the paths that answer **before** the body is read as well as the
+> `readFormBody()` refusals, and is proved on a **raw socket** for both
+> endpoints. Detail: `docs/updates/2026-09-11-gate-7-connection-lifecycle.md`.
+
 **The rule, stated so it is not re-derived wrongly: `readFormBody()` reads a
 body. It does not own the socket — the caller does, because the caller still has
 to answer.**

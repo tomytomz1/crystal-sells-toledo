@@ -55,7 +55,10 @@ import {
   NOTIFICATION_SUBJECT_PREFIX, NOTIFICATION_DEADLINE_MS, NOTIFICATION_TIMED_OUT,
 } from "../api/_lib/mail.mjs";
 import { SUPPRESSION_REASON, FEATURE_FLAG } from "../api/_lib/consent.mjs";
-import { TWILIO_TOKEN_VAR, BODY_READ_TIMEOUT_MS } from "../api/_lib/twilio.mjs";
+import {
+  TWILIO_TOKEN_VAR, BODY_READ_TIMEOUT_MS, MAX_WEBHOOK_BYTES,
+} from "../api/_lib/twilio.mjs";
+import { withRawRequest } from "./helpers.mjs";
 import { LEDGER_TIMEOUT_MS } from "../api/_lib/consent-ledger.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -2036,34 +2039,76 @@ describe("the operator-action static guards", () => {
      alternative matched the CALL SITE, four hundred characters from an
      unrelated `ledger_absent` 503 — so every failure path in
      surfaceToOperator() could be turned into a 200 with check.mjs still
-     passing. This mutation is the one that defeated it. */
-  test("turning the surfacing failures into 200s is refused", () => {
-    mutate(WEBHOOK, pristineWebhook, (t) => {
+     passing. These two mutations are the ones that defeated it.
+
+     AND A MUTATION THAT NO LONGER MATCHES IS THE SAME FAILURE ONE LAYER
+     UP. On 11 September 2026 the connection-lifecycle repair changed
+     `reply(res, 503)` to `reply(req, res, 503)`, and both of these went
+     stale in the same commit — caught here only because mutate() refuses
+     a no-op. So the surgery below states its target, asserts the target
+     EXISTS, asserts HOW MANY it expected to find, and asserts the slice
+     boundaries resolved — none of which the previous version did, and
+     any one of which failing silently would have left these tests green
+     and proving nothing. */
+  const FAILURE_CALL = "return reply(req, res, 503);";
+  const SILENT_200 = "return reply(req, res, 200, EMPTY_TWIML);";
+
+  /** Replace the first `count` failure replies inside surfaceToOperator(). */
+  function breakSurfacing(count) {
+    return (t) => {
       const start = t.indexOf("async function surfaceToOperator");
+      assert.notEqual(start, -1,
+        "surfaceToOperator() was not found - this mutation would prove nothing");
       const next = t.indexOf("\nasync function ", start + 1);
-      const body = t.slice(start, next === -1 ? t.length : next);
-      return t.slice(0, start) +
-        body.replace(/return reply\(res, 503\);/g, "return reply(res, 200, EMPTY_TWIML);") +
-        t.slice(next === -1 ? t.length : next);
-    });
+      const end = next === -1 ? t.length : next;
+      assert.ok(end > start, "the function slice did not resolve - the mutation target is wrong");
+      const body = t.slice(start, end);
+      const found = body.split(FAILURE_CALL).length - 1;
+      assert.equal(found, 4,
+        `surfaceToOperator() holds ${found} \`${FAILURE_CALL}\` calls, not 4 - the mutation target has moved and this test proves nothing`);
+      let left = count;
+      const broken = body.split(FAILURE_CALL)
+        .reduce((acc, part, i) => i === 0 ? part
+          : acc + (left-- > 0 ? SILENT_200 : FAILURE_CALL) + part);
+      assert.notEqual(broken, body, "the function body was not changed");
+      return t.slice(0, start) + broken + t.slice(end);
+    };
+  }
+
+  test("turning the surfacing failures into 200s is refused", () => {
+    mutate(WEBHOOK, pristineWebhook, breakSurfacing(4));
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a surfacing path that answers 200 on every failure");
     assert.match(output, /silent 200|reported as success/);
   });
 
   test("deleting one of the four surfacing failure paths is refused", () => {
-    mutate(WEBHOOK, pristineWebhook, (t) => {
-      const start = t.indexOf("async function surfaceToOperator");
-      const next = t.indexOf("\nasync function ", start + 1);
-      const body = t.slice(start, next === -1 ? t.length : next);
-      /* Just one — the guard must count, not merely find one survivor. */
-      return t.slice(0, start) +
-        body.replace("return reply(res, 503);", "return reply(res, 200, EMPTY_TWIML);") +
-        t.slice(next === -1 ? t.length : next);
-    });
+    /* Just one — the guard must COUNT, not merely find one survivor. */
+    mutate(WEBHOOK, pristineWebhook, breakSurfacing(1));
     const { ok, output } = runCheck();
     assert.ok(!ok, "check.mjs accepted a surfacing path with one failure turned into a 200");
     assert.match(output, /silent 200|reported as success/);
+  });
+
+  /* ---- AND THE GUARD THAT PROTECTS THE CONNECTION DECISION --------- */
+  test("a response that bypasses the lifecycle-aware boundary is refused", () => {
+    /* One direct res.end() — exactly the shape that would reopen the
+       defect on a single path while every behavioural test still passed,
+       because no test is guaranteed to be pointed at the new path. */
+    mutate(WEBHOOK, pristineWebhook,
+      "    res.setHeader(\"Allow\", \"POST\");\n    return reply(req, res, 405);",
+      "    res.setHeader(\"Allow\", \"POST\");\n    res.statusCode = 405;\n    return res.end();");
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted a response written outside reply()");
+    assert.match(output, /every response must go through reply\(\)/);
+  });
+
+  test("dropping the connection decision from the operator page is refused", () => {
+    mutate(ENDPOINT, pristineEndpoint,
+      "  if (bodyStillOutstanding(req)) res.setHeader(\"Connection\", \"close\");\n", "");
+    const { ok, output } = runCheck();
+    assert.ok(!ok, "check.mjs accepted a page() that never closes an unconsumed connection");
+    assert.match(output, /advertise a reusable connection/);
   });
 
   test("removing the notification from the unclassified branch is refused", () => {
@@ -2353,5 +2398,136 @@ describe("a POST whose body never arrives", () => {
     assert.equal(calls.length, 1, "the row was not written");
     assert.equal(req.destroyCount, 0, "a successful read destroyed the stream");
     assert.equal(req.pauseCount, 0, "a successful read paused the stream");
+  });
+});
+
+/* =====================================================================
+   11  THE CONNECTION, NOT ONLY THE PAGE — RAW SOCKET
+   =====================================================================
+   Everything above proves what the operator's browser RECEIVED. None of
+   it proves what state the exchange LEFT BEHIND — and a harness that
+   tears the connection down as soon as the response has been seen makes
+   that structurally unobservable. CLAUDE.md rule 15: the observable
+   outcome includes connection state and framing, and the teardown comes
+   after the observation window, never before it.
+
+   THE DEFECT REPAIRED HERE. api/operator-action.js could answer while a
+   declared request body had not been completely consumed and still send
+   `Connection: keep-alive` — advertising a connection that becomes
+   usable again only once the client sends the rest of the body it
+   declared. Same shape as the six paths #30 fixed in api/lead.js, and
+   the reason the decision now sits in page(), which every HTML response
+   here goes through.
+
+   A POST CAN BE REFUSED BEFORE THE BODY IS READ AT ALL — an unsupported
+   method, an unconfigured endpoint, a token in the query string — so the
+   readFormBody() catch was never the only path that needed this.
+
+   THE GET MUST NOT LOSE KEEP-ALIVE, which is why the rule is not
+   `!req.complete`: a bodyless request reports `complete === false` at
+   handler entry too.
+
+   These drive the REAL EXPORTED HANDLER.
+   ===================================================================== */
+describe("the operator action's connection lifecycle, on a raw socket", () => {
+  const CRLF = "\r\n";
+  const raw = (line, headers = [], body = "") =>
+    line + CRLF + ["Host: 127.0.0.1", ...headers].join(CRLF) + CRLF + CRLF + body;
+
+  const SECOND = raw("PUT /api/operator-action HTTP/1.1");
+  const FORM = "Content-Type: application/x-www-form-urlencoded";
+
+  /* Every refused page must still arrive WHOLE. A connection decision
+     that truncated the response would be a worse defect than the one
+     being fixed, and the security headers are part of the page. */
+  function assertCompletePage(seen) {
+    assert.ok(seen.body.includes("</html>"),
+      "the page did not arrive complete - the response was truncated");
+    assert.match(seen.raw, /X-Frame-Options: DENY/i, "the page lost X-Frame-Options");
+    assert.match(seen.raw, /Content-Security-Policy: /i, "the page lost its CSP");
+    assert.match(seen.raw, /X-Content-Type-Options: nosniff/i, "the page lost nosniff");
+  }
+
+  /* ---- A. BODYLESS EARLY REFUSAL — keep-alive is KEPT --------------- */
+  test("a bodyless unsupported method keeps keep-alive and the socket is reused", async () => {
+    const seen = await withRawRequest(operatorHandler, {
+      request: raw("PUT /api/operator-action HTTP/1.1"),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 405, "the bodyless unsupported method was not refused 405");
+    assert.notEqual(String(seen.connection || "").toLowerCase(), "close",
+      "a request with NOTHING outstanding was closed - a GET or a scanner probe would lose keep-alive too");
+    assert.equal(seen.serverClosed, false, "the server closed a connection with nothing outstanding");
+    assertCompletePage(seen);
+    assert.equal(seen.dispatched.length, 2,
+      `the second request was not dispatched (${seen.dispatched.join(", ")})`);
+    assert.equal(seen.responseCount, 2, "the second request got no response");
+  });
+
+  /* ---- B. PRE-BODY REFUSAL WITH A DECLARED BODY — closed ------------ */
+  test("a token in the query string is refused before the read AND the connection closes", async () => {
+    const seen = await withRawRequest(operatorHandler, {
+      /* Refused by handlePost BEFORE readFormBody() is called, with a
+         declared body left deliberately incomplete. */
+      request: raw("POST /api/operator-action?t=leaked HTTP/1.1",
+        [FORM, "Content-Length: 400"], "confirm=RECORD"),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 400, "the existing token-in-query status changed");
+    assert.match(seen.body, /address bar/, "this was not the token-in-query refusal");
+    assert.equal(String(seen.connection || "").toLowerCase(), "close",
+      "a pre-body refusal advertised a reusable connection while declared bytes were outstanding");
+    assertCompletePage(seen);
+    assert.equal(seen.serverClosed, true, "the server did not close the connection it said it would close");
+    assert.equal(seen.dispatched.length, 1,
+      `something else was dispatched on a closed connection (${seen.dispatched.join(", ")})`);
+    assert.equal(seen.responseCount, 1, "a second response was produced on a closed connection");
+  });
+
+  /* ---- C. BODY-READ REFUSAL — closed ------------------------------- */
+  test("an oversize declared body is refused 400 AND the connection closes", async () => {
+    /* The HEADER fast path: readFormBody() refuses on the declared length
+       before a byte is accumulated, so no body is sent at all and the
+       declared bytes stay outstanding. */
+    const seen = await withRawRequest(operatorHandler, {
+      request: raw("POST /api/operator-action HTTP/1.1",
+        [FORM, `Content-Length: ${MAX_WEBHOOK_BYTES + 64}`]),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 400, "the existing body-read refusal status changed");
+    assert.match(seen.body, /could not be read/, "this was not the body-read refusal");
+    assert.match(seen.body, /Not recorded/, "the page no longer says nothing was recorded");
+    assert.equal(String(seen.connection || "").toLowerCase(), "close",
+      "a body-read refusal advertised a reusable connection over bytes nobody read");
+    assertCompletePage(seen);
+    assert.equal(seen.serverClosed, true, "the server did not close after refusing the body");
+    assert.equal(seen.dispatched.length, 1,
+      `something else was dispatched on a closed connection (${seen.dispatched.join(", ")})`);
+  });
+
+  /* ---- D. A COMPLETE POST — keep-alive is KEPT --------------------- */
+  test("a complete POST refused 400 keeps keep-alive and the socket is reused", async () => {
+    /* Complete, small, and refused for a reason that has nothing to do
+       with the transport: the confirmation literal is missing. Nothing is
+       written, and NOTHING is outstanding. */
+    const body = "scope=sms";
+    const seen = await withRawRequest(operatorHandler, {
+      request: raw("POST /api/operator-action HTTP/1.1",
+        [FORM, `Content-Length: ${Buffer.byteLength(body)}`], body),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 400, "the existing no-confirmation status changed");
+    assert.match(seen.body, /confirmation/, "this was not the missing-confirmation refusal");
+    assert.notEqual(String(seen.connection || "").toLowerCase(), "close",
+      "a fully received request lost keep-alive");
+    assert.equal(seen.serverClosed, false, "the server closed a connection with nothing outstanding");
+    assertCompletePage(seen);
+    assert.equal(seen.dispatched.length, 2,
+      `the second request was not dispatched (${seen.dispatched.join(", ")})`);
+    assert.equal(seen.responseCount, 2, "the second request got no response");
   });
 });
