@@ -601,49 +601,117 @@ function and the sender role; `db/001` is unchanged.
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested, but nothing sends or calls, so nothing calls it in production.
 
-## Known defects on the LIVE lead path — the immediate next runtime task
+## The lead path's body read — bounded in size AND in time
 
-`api/lead.js` uses `readBody()` from `api/_lib/security.mjs`. That function has
-**three** oversize refusal paths, and they do not behave the same way. Only one
-of them carries the `#28` defect.
+`api/lead.js` reads its body through `readBody()` in `api/_lib/security.mjs`.
+Two defects lived there, both **live**, and
+[#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30) fixed both.
 
-| Path in `readBody()` | Rejects | Calls `req.destroy()` |
+| Path in `readBody()` | Refuses | Behaviour now |
 |---|---|---|
-| declared `Content-Length` over the cap, checked before reading | yes | **no** |
-| an already-parsed `req.body` (the platform supplied it) over the cap | yes | **no** |
-| **streaming accumulation crossing the cap mid-read** | yes | **yes — the defect** |
+| declared `Content-Length` over `MAX_BODY_BYTES` | yes | unchanged — refused before a byte is read, **no timer armed** |
+| an already-parsed `req.body` over the cap | yes | unchanged — measured and refused in hand, **no timer armed** |
+| **streaming accumulation crossing the cap** | yes | `req.pause()`, **never `req.destroy()`** |
+| **the streaming read exceeding `BODY_READ_TIMEOUT_MS`** | yes | new — a **total** deadline, not an inactivity gap |
 
-**Defect 1 — the streaming oversize branch destroys the response.**
-`api/_lib/security.mjs:143` calls `req.destroy()` after rejecting. That is the
-same pattern [#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28)
-measured and fixed in `api/_lib/twilio.mjs`: `req` and `res` share one socket, so
-destroying the request destroys the response — `res.end()` still succeeds and
-reports the response as ended, while the client receives `ECONNRESET`. On this
-path, and **only** this path, the refusal is lost on the wire while the log
-records a delivered response.
+**What was wrong.** The streaming oversize branch called `req.destroy()`. `req`
+and `res` share one socket, so that destroyed the response the handler still had
+to send: `res.end()` succeeded and `res.writableEnded` became true, so the
+handler was told nothing. **When this branch is exercised against a real local
+`node:http` boundary, the client receives `ECONNRESET` instead of the intended
+refusal**, while the handler logs a 413 it never delivered. Separately, the
+streaming fallback registered `data`/`end`/`error` with **no code-level
+deadline**: if that path was exercised and the client stalled, the read could
+remain pending until an outside/platform limit intervened.
 
-The two fast paths reject before any socket teardown and are **not** claimed to
-have this defect. Nothing has measured them as broken, and nothing should say
-they are.
+**Both were present in the live endpoint's CODE PATH; neither is claimed to have
+been observed in Production.** See the reachability note below.
 
-**Defect 2 — the streaming fallback has no time bound.** It registers `data`,
-`end` and `error` and then waits indefinitely. A client that opens a request,
-sends a partial body and stalls holds the invocation until the platform's own
-timeout ends it. This is the size-bounded-but-time-unbounded shape that #28
-fixed in `readFormBody()`; `readBody()` never received the equivalent bound.
+**The bound is 5 s**, derived from this endpoint's own budget — 30 s
+`maxDuration`, no third-party clock, a 16 KB cap that a poor mobile uplink
+delivers in roughly 2.6 s. The arithmetic, including the honest note that the
+downstream per-step ceilings are **not** additive-realistic, is in the source
+above `BODY_READ_TIMEOUT_MS`. Deliberately **not** the webhook's 3 s: that one is
+bound by a 15 s `maxDuration` and Twilio's own clock, and neither applies here.
 
-**Reachability is unproven.** Whether Vercel's Node runtime populates `req.body`
-for `api/lead.js` in Production — and therefore whether the streaming fallback is
-exercised there at all — **has not been measured**. It is a real code path with
-two real defects; how often production reaches it is an open question, not a
-claim. Treat the fix as correctness work, not as an incident.
+**New response code.** A body-read timeout now answers **`408 BODY_READ_TIMED_OUT`**
+rather than `400 BAD_REQUEST`. The request was not malformed; it never finished
+arriving, and `code` is held to the same truthfulness standard as prose. Oversize
+still answers `413 PAYLOAD_TOO_LARGE`; a stream error still answers `400`. No
+body-read failure reaches parsing, validation, consent evidence, the ledger,
+HubSpot or the acknowledgement mail — proven by driving the real handler over a
+real socket, against a control that shows a complete body **does** reach delivery.
 
-**Both were found by repo-wide pattern searches that #28's defect triggered** —
-defect 1 by the resource-ownership search, defect 2 by the unbounded-read search
-that the first pass missed (see `docs/ENGINEERING-LESSONS.md`). Deliberately not
-fixed in #28, and deliberately not fixed by the process change that introduced
-`docs/ENGINEERING-LESSONS.md`. They are the **immediate next runtime pull
-request**. Unlike the gate 7 endpoints, this path is **live**.
+**Whether Vercel Production reaches the streaming fallback for `api/lead.js` at
+all remains UNPROVEN** — it has not been measured, and nothing here asserts it
+either way. The path is correct if reached.
+
+**The connection lifecycle is part of the fix, not a residual.** An earlier
+revision of this work left `pause()`'s surviving connection described as "a
+resource question, not a correctness failure". **That classification was wrong**,
+and independent review caught it. Measured on that revision: a 408 or 413 issued
+while part of the request body was still unread went out carrying
+`Connection: keep-alive` on a connection that only becomes usable again if the
+client sends the rest of the body it declared — which, on the timeout path, is by
+definition what it did not do. The response was advertising reuse the server
+would not honour, and a pooling client can stall on it.
+
+`api/lead.js` now decides this at the **response boundary**, where `res` is
+owned, and `readBody()` is still never given the response:
+
+| Situation | `Connection` |
+|---|---|
+| a body was declared and this server did not consume it | **`close`** |
+| the request was fully received, or had no body at all | keep-alive, unchanged |
+
+The signal is `req.complete` together with the declared body length — never which
+branch refused. A bodyless `GET` reports `complete === false` at handler entry
+too, so the length test is what stops the rule closing every scanner probe. This
+covers all **six** paths that answer before the body is consumed: `405`, `403`
+and `429` before the read, and `413`, `408` and `400` on refusal.
+
+**Deliberately conservative at one edge, recorded rather than assumed.** On the
+already-parsed `req.body` path the platform may have consumed the stream before
+the handler ran, in which case keep-alive would have been fine. **This code
+cannot truthfully know that, and whether Vercel leaves `req.complete` true there
+has not been measured**, so the connection is closed. The cost is one avoidable
+teardown on a refused oversize submission; the alternative is advertising reuse
+over bytes nobody read.
+
+**What was NOT reproduced**, stated so the claim is not stronger than the
+evidence: against Node's own parser, in both the `pause()` and no-`pause()`
+variants, outstanding body bytes were **not** dispatched as a second request. No
+smuggled request was observed. The behaviour of any intermediary in front of this
+function has not been measured, and the current HTTP specification could not be
+retrieved from this environment (egress to the RFC sources is blocked), so
+nothing here is argued from quoted normative text.
+
+### Sequenced follow-ups, none of them fixed in #30
+
+0. **Both gate 7 endpoints answer without deciding the connection.**
+   `api/twilio-inbound.js` and `api/operator-action.js` respond after a
+   `readFormBody()` refusal without consuming the body and without setting
+   `Connection`, exactly as `api/lead.js` did before #30. **Both are inert** —
+   `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` are set in no environment —
+   so nothing reaches them today. #28's update document now carries a dated
+   correction beside its original "resource question" claim; the code repair is
+   sequenced work and was deliberately not folded into #30.
+1. **`tests/suppression.test.mjs`** — #28's test *"an oversize body is refused AND
+   the caller's 400 still reaches the client"* declares a `Content-Length` over
+   the cap, which (measured 11 September 2026) takes the **header fast path**, not
+   the streaming size check it is named for. `readFormBody()`'s streaming oversize
+   branch therefore has no real-socket proof. The code is correct; the evidence is
+   weaker than the test name claims.
+2. **Harness duplication** — `tests/helpers.mjs` now exports a generic
+   `withHttpServer`; `suppression.test.mjs` still carries its own local copy.
+3. **`api/_lib/mail.mjs` `sendAcknowledgement()`** has no single overall deadline,
+   only nodemailer's per-phase timeouts, unlike `sendInboundNotification()`. On the
+   lead path it runs *after* the lead is safely in HubSpot, so it cannot lose a
+   lead — but it can consume `maxDuration`.
+4. **`createLead()`'s per-request ceilings can sum past `maxDuration`** on the
+   create-conflict path (5 requests × 8 s against 30 s). Pre-existing, recorded in
+   the source, not introduced or changed by #30.
+5. **`api/lead.js` imports `MAX_BODY_BYTES` and never uses it.**
 
 ## Where the detail lives
 
@@ -651,6 +719,7 @@ Open one of these only when the task actually needs it.
 
 | Topic | Document |
 |---|---|
+| **The lead body read** — the two defects, the 5 s arithmetic, the 408, the mutation proofs, the five follow-ups | `docs/updates/2026-09-11-lead-body-read-bounds.md` |
 | **Why this project's engineering rules exist** — the defects that earned them | **`docs/ENGINEERING-LESSONS.md`** — read the relevant entry, not the archive |
 | Rule rationale, Phase 1 contract | `docs/PHASE-1-HANDOFF.md` §6 — do not read wholesale |
 | HubSpot consent schema, §6/§6a verification, rollback | `docs/updates/2026-09-09-hubspot-consent-setup.md` |
