@@ -191,7 +191,8 @@ Where a helper touches a shared resource, prove the caller can still complete
 its operation afterwards — from the caller's or the observer's side.
 
 **Repo-wide search result**
-One match, live: see the entry below.
+One match, live at the time: `api/_lib/security.mjs`. See the entry below;
+corrected in [#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30).
 
 **Promoted rule**
 `CLAUDE.md` § Resource-ownership rule.
@@ -240,12 +241,14 @@ Two shapes, stated in words before querying:
 
 1. *A helper tears down a resource its caller still needs.*
    `grep -rn "\.destroy()" api/` → `api/_lib/twilio.mjs` (corrected in #28) and
-   **`api/_lib/security.mjs:143`** — live, outstanding.
+   **`api/_lib/security.mjs:143`** — corrected in
+   [#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30).
 2. *An external stream is read to completion with no deadline.* Found by reading
    every request-body reader in `api/` rather than by token: `readBody()`'s
    streaming fallback in `api/_lib/security.mjs` registers `data`/`end`/`error`
    and waits indefinitely. Size-bounded, time-unbounded — the same shape #28
-   fixed in `readFormBody()`. **Live, outstanding, and missed by search 1.**
+   fixed in `readFormBody()`. **Missed by search 1**; corrected in
+   [#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30).
 
 The claim is narrowed to what was measured. `readBody()` has **three** oversize
 refusal paths — declared `Content-Length`, an already-parsed `req.body`, and
@@ -265,9 +268,12 @@ real-boundary evidence for it. Adding a rule here would have made the ruleset lo
 without changing a single future decision — which the promotion bar in
 `docs/WORKFLOW.md` § Lesson promotion exists to refuse.
 
-**Both `security.mjs` defects are recorded in `docs/CURRENT-STATE.md` as the
-immediate next runtime task and are deliberately not fixed by the process change
-that created this file.**
+**Both `security.mjs` defects were recorded in `docs/CURRENT-STATE.md` as the
+immediate next runtime task, deliberately not fixed by the process change that
+created this file, and fixed in
+[#30](https://github.com/tomytomz1/crystal-sells-toledo/pull/30) — where the
+behavioural search, run as two named shapes rather than one token, returned zero
+live matches for either.**
 
 ---
 

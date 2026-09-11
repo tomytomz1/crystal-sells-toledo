@@ -16,7 +16,7 @@ import { createLead, isConfigured } from "./_lib/hubspot.mjs";
 import { sendAcknowledgement, classifyMailError } from "./_lib/mail.mjs";
 import { buildConsentEvidence, consentFeatureEnabled, consentLogShape } from "./_lib/consent.mjs";
 import { appendConsentEvents, ledgerLogShape } from "./_lib/consent-ledger.mjs";
-import { readBody, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
+import { readBody, bodyErrorReason, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
 /** 96 bits of CSPRNG entropy, prefixed so it is recognisable in a CRM record. */
@@ -72,10 +72,44 @@ export default async function handler(req, res) {
   try {
     raw = await readBody(req);
   } catch (err) {
-    if (err.message === "PAYLOAD_TOO_LARGE")
+    /* EVERY BODY-READ FAILURE ENDS THE REQUEST HERE. Nothing below this
+       block runs: no JSON parse, no validation, no consent evidence, no
+       ledger append, no HubSpot write, no acknowledgement mail. There is
+       no body, so there is no lead, and none of those steps has anything
+       truthful to do with a submission that never arrived.
+
+       The reason is derived from the helper's stable token, never from
+       err.message — a message can carry parser text, and parser text can
+       carry a fragment of what the visitor typed. */
+    const reason = bodyErrorReason(err);
+    log("lead.body_failed", { reason });
+
+    if (reason === "too_large")
       return fail(res, 413, "PAYLOAD_TOO_LARGE",
         "That submission is too long to send. Please shorten your message and try again, " +
         "or contact Crystal directly.");
+
+    /* 408, NOT 400, AND THE DISTINCTION IS THE POINT. The request was
+       not malformed; it never finished arriving. Labelling an incomplete
+       upload BAD_REQUEST tells the visitor — and anyone later reading
+       the logs — that they sent something wrong, which is a claim this
+       endpoint cannot support. `code` is machine-readable and is held to
+       the same standard as prose.
+
+       Safe to return here: no body was read, so no lead was created, and
+       a repeated submission duplicates nothing. assets/js/main.js treats
+       every non-2xx alike - it reads `code` for analytics and shows
+       `message` - so the visitor-facing behaviour is unchanged and the
+       form keeps the visitor's input either way.
+
+       What this comment does NOT claim: how any particular intermediary
+       or browser reacts to a 408 on a POST. That has not been measured
+       here. The safety argument above does not depend on it - a repeat
+       of a submission that was never read is harmless whoever initiates
+       it. */
+    if (reason === "timed_out")
+      return fail(res, 408, "BODY_READ_TIMED_OUT", TRANSPORT_FAILURE);
+
     return fail(res, 400, "BAD_REQUEST", TRANSPORT_FAILURE);
   }
 

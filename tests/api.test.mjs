@@ -8,9 +8,13 @@ import handler from "../api/lead.js";
 import { validateLead, FieldError, normalizePhone } from "../api/_lib/validate.mjs";
 import { buildDescription, DESCRIPTION_LABELS } from "../api/_lib/description.mjs";
 import { toLeadRecord, withoutPicklists, COMPANY_BY_FORM } from "../api/_lib/zoho.mjs";
-import { _resetRateLimit, _rateLimitSize, rateLimit, originAllowed, allowedHosts } from "../api/_lib/security.mjs";
+import {
+  _resetRateLimit, _rateLimitSize, rateLimit, originAllowed, allowedHosts,
+  readBody, bodyErrorReason, MAX_BODY_BYTES,
+  BODY_READ_TIMEOUT_MS, BODY_READ_TIMED_OUT, PAYLOAD_TOO_LARGE,
+} from "../api/_lib/security.mjs";
 import { safeShape } from "../api/_lib/log.mjs";
-import { mockReq, mockRes, validContact, validHomeValue } from "./helpers.mjs";
+import { mockReq, mockRes, validContact, validHomeValue, withHttpServer } from "./helpers.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -721,5 +725,313 @@ describe("privacy: visitor-facing failures say what to do (F01)", () => {
     assert.doesNotMatch(res.json().message, /JSON/i,
       "the visitor-facing message must not mention JSON");
     assert.match(res.json().message, /refresh the page|contact Crystal/i);
+  });
+});
+
+/* =====================================================================
+   readBody() AGAINST A REAL node:http SOCKET
+   =====================================================================
+   THE TWO DEFECTS THIS SECTION EXISTS TO HAVE CAUGHT, both on the LIVE
+   lead path, both merged and live until #30:
+
+     1. the streaming oversize branch called req.destroy(). `req` and
+        `res` share ONE socket, so that destroyed the response with the
+        request. res.end() still succeeds and res.writableEnded still
+        becomes true, so THE HANDLER IS TOLD NOTHING — it logged a 413
+        the visitor never received. The client got ECONNRESET.
+     2. the streaming fallback had no time bound at all. A client that
+        opened a request, sent part of a body and stalled held the
+        invocation until the platform killed it.
+
+   WHY THE WHOLE EXISTING SUITE WAS BLIND TO BOTH. tests/helpers.mjs
+   mockReq() sets `req.body`, so EVERY pre-existing test in this file
+   takes the already-parsed fast path. The streaming branch — the only
+   branch either defect lived in — was never executed by any test, and
+   the suite was green over both for as long as they existed.
+
+   HOW THE STREAMING OVERSIZE BRANCH IS ACTUALLY REACHED, measured
+   11 September 2026 against a real client on a throwaway copy of the
+   tree with the two branches temporarily given distinct tokens:
+
+     declared Content-Length over the cap  ->  the HEADER FAST PATH
+     chunked, no Content-Length, over cap  ->  the STREAMING check
+
+   So every streaming test below omits Content-Length and lets Node use
+   chunked transfer encoding. A test that declares an oversize length is
+   testing the header check, whatever its name says.
+   ===================================================================== */
+describe("readBody over a real socket", () => {
+  /* The three lines api/lead.js actually runs on a body failure, kept in
+     one place so every case below answers the way the endpoint does. */
+  const answer = (res, reason) => {
+    if (reason === "too_large") { res.statusCode = 413; res.end("PAYLOAD_TOO_LARGE"); return; }
+    if (reason === "timed_out") { res.statusCode = 408; res.end("BODY_READ_TIMED_OUT"); return; }
+    res.statusCode = 400; res.end("BAD_REQUEST");
+  };
+
+  /** Read the body the way api/lead.js does, then answer. */
+  const leadLike = (opts = {}) => async (req, res, out) => {
+    let raw;
+    try {
+      raw = await readBody(req, opts);
+      out.server.reason = "resolved";
+      out.server.bytes = Buffer.byteLength(raw);
+      out.server.raw = raw;
+    } catch (err) {
+      out.server.reason = bodyErrorReason(err);
+      out.server.token = err?.token;
+    }
+    /* THE ASSERTION THE STUBS COULD NOT MAKE — read BEFORE answering. */
+    out.server.socketDestroyedBeforeAnswer = res.socket ? res.socket.destroyed : null;
+    if (out.server.reason === "resolved") { res.statusCode = 200; res.end("ok"); }
+    else answer(res, out.server.reason);
+  };
+
+  /* ---- 1. STREAMED OVERSIZE REACHES THE CLIENT AS 413 -------------- */
+  test("a streamed oversize body is refused AND the client receives the 413", async () => {
+    const seen = await withHttpServer(leadLike(), {
+      /* No content-length: chunked, so the STREAMING size check decides. */
+      headers: { "content-type": "application/json" },
+      write: "x".repeat(MAX_BODY_BYTES + 1024),
+      end: true,
+    });
+
+    assert.equal(seen.server.reason, "too_large", "the streaming byte cap did not refuse");
+    assert.equal(seen.server.token, PAYLOAD_TOO_LARGE);
+    assert.equal(seen.server.socketDestroyedBeforeAnswer, false,
+      "the socket was already destroyed when the handler went to answer - the 413 cannot be delivered");
+    assert.equal(seen.clientError, null,
+      `the client got ${seen.clientError} instead of a response - the refusal was lost on the wire`);
+    assert.equal(seen.clientStatus, 413, "the client did not receive the 413");
+    assert.equal(seen.clientBody, "PAYLOAD_TOO_LARGE");
+  });
+
+  /* ---- 2. A STALLED BODY TIMES OUT AND THE CLIENT IS ANSWERED ------ */
+  test("a stalled streamed body times out AND the client receives the 408", async () => {
+    const seen = await withHttpServer(leadLike({ timeoutMs: 150 }), {
+      headers: { "content-type": "application/json", "content-length": "200" },
+      write: '{"form_type":"cont',   // a partial body, and then nothing - ever
+      end: false,
+    });
+
+    assert.equal(seen.server.reason, "timed_out", "the bound did not fire");
+    assert.equal(seen.server.token, BODY_READ_TIMED_OUT);
+    assert.equal(seen.server.socketDestroyedBeforeAnswer, false);
+    assert.equal(seen.clientError, null,
+      `the client got ${seen.clientError} instead of a response - the refusal was lost on the wire`);
+    assert.equal(seen.clientStatus, 408, "the client did not receive the timeout refusal");
+    assert.equal(seen.clientBody, "BODY_READ_TIMED_OUT");
+  });
+
+  /* ---- THE REAL HANDLER, NOT A RESTATEMENT OF IT ------------------
+     An earlier draft of this test re-implemented api/lead.js's sequence
+     inside the test and asserted that nothing after the await ran. That
+     proves how `try` works, not what the endpoint does. This one drives
+     THE ACTUAL EXPORTED HANDLER over a real socket.
+
+     WHY THE STATUS IS THE PROOF. HUBSPOT_ACCESS_TOKEN is absent in the
+     test environment, so isConfigured() is false and ANY body that got
+     as far as delivery answers 503 NOT_CONFIGURED. A 408 therefore means
+     the request stopped at the body read: it never parsed, never
+     validated, never built consent evidence, never appended to the
+     ledger, never reached HubSpot and never reached the mailer. A 503 -
+     or a 422, or a 200 - would each say it had gone further. */
+  test("api/lead.js itself stops at the body read and never reaches delivery", async () => {
+    _resetRateLimit();
+    const seen = await withHttpServer(async (req, res) => {
+      await handler(req, res);
+    }, {
+      headers: { "content-type": "application/json", "content-length": "200" },
+      write: '{"form_type":"cont',
+      end: false,
+      guardMs: 9000,
+    });
+
+    assert.notEqual(seen.clientStatus, 503,
+      "the handler reached the delivery stage - a body that never arrived must not get that far");
+    assert.equal(seen.clientStatus, 408,
+      `the real handler answered ${seen.clientStatus}, not the timeout refusal`);
+    assert.equal(JSON.parse(seen.clientBody).code, "BODY_READ_TIMED_OUT");
+    assert.equal(JSON.parse(seen.clientBody).ok, false);
+  });
+
+  /* THE PAIRED TEST THAT MAKES THE ONE ABOVE MEAN SOMETHING. If a
+     complete body did NOT answer 503 here, "not 503" would be an
+     assertion that could never fail and the 408 would prove only that
+     something refused. This is the control: same handler, same socket,
+     a body that DOES arrive, and it gets all the way to the delivery
+     stage before failing for want of a CRM token. */
+  test("a complete body over the same socket does reach delivery (the control)", async () => {
+    _resetRateLimit();
+    const body = JSON.stringify({
+      form_type: "contact", first_name: "Jane", last_name: "Doe",
+      email: "jane@example.com", phone: "4195551234", topic: "Selling my home",
+      message: "I would like to talk about selling.", page: "/contact", attribution: {},
+    });
+    const seen = await withHttpServer(async (req, res) => {
+      await handler(req, res);
+    }, {
+      headers: { "content-type": "application/json" },   // chunked
+      write: body,
+      end: true,
+      guardMs: 9000,
+    });
+
+    assert.equal(seen.clientStatus, 503,
+      "a complete body no longer reaches the delivery stage - the 408 test's discriminator is gone");
+    assert.equal(JSON.parse(seen.clientBody).code, "NOT_CONFIGURED");
+  });
+
+  /* The same endpoint, the same socket, an oversize streamed body. */
+  test("api/lead.js answers 413 over a real socket for a streamed oversize body", async () => {
+    _resetRateLimit();
+    const seen = await withHttpServer(async (req, res) => {
+      await handler(req, res);
+    }, {
+      headers: { "content-type": "application/json" },   // chunked
+      write: "x".repeat(MAX_BODY_BYTES + 1024),
+      end: true,
+      guardMs: 9000,
+    });
+
+    assert.equal(seen.clientError, null,
+      `the visitor got ${seen.clientError} instead of a refusal - this is the live lead path`);
+    assert.equal(seen.clientStatus, 413);
+    assert.equal(JSON.parse(seen.clientBody).code, "PAYLOAD_TOO_LARGE");
+  });
+
+  /* ---- 3. AN ORDINARY STREAMED BODY IS UNAFFECTED ------------------ */
+  test("a complete streamed body still resolves and answers 200", async () => {
+    const body = JSON.stringify({ form_type: "contact", message: "hello" });
+    const seen = await withHttpServer(leadLike(), {
+      headers: { "content-type": "application/json" },   // chunked again
+      write: body,
+      end: true,
+    });
+
+    assert.equal(seen.server.reason, "resolved", "a complete streamed body was refused");
+    assert.equal(seen.server.raw, body, "the body was altered or truncated in transit");
+    assert.equal(seen.clientStatus, 200);
+    assert.equal(seen.clientBody, "ok");
+  });
+
+  /* A body that arrives in pieces, slowly, but INSIDE the bound is a real
+     visitor on a poor connection - not a stall. It must succeed. This is
+     the direction that matters on the lead path: a bound tight enough to
+     refuse a slow-but-genuine upload loses the lead, which is the outcome
+     this project treats as worst. The chunks land at 60/120/180 ms
+     against a 1500 ms bound, so the margin is deliberate and the test
+     does not depend on machine speed to pass. */
+  test("a body delivered in slow pieces inside the bound still succeeds", async () => {
+    const head = '{"form_type":"contact","message":"';
+    const tail = 'slow"}';
+    const seen = await withHttpServer(leadLike({ timeoutMs: 1500 }), {
+      headers: { "content-type": "application/json" },
+      write: head,
+      writes: [[60, "a"], [120, "b"], [180, tail]],
+      endAt: 240,
+      end: false,
+      guardMs: 3000,
+    });
+
+    assert.equal(seen.server.reason, "resolved",
+      `a slow but complete body was refused as ${seen.server.reason} - that is a lost lead`);
+    assert.equal(seen.server.raw, head + "ab" + tail, "the reassembled body is not what was sent");
+    assert.equal(seen.clientStatus, 200);
+    assert.ok(seen.ms >= 180, `the body cannot have been fully read in ${seen.ms}ms`);
+  });
+
+  /* ---- THE BOUND IS TOTAL, NOT AN INACTIVITY GAP ------------------
+     THIS IS THE TEST THAT DISTINGUISHES THEM, and without it the claim
+     in the source - that the deadline covers the whole wait rather than
+     the gap between chunks - would be inspection only.
+
+     The client sends a chunk every 40 ms, forever. An INACTIVITY timer
+     of 300 ms would be reset by every one of those chunks and would
+     never fire; a TOTAL bound of 300 ms fires while data is still
+     arriving. The body is never ended, so only the bound can settle it. */
+  test("a body that keeps dripping past the deadline is still refused", async () => {
+    const drip = [];
+    for (let at = 40; at <= 1200; at += 40) drip.push([at, "."]);
+
+    const seen = await withHttpServer(leadLike({ timeoutMs: 300 }), {
+      headers: { "content-type": "application/json" },
+      write: "{",
+      writes: drip,
+      end: false,
+      guardMs: 4000,
+    });
+
+    assert.equal(seen.server.reason, "timed_out",
+      "a client still sending data was not bounded - the deadline resets on activity");
+    assert.equal(seen.clientStatus, 408, "the client did not receive the timeout refusal");
+    /* THE DISCRIMINATING NUMBER, and an earlier draft of this assertion
+       got it wrong. The drip runs to 1200 ms, so an INACTIVITY timer of
+       300 ms would settle at roughly 1500 ms - which a loose ceiling of
+       2000 ms would have accepted, making the test pass against the very
+       behaviour it exists to rule out. A TOTAL bound settles at ~300 ms.
+       900 ms sits well clear of both: three times the total bound, and
+       well under the inactivity one. */
+    assert.ok(seen.ms < 900,
+      `the refusal took ${seen.ms}ms - at a 300ms total bound that is an inactivity timer being reset by the drip`);
+  });
+
+  /* ---- 4. THE DECLARED-LENGTH FAST PATH IS UNCHANGED --------------- */
+  test("a declared Content-Length over the cap is still refused immediately", async () => {
+    const seen = await withHttpServer(leadLike(), {
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(MAX_BODY_BYTES + 64),
+      },
+      /* Nothing is written at all: the refusal must come from the header
+         alone, before a byte of body is read. */
+      write: null,
+      end: false,
+    });
+
+    assert.equal(seen.server.reason, "too_large", "the declared-length fast path stopped refusing");
+    assert.equal(seen.server.socketDestroyedBeforeAnswer, false);
+    assert.equal(seen.clientStatus, 413, "the client did not receive the 413");
+    assert.ok(seen.ms < 1000,
+      `the header refusal took ${seen.ms}ms - it must not wait for a body it already refused`);
+  });
+
+  /* ---- 5. THE ALREADY-PARSED FAST PATH IS UNCHANGED ---------------- */
+  test("an already-populated req.body still works and stays immediate", async () => {
+    const body = JSON.stringify({ form_type: "contact", message: "platform-parsed" });
+    const seen = await withHttpServer(async (req, res, out) => {
+      /* What the platform does before the handler runs. The socket is
+         real; this branch is simply not reachable by writing bytes. */
+      req.body = body;
+      await leadLike()(req, res, out);
+    }, {
+      headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) },
+      /* The bytes are deliberately NEVER sent. If this path waited on the
+         stream at all - or armed a timer for it - the test would stall
+         and the guard would report NO_ANSWER. */
+      write: null,
+      end: false,
+    });
+
+    assert.equal(seen.server.reason, "resolved", "the pre-parsed fast path stopped working");
+    assert.equal(seen.server.raw, body);
+    assert.equal(seen.clientStatus, 200);
+    assert.ok(seen.ms < 1000,
+      `the pre-parsed path took ${seen.ms}ms - it must not wait on a stream it never reads`);
+  });
+
+  test("an oversize already-populated req.body is still refused", async () => {
+    const big = JSON.stringify({ message: "x".repeat(MAX_BODY_BYTES + 64) });
+    const seen = await withHttpServer(async (req, res, out) => {
+      req.body = big;
+      await leadLike()(req, res, out);
+    }, {
+      headers: { "content-type": "application/json" },
+      write: null,
+      end: false,
+    });
+
+    assert.equal(seen.server.reason, "too_large");
+    assert.equal(seen.clientStatus, 413);
   });
 });
