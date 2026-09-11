@@ -148,6 +148,75 @@ mutation run, and **no** test the tier table did not already call for. The only
 test it may add is the single regression for a material defect it actually
 found.
 
+## Lesson promotion
+
+**When.** After a material defect is understood and corrected, and **before** the
+handoff — the last step of the pre-handoff review above, not a separate ceremony.
+It runs on **material** findings only: the ones that cost, or could have cost,
+correctness, compliance, a lead, a consumer's request, or the operator's trust in
+a record.
+
+**It does not run on ordinary corrections.** A typo, a rename, a formatting fix,
+a test that needed a better name — those end in a commit message.
+
+### The seven questions, answered in writing
+
+1. **What class of failure was this?** Name the class, not the line.
+2. **Why did the existing tests, review or evidence miss it?** "Nobody looked" is
+   an answer; so is "the assertion was true but was not about the invariant".
+3. **What proof would have caught it earlier?** If none can be named, this is an
+   observation rather than a lesson, and it stops here.
+4. **Does the same behavioural pattern exist elsewhere in the repository?**
+   Search the **shape**, not the identifier, and record the query and its result.
+5. **Is the lesson material, reusable and likely to recur?** All three, or it
+   stops here.
+6. **If promoted, where does it belong?**
+   - `CLAUDE.md` — the compact, non-negotiable, permanent rule;
+   - `docs/WORKFLOW.md` — a reasoning or process rule;
+   - `docs/ENGINEERING-LESSONS.md` — the reusable lesson and its rationale;
+   - `docs/CURRENT-STATE.md` — **current truth only**, never history.
+   A lesson usually earns **one** home. Repeating it in three is how a rule set
+   becomes unreadable and how the copies drift apart.
+7. **Did the new evidence make any current-design prose false?** Comments, test
+   names, documentation, UI wording, open pull-request descriptions. Correct
+   those; leave historical handoffs alone and supersede them instead.
+
+### Two rules with teeth
+
+**A material finding is not finished until question 4 has actually been
+performed** and any relevant out-of-scope matches are recorded and sequenced.
+Recording them is the whole obligation — **do not widen the current change to
+absorb them**, because a reviewed change that quietly grows is how an unrelated
+regression arrives with a green tick.
+
+**The outcome is recorded where someone can see it.** When a material defect was
+involved, the handoff carries a **Lesson promotion** line stating what was
+promoted, or that nothing was — **with the reason**, and with the repo-wide
+search and its result. Judging alone and in silence is the one way this section
+can be satisfied while changing nothing; a stated judgement can be disagreed
+with. The heading is omitted entirely when no material defect was involved, so
+this costs ordinary work nothing.
+
+**Do not manufacture a rule for every correction.** Promotion is meant to be
+uncommon. `docs/ENGINEERING-LESSONS.md` is only useful while it is short enough
+to read end to end; if it stops being worth reading, the correct fix is to
+**remove weak entries**, not to add more. A session that promotes nothing has
+done this step correctly whenever nothing cleared the bar — and saying so in the
+handoff is the expected outcome, not a gap.
+
+### The technical-compliance trap
+
+The question to ask before claiming this step is done:
+
+> **"If I wanted to satisfy this section while learning nothing, what would I
+> write?"**
+
+The answers are recognisable: a lesson that restates the diff; an invariant
+phrased so broadly that no future change could violate it; a "repo-wide search"
+that grepped the identifier rather than the behaviour; a new rule that duplicates
+one already in `CLAUDE.md`. **Each of those is a failed promotion**, and the
+correct response is to promote nothing and say so.
+
 ## Delivery
 
 Where the section above applies, the adversarial review comes first — before
@@ -317,6 +386,12 @@ back. Distinguish the two.>
 
 ### Defects found and fixed
 <including the root cause, not just the symptom>
+
+### Lesson promotion
+<ONLY when a material defect was involved; omit the heading entirely otherwise.
+State the outcome and the reason — including "nothing promoted", which is the
+common and correct answer. Name the repo-wide search that was run and what it
+returned. See § Lesson promotion.>
 
 ### Blockers
 <or "none">

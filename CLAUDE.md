@@ -4,6 +4,11 @@
 
 - Start with **CLAUDE.md** and **docs/CURRENT-STATE.md**.
 - For repo-changing tasks also read **docs/WORKFLOW.md**.
+- Read the **relevant entries** of **docs/ENGINEERING-LESSONS.md** when the work
+  involves a material defect, security, consent or suppression, a runtime or
+  provider boundary, or an adversarial review of a failure class that has bitten
+  before. **Not for a typo, a CSS tweak or an unrelated Tier 0 change**, and
+  never the whole archive out of habit — the point is grounding, not ritual.
 - Read only files directly relevant to the requested task.
 - Do not read `docs/PHASE-1-HANDOFF.md` wholesale unless explicitly required.
 - Do not survey `docs/updates`; open a specific update only when relevant.
@@ -57,6 +62,51 @@ add it there rather than expecting the next prompt to repeat it.
 
 Full rationale for 1–12: `docs/PHASE-1-HANDOFF.md` §6 — read it only if a rule's
 *reason* is actually in question.
+
+## Engineering rules earned the hard way
+
+These govern *how* a claim is proved, not what the site says. Each was paid for
+by a defect this project actually shipped; the reasoning behind each one is in
+`docs/ENGINEERING-LESSONS.md`, which names the incident. **Read that file's
+relevant entry when working in the area it describes — not otherwise.**
+
+14. **Boundary-evidence.** Mocks and stubs prove logic *inside* the mocked
+    boundary. When a material correctness claim depends on behaviour owned by
+    Node HTTP, Vercel, Twilio, HubSpot, Postgres/Neon, SMTP, a browser or another
+    provider, the strongest evidence is a test at the **lowest practical real
+    boundary** that can carry the claim — a real local `node:http` client and
+    server for socket semantics, a browser test for rendered behaviour, a real
+    role for database privileges. Do not claim real-boundary behaviour from mocks
+    alone. **This authorises no live external call**: a local real boundary is
+    usually both stronger and cheaper, and a live provider call is reached for
+    only when the claim is genuinely about that provider.
+15. **Externally-observable outcomes are asserted from the observer's side**
+    where practical. `res.statusCode = 400` is not "the client received 400";
+    a built request body is not "HubSpot accepted it"; grant text is not "the
+    role cannot `SELECT`".
+16. **Resource ownership is explicit.** A helper may stop its own work. It must
+    not destroy, close, release or mutate a resource the **caller** still needs —
+    `readFormBody()` reads a body and does not own the response socket.
+17. **A material defect is not isolated until the repository has been searched
+    for the same behavioural pattern.** Search the shape, not the identifier.
+    Record out-of-scope matches as named, sequenced follow-ups; **never widen the
+    current change to absorb them.**
+18. **Prose may not outrun the evidence.** Comments, test names, current-design
+    documentation, PR descriptions, UI wording and handoffs may not state a
+    stronger guarantee than the implementation and evidence support. An inherited
+    sentence is not evidence, and copying it forward is not verification.
+19. **Inactivity is not enforcement.** Keep **durable evidence**, **operational
+    projection** and **active enforcement** distinct. Unconfigured or inactive
+    functionality is not implemented enforcement, and must never be described as
+    though it were.
+20. **Promote a lesson only when it is worth obeying forever.** After a material
+    finding, decide *explicitly* whether it produced reusable intelligence. If it
+    did: the rationale goes in `docs/ENGINEERING-LESSONS.md` and only the compact
+    invariant is promoted here or into `docs/WORKFLOW.md`. Most corrections
+    produce no rule at all, and **manufacturing one is itself a failure**. State
+    the outcome in the handoff — *including* "nothing promoted, because …" — so
+    the judgement is reviewable rather than silent. See `docs/WORKFLOW.md`
+    § Lesson promotion.
 
 ## Testing — risk-based
 

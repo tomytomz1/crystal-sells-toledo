@@ -601,12 +601,29 @@ function and the sender role; `db/001` is unchanged.
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested, but nothing sends or calls, so nothing calls it in production.
 
+## Known defect on the LIVE lead path — the immediate next runtime task
+
+**`api/_lib/security.mjs:143` calls `req.destroy()` on its oversize branch**, and
+`api/lead.js` uses it. That is the same pattern
+[#28](https://github.com/tomytomz1/crystal-sells-toledo/pull/28) measured and
+fixed in `api/_lib/twilio.mjs`: `req` and `res` share one socket, so destroying
+the request destroys the response — `res.end()` still succeeds and reports the
+response as ended, while the client receives `ECONNRESET`. An oversize lead
+submission therefore **cannot deliver its refusal**; the visitor gets a
+connection reset and the log records a response that never arrived.
+
+**Found by the repo-wide pattern search that #28's defect triggered. Deliberately
+not fixed there, and not fixed by the process change that introduced
+`docs/ENGINEERING-LESSONS.md`.** It is the **immediate next runtime pull
+request**. Unlike the gate 7 endpoints, this one is **live**.
+
 ## Where the detail lives
 
 Open one of these only when the task actually needs it.
 
 | Topic | Document |
 |---|---|
+| **Why this project's engineering rules exist** — the defects that earned them | **`docs/ENGINEERING-LESSONS.md`** — read the relevant entry, not the archive |
 | Rule rationale, Phase 1 contract | `docs/PHASE-1-HANDOFF.md` §6 — do not read wholesale |
 | HubSpot consent schema, §6/§6a verification, rollback | `docs/updates/2026-09-09-hubspot-consent-setup.md` |
 | Consent model, disclosures, evidence, feature gate | `docs/updates/2026-09-09-communications-consent-foundation.md` |
