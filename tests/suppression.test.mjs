@@ -65,6 +65,7 @@ import inboundHandler, {
   MAX_PROJECTION_CONTACTS, PROJECTION_DEADLINE_MS, MIN_WRITE_MS, MIN_SEARCH_MS,
   WEBHOOK_BODY_TIMEOUT_MS,
 } from "../api/twilio-inbound.js";
+import { withRawRequest } from "./helpers.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TOKEN = "test_auth_token_not_a_real_credential";
@@ -1785,8 +1786,21 @@ describe("readFormBody against a real node:http socket", () => {
       out.server.socketDestroyedBeforeAnswer = res.socket ? res.socket.destroyed : null;
       res.statusCode = 400;
       res.end("Not recorded");
-      /* Declared length is honest here, so the refusal comes from the
-         running byte total rather than from the header check. */
+      /* WHICH REFUSAL PATH THIS ACTUALLY EXERCISES, corrected on
+         11 September 2026. The declared Content-Length is itself over the
+         cap, so readFormBody() refuses at the HEADER FAST PATH, before a
+         byte is accumulated. The comment here previously claimed the
+         opposite — that the refusal came "from the running byte total
+         rather than from the header check" — and that claim was false;
+         #30 recorded it as a sequenced follow-up.
+
+         The test is still worth what it asserts: the oversize refusal
+         reaches the client and the socket was not destroyed to deliver
+         it. It is simply evidence about the HEADER path.
+
+         THE STREAMING size check is reached only by a chunked body with
+         no Content-Length, and is proved on a raw socket in section 10
+         below. */
     }, { write: "x".repeat(MAX_WEBHOOK_BYTES + 64), contentLength: MAX_WEBHOOK_BYTES + 64 });
 
     assert.equal(seen.server.reason, "PAYLOAD_TOO_LARGE", "an oversize body was not refused");
@@ -1864,5 +1878,164 @@ describe("readFormBody against a real node:http socket", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/* =====================================================================
+   10  THE CONNECTION, NOT ONLY THE RESPONSE — RAW SOCKET
+   =====================================================================
+   Section 9 proves what the CLIENT RECEIVED. It cannot prove what state
+   the exchange LEFT BEHIND, because its harness tears the connection
+   down as soon as the response has been seen — and a teardown that runs
+   before the observation is not a teardown, it is the experiment. That
+   is the lesson #30 paid for and the reason CLAUDE.md rule 15 now says
+   the observable outcome includes connection state and framing.
+
+   THE DEFECT REPAIRED HERE. api/twilio-inbound.js could answer while a
+   declared request body had not been completely consumed and still send
+   `Connection: keep-alive`. The socket survives, so the response's own
+   framing metadata advertised a connection that becomes usable again
+   only once the client sends the rest of the body it declared — which,
+   on a refused read, is by definition what it did not do. Same shape,
+   same rule, same mechanism as the six paths #30 fixed in api/lead.js.
+
+   WHAT EACH CASE BELOW IS FOR. A and B are a CONTROLLED PAIR: the same
+   branch, the same status, one bodyless and one with a declared body
+   outstanding. They are the evidence that the signal is the REQUEST'S
+   OWN STATE and not which branch refused — and A is the guard against
+   the over-blunt `!req.complete` rule, which a first draft of the lead
+   fix used and which closes the connection on every ordinary bodyless
+   probe.
+
+   C reaches the STREAMING size check, which needs chunked framing and
+   no Content-Length: a declared oversize length is refused at the header
+   fast path instead (section 9's oversize test, whose prose used to
+   claim otherwise). D is the ordinary complete request that must keep
+   keep-alive.
+
+   These drive the REAL EXPORTED HANDLER, not a re-implementation of it.
+   ===================================================================== */
+describe("the webhook's connection lifecycle, on a raw socket", () => {
+  const ENV = [TWILIO_TOKEN_VAR];
+  let saved;
+
+  before(() => {
+    saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
+    process.env[TWILIO_TOKEN_VAR] = TOKEN;
+  });
+  after(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  const CRLF = "\r\n";
+  const req = (line, headers = [], body = "") =>
+    line + CRLF + ["Host: 127.0.0.1", ...headers].join(CRLF) + CRLF + CRLF + body;
+
+  /* A second request written once a response head has been seen. If the
+     connection is genuinely reusable the server dispatches it. */
+  const SECOND = req("PUT /api/twilio-inbound HTTP/1.1");
+
+  /* THE WHOLE RESPONSE, not merely "a response arrived". Closing the
+     connection must not truncate what was already being written, and the
+     refusals on this endpoint carry an EMPTY body — so "the body is
+     non-empty" would prove nothing here. The response's OWN
+     Content-Length is what it promised to deliver; compare the bytes
+     actually received against it. */
+  function assertWholeResponse(seen) {
+    const head = seen.raw.split("\r\n\r\n")[0] || "";
+    assert.ok(seen.raw.includes("\r\n\r\n"), "the response head never terminated");
+    const declared = Number((head.match(/\r\nContent-Length: *(\d+)/i) || [])[1]);
+    assert.ok(Number.isFinite(declared),
+      "the response declared no Content-Length - completeness cannot be checked from the client");
+    assert.equal(Buffer.byteLength(seen.body), declared,
+      `the response body arrived truncated: ${Buffer.byteLength(seen.body)} of ${declared} bytes`);
+  }
+
+  /* ---- A. BODYLESS EARLY REFUSAL — keep-alive is KEPT --------------- */
+  test("a bodyless unsupported request keeps keep-alive and the socket is reused", async () => {
+    const seen = await withRawRequest(inboundHandler, {
+      request: req("PUT /api/twilio-inbound HTTP/1.1"),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 405, "the bodyless unsupported request was not refused 405");
+    assert.notEqual(String(seen.connection || "").toLowerCase(), "close",
+      "a request with NOTHING outstanding was closed - the rule is over-blunt and every scanner probe loses keep-alive");
+    assert.equal(seen.serverClosed, false, "the server closed a connection with nothing outstanding");
+    assert.equal(seen.dispatched.length, 2,
+      `the second request was not dispatched (${seen.dispatched.join(", ")}) - the connection was not actually reusable`);
+    assert.equal(seen.responseCount, 2, "the second request got no response");
+  });
+
+  /* ---- B. PRE-BODY REFUSAL WITH A DECLARED BODY — closed ------------ */
+  test("an early refusal with a declared, unconsumed body closes the connection", async () => {
+    const seen = await withRawRequest(inboundHandler, {
+      /* The SAME branch and the SAME status as A. Only the request's own
+         state differs, which is the whole point of the pair. */
+      request: req("PUT /api/twilio-inbound HTTP/1.1",
+        ["Content-Type: application/x-www-form-urlencoded", "Content-Length: 400"],
+        "MessageSid=SM1&Bo"),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 405, "the existing status changed");
+    assert.equal(String(seen.connection || "").toLowerCase(), "close",
+      "the refusal advertised a reusable connection while 383 declared bytes were still outstanding");
+    assertWholeResponse(seen);
+    assert.equal(seen.serverClosed, true, "the server did not close the connection it said it would close");
+    assert.equal(seen.dispatched.length, 1,
+      `something else was dispatched on a connection that was closed (${seen.dispatched.join(", ")})`);
+    assert.equal(seen.responseCount, 1, "a second response was produced on a closed connection");
+  });
+
+  /* ---- C. THE STREAMING SIZE CHECK, chunked, never completed -------- */
+  test("a chunked oversize body is refused 400 AND the connection is closed", async () => {
+    /* CHUNKED AND NO CONTENT-LENGTH. That is the only framing that
+       reaches readFormBody()'s running-byte check; a declared oversize
+       length is refused at the header fast path instead. The terminating
+       zero-length chunk is never sent, so the body is genuinely
+       incomplete when the refusal is written. */
+    const chunk = "1000" + CRLF + "x".repeat(4096) + CRLF;
+    const seen = await withRawRequest(inboundHandler, {
+      request: req("POST /api/twilio-inbound HTTP/1.1",
+        ["Content-Type: application/x-www-form-urlencoded", "Transfer-Encoding: chunked"],
+        chunk.repeat(5)),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 400, "the existing oversize response semantics changed");
+    assert.equal(String(seen.connection || "").toLowerCase(), "close",
+      "an oversize chunked body was refused on a connection still advertised as reusable");
+    assertWholeResponse(seen);
+    assert.equal(seen.serverClosed, true, "the server did not close after refusing an unfinished chunked body");
+    assert.equal(seen.dispatched.length, 1,
+      `something else was dispatched after the refusal (${seen.dispatched.join(", ")})`);
+    assert.equal(seen.responseCount, 1, "a second response was produced after the refusal");
+  });
+
+  /* ---- D. A COMPLETE BODY — keep-alive is KEPT --------------------- */
+  test("a complete POST refused 403 keeps keep-alive and the socket is reused", async () => {
+    /* Complete, small, and refused for a reason that has nothing to do
+       with the transport: no X-Twilio-Signature. Nothing is written,
+       nothing is classified, and NOTHING is outstanding. */
+    const body = "MessageSid=SM1&From=%2B14195550123&Body=STOP";
+    const seen = await withRawRequest(inboundHandler, {
+      request: req("POST /api/twilio-inbound HTTP/1.1",
+        ["Content-Type: application/x-www-form-urlencoded",
+         `Content-Length: ${Buffer.byteLength(body)}`],
+        body),
+      afterResponse: SECOND,
+    });
+
+    assert.equal(seen.status, 403, "the existing signature-refusal status changed");
+    assert.notEqual(String(seen.connection || "").toLowerCase(), "close",
+      "a fully received request lost keep-alive");
+    assert.equal(seen.serverClosed, false, "the server closed a connection with nothing outstanding");
+    assert.equal(seen.dispatched.length, 2,
+      `the second request was not dispatched (${seen.dispatched.join(", ")})`);
+    assert.equal(seen.responseCount, 2, "the second request got no response");
   });
 });

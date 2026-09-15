@@ -1100,10 +1100,23 @@ for (const file of pages) {
        This was an OR whose first alternative matched the CALL SITE in the
        `!decision` branch, which happens to sit within 400 characters of
        the unrelated `ledger_absent` 503. Proved by mutation on
-       10 September 2026: replacing EVERY `reply(res, 503)` inside
+       10 September 2026: replacing EVERY 503 reply inside
        surfaceToOperator() with a 200 left check.mjs passing — the guard
        was syntactically satisfied while the invariant it names was
-       destroyed. Now the body is extracted and counted on its own. */
+       destroyed. Now the body is extracted and counted on its own.
+
+       AND IT NO LONGER ENCODES reply()'s ARGUMENT SHAPE. It used to
+       match the literal `reply(res, 503)`. On 11 September 2026 the
+       connection-lifecycle repair changed that call to
+       `reply(req, res, 503)` — at which point the old pattern would have
+       counted ZERO failure paths and the guard would have fired on
+       correct code; loosening it to make `npm run check` pass is how a
+       guard becomes decoration. The pattern below asks the question the
+       invariant is actually about — "does this reply carry a 503?" —
+       so a further signature change cannot silently empty it, while a
+       status change still fails it. The mutation tests in
+       tests/operator-action.test.mjs assert their target exists before
+       replacing it, so a stale mutation cannot report green either. */
     const surfaceStart = inbound.indexOf("async function surfaceToOperator");
     if (surfaceStart === -1)
       fail(webhookRel, "has no surfaceToOperator - the unclassified branch surfaces nothing");
@@ -1111,15 +1124,60 @@ for (const file of pages) {
       /* To the next top-level function declaration, or end of file. */
       const nextFn = inbound.indexOf("\nasync function ", surfaceStart + 1);
       const surfaceBody = inbound.slice(surfaceStart, nextFn === -1 ? inbound.length : nextFn);
-      const failures = (surfaceBody.match(/reply\(res,\s*503\)/g) || []).length;
+      /* Any reply() whose arguments carry 503, whatever precedes them. */
+      const failing = surfaceBody.match(/\breply\([^)]*\b503\b[^)]*\)/g) || [];
       /* Four ways to fail to surface, and every one of them is a 503:
          unconfigured, seal failure, send failure, and a send that
          declined without throwing. Fewer than four means one of them
          became a silent 200. */
-      if (failures < 4)
-        fail(webhookRel, `surfaceToOperator answers 503 on only ${failures} of its 4 failure paths - a failure to surface would be a silent 200`);
-      if (/reply\(res,\s*200/.test(surfaceBody.slice(0, surfaceBody.lastIndexOf("reply(res, 503)"))))
+      if (failing.length < 4)
+        fail(webhookRel, `surfaceToOperator answers 503 on only ${failing.length} of its 4 failure paths - a failure to surface would be a silent 200`);
+      const lastFailure = surfaceBody.lastIndexOf(failing[failing.length - 1] || "\u0000");
+      if (lastFailure > 0 && /\breply\([^)]*\b200\b/.test(surfaceBody.slice(0, lastFailure)))
         fail(webhookRel, "surfaceToOperator answers 200 before its last failure check - a failure would be reported as success");
+    }
+
+    /* 5b. EVERY RESPONSE GOES THROUGH THE LIFECYCLE-AWARE BOUNDARY.
+           Both gate 7 endpoints decide `Connection: close` at ONE place —
+           reply() here, page() in the operator action — because a request
+           answered while its declared body is still outstanding leaves
+           HTTP/1.1 advertising a connection the server may never serve
+           (the shape #30 fixed on the live lead path). A response written
+           directly with res.end() would bypass that decision and reopen
+           the defect on exactly one path, which is the kind of hole no
+           behavioural test is guaranteed to be pointed at. */
+    for (const [rel, srcText, helper] of [
+      [webhookRel, inbound, "reply"],
+      ["api/operator-action.js", null, "page"],
+    ]) {
+      const path = join(ROOT, "..", rel);
+      /* A missing file is reported by its own guard below; crashing here
+         with ENOENT would replace that message with a stack trace. */
+      if (srcText === null && !existsSync(path)) continue;
+      const text = srcText ?? readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+
+      /* EXACTLY ONE, and that is what makes the slice below exact. */
+      const ends = (text.match(/\bres\.end\(/g) || []).length;
+      if (ends !== 1)
+        fail(rel, `writes res.end() ${ends} times - every response must go through ${helper}(), which is where the connection lifecycle is decided`);
+
+      /* ANCHORED TO THE HELPER'S OWN BODY, not to a character window.
+         A window is satisfiable by code that merely sits near the helper,
+         and it goes stale the moment a header is added — the two ways a
+         guard stops guarding. The slice runs from the declaration to the
+         file's single res.end(), so the decision must be INSIDE it and
+         must come BEFORE the response is written. */
+      const declared = text.indexOf(`function ${helper}(req, res`);
+      const writes = text.indexOf("res.end(");
+      if (declared === -1)
+        fail(rel, `has no ${helper}(req, res, ...) - the response boundary that decides the connection is gone`);
+      else if (writes < declared)
+        fail(rel, `writes its response outside ${helper}() - the connection decision would be bypassed`);
+      else {
+        const boundary = text.slice(declared, writes);
+        if (!boundary.includes("bodyStillOutstanding(req)") || !boundary.includes("Connection"))
+          fail(rel, `${helper}() does not set Connection: close from bodyStillOutstanding(req) before answering - a refusal with an unconsumed body would advertise a reusable connection`);
+      }
     }
 
     const operatorRel = "api/operator-action.js";

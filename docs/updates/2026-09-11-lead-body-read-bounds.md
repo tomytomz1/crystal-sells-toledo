@@ -457,12 +457,33 @@ matches across `api/`:**
    `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` are set in no environment.
    Deliberately **not** fixed here: #28's document has been annotated with a dated
    correction beside its original claim, and the repair is sequenced work.
+
+   > **Correction, 11 September 2026 (gate 7 lifecycle repair).** This
+   > follow-up is **done**. The entry above is left unedited: it was accurate
+   > when #30 was written. Both endpoints now decide the connection at their own
+   > response boundaries — `reply()` in the webhook, `page()` in the operator
+   > action — from the same rule, shared as the pure predicate
+   > `bodyStillOutstanding()` in `api/_lib/twilio.mjs`. `api/lead.js` was
+   > **deliberately not refactored** to import it: the live lead path was fixed
+   > and proven here and is not disturbed to remove a duplicated four-line rule.
+   > Both endpoints remain inert. Detail:
+   > `docs/updates/2026-09-11-gate-7-connection-lifecycle.md`.
 1. **`tests/suppression.test.mjs`** — #28's test *"an oversize body is refused AND
    the caller's 400 still reaches the client"* declares an oversize
    `Content-Length`, which takes the **header fast path**, not the streaming check
    it is named for. `readFormBody()`'s streaming oversize branch therefore has no
    real-socket proof. **The code is correct; the evidence is weaker than the test
    name claims.**
+
+   > **Correction, 11 September 2026 (gate 7 lifecycle repair).** Both halves of
+   > this are now addressed, and the entry is left unedited. The **false nearby
+   > prose** — *"the refusal comes from the running byte total rather than from
+   > the header check"* — is corrected in place, and now says which path that
+   > test actually exercises (the header one). The **missing streaming proof** is
+   > supplied: a new raw-socket test drives the real exported webhook handler
+   > with a `Transfer-Encoding: chunked` body and **no** `Content-Length`, which
+   > is the only framing that reaches `readFormBody()`'s running-byte check. The
+   > test name was left alone; the prose was the thing that lied.
 2. **Harness duplication** — `tests/helpers.mjs` now exports a generic
    `withHttpServer`; `suppression.test.mjs` still has its own local copy.
 3. **`sendAcknowledgement()` has no single overall deadline**, unlike

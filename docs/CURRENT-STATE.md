@@ -686,24 +686,92 @@ function has not been measured, and the current HTTP specification could not be
 retrieved from this environment (egress to the RFC sources is blocked), so
 nothing here is argued from quoted normative text.
 
-### Sequenced follow-ups, none of them fixed in #30
+## The gate 7 connection lifecycle — REPAIRED
 
-0. **Both gate 7 endpoints answer without deciding the connection.**
-   `api/twilio-inbound.js` and `api/operator-action.js` respond after a
-   `readFormBody()` refusal without consuming the body and without setting
-   `Connection`, exactly as `api/lead.js` did before #30. **Both are inert** —
-   `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` are set in no environment —
-   so nothing reaches them today. #28's update document now carries a dated
-   correction beside its original "resource question" claim; the code repair is
-   sequenced work and was deliberately not folded into #30.
-1. **`tests/suppression.test.mjs`** — #28's test *"an oversize body is refused AND
-   the caller's 400 still reaches the client"* declares a `Content-Length` over
-   the cap, which (measured 11 September 2026) takes the **header fast path**, not
-   the streaming size check it is named for. `readFormBody()`'s streaming oversize
-   branch therefore has no real-socket proof. The code is correct; the evidence is
-   weaker than the test name claims.
+**Both gate 7 endpoints now decide the connection at their own response
+boundaries.** This was #30's sequenced follow-up and it is done. `api/lead.js`,
+`api/twilio-inbound.js` and `api/operator-action.js` are the **only three
+server-endpoint response boundaries** in this repository, and **all three** now
+make the decision.
+
+Both gate 7 endpoints could answer while a declared request body had not been
+completely consumed and still send `Connection: keep-alive` — the same shape #30
+fixed on the live lead path. **That is not only the `readFormBody()` refusal
+path**: each endpoint can also answer *before* it reads the body at all (a wrong
+method, an unconfigured endpoint, a token in the query string), and those
+requests carry declared bodies just as readily.
+
+| Endpoint | Response boundary | Every response goes through it |
+|---|---|---|
+| `api/lead.js` | `send()` | yes — since #30 |
+| `api/twilio-inbound.js` | `reply()` | yes, `surfaceToOperator()` included |
+| `api/operator-action.js` | `page()` | yes, `notice()` and `refuseToken()` route through it |
+
+**The rule is one shared pure predicate**, `bodyStillOutstanding(req)`, exported
+from `api/_lib/twilio.mjs` and imported by both gate 7 endpoints. It reads `req`
+and **mutates nothing** — not the request, not the response, not the socket.
+`readFormBody()` is still **not** given `res` and still does not own the socket:
+the caller's response boundary owns the response and makes the decision.
+
+| Situation | `Connection` |
+|---|---|
+| `req.complete === false` **and** chunked, or a declared `Content-Length > 0` | **`close`** |
+| fully received, bodyless, or `req.complete` undefined (unknown) | keep-alive, unchanged |
+
+`=== false` and not `!req.complete`: **undefined means unknown**, and an unknown
+keeps today's behaviour. The length/framing test is what stops the rule closing
+every ordinary bodyless probe — a bodyless request reports `complete === false`
+at handler entry too, and the operator action's read-only `GET` depends on that
+narrowing.
+
+**Mechanism: `Connection: close` and nothing more.** No `req.destroy()`, no
+`socket.end()`, no teardown after `res.end()`. Node flushes the complete
+response — the operator page's security headers included — and closes.
+
+**Proved on a raw socket for both endpoints**, driving the real exported
+handlers and observing **before** any teardown. Stated per endpoint, because
+neither carries the whole matrix:
+
+| | `api/twilio-inbound.js` | `api/operator-action.js` |
+|---|---|---|
+| keeps keep-alive, socket carries a second request | bodyless `405`; complete-body `403` | bodyless `405`; complete-body `400` |
+| complete response, `Connection: close`, server closes, nothing further dispatched | pre-body `405` with a declared body; **chunked** oversize `400` | pre-body `400` (token in query) with a declared body; declared-oversize `400` |
+
+**Chunked framing is proved once**, on the webhook, because that is the only
+framing that reaches `readFormBody()`'s running-byte check. The predicate is one
+shared pure function, so the operator action takes the same branch — that is
+inference from shared code, not a second measurement, and is not claimed as one.
+
+Removing the decision on a throwaway copy fails exactly the closing assertions
+and leaves both keep-alive controls passing, on both endpoints.
+
+**`api/lead.js` was deliberately not refactored** to import the shared
+predicate. The live lead path was fixed and proven in #30; disturbing it to
+remove a duplicated four-line rule would be risk with no correctness gain.
+
+**Status semantics are unchanged.** The webhook's body-read rejection is still
+`400` and the operator action's is still `400`. Whether `408` would be
+preferable for either is **unresolved and not decided here**.
+
+**Both endpoints remain inert** — `TWILIO_AUTH_TOKEN` and
+`OPERATOR_ACTION_SECRET` are set in no environment. This was correctness work
+before activation, not a production incident, and **no production behaviour
+changed**.
+
+## Sequenced follow-ups from the transport work
+
+0. ~~Both gate 7 endpoints answer without deciding the connection.~~ **Done** —
+   see the section above.
+1. ~~`tests/suppression.test.mjs`'s oversize real-socket test claims the
+   streaming path and exercises the header one.~~ **Done** — the false prose is
+   corrected in place and says which path that test actually exercises, and the
+   **streaming** size check now has its own raw-socket proof (chunked framing,
+   no `Content-Length`, through the real webhook handler).
 2. **Harness duplication** — `tests/helpers.mjs` now exports a generic
    `withHttpServer`; `suppression.test.mjs` still carries its own local copy.
+   **Not blocking**: the new lifecycle tests use the shared `withRawRequest`, so
+   the duplication was not in the way and the change was not widened to absorb
+   it.
 3. **`api/_lib/mail.mjs` `sendAcknowledgement()`** has no single overall deadline,
    only nodemailer's per-phase timeouts, unlike `sendInboundNotification()`. On the
    lead path it runs *after* the lead is safely in HubSpot, so it cannot lose a
@@ -720,6 +788,7 @@ Open one of these only when the task actually needs it.
 | Topic | Document |
 |---|---|
 | **The lead body read** — the two defects, the 5 s arithmetic, the 408, the mutation proofs, the five follow-ups | `docs/updates/2026-09-11-lead-body-read-bounds.md` |
+| **The gate 7 connection lifecycle** — the shared predicate, both response boundaries, the static guard rewrite, the raw-socket matrix | `docs/updates/2026-09-11-gate-7-connection-lifecycle.md` |
 | **Why this project's engineering rules exist** — the defects that earned them | **`docs/ENGINEERING-LESSONS.md`** — read the relevant entry, not the archive |
 | Rule rationale, Phase 1 contract | `docs/PHASE-1-HANDOFF.md` §6 — do not read wholesale |
 | HubSpot consent schema, §6/§6a verification, rollback | `docs/updates/2026-09-09-hubspot-consent-setup.md` |

@@ -98,7 +98,9 @@ import {
 import {
   findContactsByPhone, writeSuppressionProperties, isConfigured, HUBSPOT_TIMEOUT_MS,
 } from "./_lib/hubspot.mjs";
-import { readFormBody, parseFormParams, bodyErrorReason } from "./_lib/twilio.mjs";
+import {
+  readFormBody, parseFormParams, bodyErrorReason, bodyStillOutstanding,
+} from "./_lib/twilio.mjs";
 import { escapeHtml } from "./_lib/mail.mjs";
 import { log } from "./_lib/log.mjs";
 
@@ -263,7 +265,38 @@ export const MIN_WRITE_MS = 500;
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; " +
             "base-uri 'none'; frame-ancestors 'none'";
 
-function page(res, status, html) {
+/* ---------------------------------------------------------------------
+   THE RESPONSE BOUNDARY — AND IT DECIDES THE CONNECTION TOO
+   ---------------------------------------------------------------------
+   EVERY HTML response this endpoint makes goes through here, which is
+   why the connection decision lives here and nowhere else. It is not
+   reached only from the readFormBody() catch: a POST can be refused
+   BEFORE the body is read at all — an unsupported method, an
+   unconfigured endpoint, a token in the query string — and those
+   requests carry a declared body just as readily.
+
+   THE DEFECT, the same shape #30 measured and fixed in api/lead.js: the
+   endpoint answered while a declared request body had not been
+   completely consumed, and still advertised `Connection: keep-alive`.
+   The socket survives, so the response's own framing metadata promised
+   a reusable connection this server may never serve — it becomes usable
+   again only once the client sends the rest of the body it declared,
+   which on a refused read is by definition what it did not do. Measured
+   for THIS endpoint on a raw socket in tests/operator-action.test.mjs.
+
+   THE RULE is bodyStillOutstanding() in api/_lib/twilio.mjs — a PURE
+   predicate that reads `req` and mutates nothing. Not `!req.complete`,
+   which is too blunt: a bodyless request reports `complete === false` at
+   handler entry too. THE GET PATH DEPENDS ON THAT NARROWING — a GET
+   carries no body, is read-only, and must keep keep-alive.
+
+   THE MECHANISM IS `Connection: close` AND NOTHING MORE. No
+   req.destroy(), no socket.end(), no teardown after res.end(): Node
+   flushes the complete page — every security header above included —
+   and closes the connection itself. `res` is the handler's and stays the
+   handler's; readFormBody() is not given it. CLAUDE.md rules 14, 15, 16.
+   --------------------------------------------------------------------- */
+function page(req, res, status, html) {
   res.statusCode = status;
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, max-age=0");
@@ -272,6 +305,7 @@ function page(res, status, html) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Content-Security-Policy", CSP);
+  if (bodyStillOutstanding(req)) res.setHeader("Connection", "close");
   res.end(html);
 }
 
@@ -302,8 +336,8 @@ function shell(title, inner) {
     `<body><main><h1>${escapeHtml(title)}</h1>${inner}</main></body></html>`;
 }
 
-function notice(res, status, title, body) {
-  return page(res, status, shell(title, `<div class="warn"><p>${body}</p></div>`));
+function notice(req, res, status, title, body) {
+  return page(req, res, status, shell(title, `<div class="warn"><p>${body}</p></div>`));
 }
 
 /* ---------------------------------------------------------------------
@@ -363,7 +397,7 @@ export default async function handler(req, res) {
   const method = String(req?.method || "").toUpperCase();
   if (method !== "GET" && method !== "POST") {
     res.setHeader("Allow", "GET, POST");
-    return notice(res, 405, "Not allowed", "This link accepts GET and POST only.");
+    return notice(req, res, 405, "Not allowed", "This link accepts GET and POST only.");
   }
 
   if (!operatorActionConfigured()) {
@@ -371,7 +405,7 @@ export default async function handler(req, res) {
        never guessed at. 503 rather than 403: the fault is ours, and with
        the secret absent the endpoint is inert by design. */
     log("operator.action.not_configured", { method });
-    return notice(res, 503, "Not available",
+    return notice(req, res, 503, "Not available",
       "This action is not configured on the server, so nothing can be recorded here. " +
       "Nothing has been changed.");
   }
@@ -393,13 +427,13 @@ async function handleGet(req, res) {
   try {
     payload = unsealOperatorToken(token);
   } catch (err) {
-    return refuseToken(res, err, "get");
+    return refuseToken(req, res, err, "get");
   }
 
   /* A scanner's GET and a human's GET are indistinguishable and are
      treated identically: both get a page and neither changes anything. */
   log("operator.action.confirmation_rendered", { message_sid: payload.sid });
-  return page(res, 200, confirmationPage(payload, token));
+  return page(req, res, 200, confirmationPage(payload, token));
 }
 
 /* ---------------------------------------------------------------------
@@ -413,7 +447,7 @@ async function handlePost(req, res) {
      the body instead would let the leak keep happening unnoticed. */
   if (queryParam(req, "t")) {
     log("operator.action.refused", { reason: "token_in_query" });
-    return notice(res, 400, "Not recorded",
+    return notice(req, res, 400, "Not recorded",
       "This request carried its token in the address bar. Nothing was recorded. " +
       "Open the link from the email again and use the button on the page.");
   }
@@ -438,7 +472,7 @@ async function handlePost(req, res) {
        `bodyErrorReason()` yields one of three fixed strings and never
        touches the body or the operator's note. */
     log("operator.action.refused", { reason: bodyErrorReason(err) });
-    return notice(res, 400, "Not recorded",
+    return notice(req, res, 400, "Not recorded",
       "That submission could not be read. Nothing was recorded.");
   }
 
@@ -446,7 +480,7 @@ async function handlePost(req, res) {
      ledger is touched at all. */
   if (!matchesLiteral(params.confirm, CONFIRM_LITERAL)) {
     log("operator.action.refused", { reason: "no_confirmation" });
-    return notice(res, 400, "Not recorded",
+    return notice(req, res, 400, "Not recorded",
       "That submission did not carry the page's confirmation. Nothing was recorded.");
   }
 
@@ -456,7 +490,7 @@ async function handlePost(req, res) {
     /* NO DEFAULT, deliberately. Guessing "sms" here would suppress less
        than the consumer asked for; guessing "all" would suppress more. */
     log("operator.action.refused", { reason: scopeKey ? "scope_unknown" : "scope_missing" });
-    return notice(res, 400, "Not recorded",
+    return notice(req, res, 400, "Not recorded",
       "No choice was made about what should stop, so nothing was recorded. " +
       "Go back and choose one.");
   }
@@ -465,7 +499,7 @@ async function handlePost(req, res) {
   try {
     payload = unsealOperatorToken(params.t);
   } catch (err) {
-    return refuseToken(res, err, "post");
+    return refuseToken(req, res, err, "post");
   }
 
   const shape = { message_sid: payload.sid, channel: scope.channel };
@@ -474,7 +508,7 @@ async function handlePost(req, res) {
     /* Without the durable record there is nothing to record INTO, and a
        page saying "recorded" would be a lie about a compliance decision. */
     log("operator.action.ledger_absent", shape);
-    return notice(res, 503, "Not recorded",
+    return notice(req, res, 503, "Not recorded",
       "The durable record is not reachable from this deployment, so nothing was " +
       "recorded. Nothing has been changed.");
   }
@@ -488,7 +522,7 @@ async function handlePost(req, res) {
     log("operator.action.refused", {
       message_sid: payload.sid, reason: "note_too_long", limit: MAX_NOTE_CHARS,
     });
-    return notice(res, 400, "Not recorded",
+    return notice(req, res, 400, "Not recorded",
       `That note is longer than ${MAX_NOTE_CHARS} characters, so <strong>nothing was ` +
       "recorded</strong> — it was not shortened for you. Go back, shorten the note, and " +
       "submit again. The link still works.");
@@ -531,7 +565,7 @@ async function handlePost(req, res) {
     });
   } catch (buildErr) {
     log("operator.action.unrecordable", { ...shape, ...ledgerLogShape(buildErr) });
-    return notice(res, 400, "Not recorded",
+    return notice(req, res, 400, "Not recorded",
       "That message's number could not be recorded against. Nothing was recorded.");
   }
 
@@ -543,7 +577,7 @@ async function handlePost(req, res) {
        There is no retry and no queue: the operator still has the email
        and the link, and the link is idempotent. */
     log("operator.action.ledger_failed", { ...shape, ...ledgerLogShape(ledgerErr) });
-    return notice(res, 503, "Not recorded",
+    return notice(req, res, 503, "Not recorded",
       "The durable record could not be written, so nothing was recorded. " +
       "The link in the email still works — try it again in a few minutes.");
   }
@@ -557,7 +591,7 @@ async function handlePost(req, res) {
      The <h1> is still "Recorded". The CRM outcome is a SEPARATE sentence
      below — projectionSentence() — and must stay separate, because this
      line is true whatever HubSpot did. */
-  return page(res, 200, shell("Recorded", `
+  return page(req, res, 200, shell("Recorded", `
     <div class="ok">
       <p><strong>${escapeHtml(scope.afterRecording)}</strong></p>
       <p class="meta">Recording <strong>${escapeHtml(scope.label.toLowerCase())}</strong>
@@ -785,17 +819,17 @@ function queryParam(req, name) {
 }
 
 /** One refusal shape for every bad token, on either method. */
-function refuseToken(res, err, method) {
+function refuseToken(req, res, err, method) {
   const shape = err instanceof OperatorTokenError
     ? tokenLogShape(err) : { token_error: "unknown" };
   log("operator.action.token_refused", { method, ...shape });
 
   if (err instanceof OperatorTokenError && err.token === TOKEN_EXPIRED)
-    return notice(res, 410, "This link has expired",
+    return notice(req, res, 410, "This link has expired",
       "Links in these notifications stop working after 30 days. Nothing was recorded. " +
       "The message is still in the Twilio log if you need it.");
 
-  return notice(res, 400, "This link is not valid",
+  return notice(req, res, 400, "This link is not valid",
     "This link could not be read. Nothing was recorded. Open it directly from the " +
     "notification email rather than from a copy that may have been altered in transit.");
 }

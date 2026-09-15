@@ -80,7 +80,7 @@
  */
 
 import {
-  verifyTwilioSignature, readFormBody, optOutType, OPT_OUT_TYPE,
+  verifyTwilioSignature, readFormBody, bodyStillOutstanding, optOutType, OPT_OUT_TYPE,
   twilioConfigured, TWILIO_NOT_CONFIGURED, bodyErrorReason,
 } from "./_lib/twilio.mjs";
 import { classifyInbound, classificationLogShape } from "./_lib/optout.mjs";
@@ -247,11 +247,49 @@ export const MIN_WRITE_MS = 500;
    be aborted in flight and logged as a HubSpot failure. */
 export const MIN_SEARCH_MS = 1000;
 
-function reply(res, status, body = "") {
+/* ---------------------------------------------------------------------
+   THE RESPONSE BOUNDARY — AND IT DECIDES THE CONNECTION, NOT ONLY THE
+   RESPONSE
+   ---------------------------------------------------------------------
+   EVERY response this endpoint makes goes through here, which is the
+   reason the decision lives here and nowhere else. This function is not
+   reached only from the readFormBody() catch: it also answers BEFORE the
+   body is read at all — a wrong method, an unconfigured endpoint — and
+   those requests can carry a declared body just as easily.
+
+   THE DEFECT, the same shape #30 measured and fixed in api/lead.js:
+   the endpoint answered while a declared request body had not been
+   completely consumed, and still advertised `Connection: keep-alive`.
+   The socket survives, so the framing metadata promised a reusable
+   connection the server may never serve — it becomes usable again only
+   once the client sends the rest of the body it declared. Measured in
+   #30 against a real node:http boundary; measured here on a raw socket,
+   for this endpoint, in tests/suppression.test.mjs § 10.
+
+   THE RULE is bodyStillOutstanding() in api/_lib/twilio.mjs — a PURE
+   predicate that reads `req` and mutates nothing. It is not
+   `!req.complete`, which is too blunt: a bodyless request reports
+   `complete === false` at handler entry too, and closing on that would
+   drop keep-alive for every ordinary probe. Both controls are pinned by
+   tests rather than left to this comment.
+
+   THE MECHANISM IS `Connection: close` AND NOTHING MORE. No
+   req.destroy(), no socket.end(), no teardown after res.end(): Node
+   flushes the complete response and closes the connection itself. Ending
+   the socket by hand closes it while still advertising keep-alive, which
+   leaves the header lying, and destroying it loses the response outright
+   — the bug #28 paid for.
+
+   `res` IS THE HANDLER'S AND STAYS THE HANDLER'S. readFormBody() is not
+   given the response and cannot make this decision. CLAUDE.md rules 14,
+   15 and 16.
+   --------------------------------------------------------------------- */
+function reply(req, res, status, body = "") {
   res.statusCode = status;
   res.setHeader("Content-Type", body ? "text/xml; charset=utf-8" : "text/plain; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
+  if (bodyStillOutstanding(req)) res.setHeader("Connection", "close");
   res.end(body);
 }
 
@@ -316,14 +354,14 @@ export default async function handler(req, res) {
 
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
-    return reply(res, 405);
+    return reply(req, res, 405);
   }
 
   if (!twilioConfigured()) {
     /* No token means nothing can be verified, and an unverifiable request
        is never processed. 503 rather than 403: the fault is ours. */
     log("twilio.inbound.not_configured", { error: TWILIO_NOT_CONFIGURED });
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   let params;
@@ -344,7 +382,7 @@ export default async function handler(req, res) {
        field has been read, let alone acted on. `bodyErrorReason()` yields
        one of three fixed strings and never touches the body. */
     log("twilio.inbound.body_rejected", { reason: bodyErrorReason(err) });
-    return reply(res, 400);
+    return reply(req, res, 400);
   }
 
   /* ---- 1. AUTHENTICATE, BEFORE INTERPRETING ANYTHING ---------------- */
@@ -352,7 +390,7 @@ export default async function handler(req, res) {
   if (!verdict.ok) {
     /* The reason is a stable token and carries no value from the request. */
     log("twilio.inbound.rejected", { reason: verdict.reason });
-    return reply(res, 403);
+    return reply(req, res, 403);
   }
 
   const messageSid = String(params.MessageSid || params.SmsMessageSid || "").trim();
@@ -370,7 +408,7 @@ export default async function handler(req, res) {
     /* Without a MessageSid there is no idempotency key, and without a From
        there is no number to suppress. Neither is recoverable by retrying. */
     log("twilio.inbound.incomplete", { has_sid: Boolean(messageSid), has_from: Boolean(from) });
-    return reply(res, 400);
+    return reply(req, res, 400);
   }
 
   /* ---- 2. CLASSIFY -------------------------------------------------- */
@@ -391,19 +429,19 @@ export default async function handler(req, res) {
        An ordinary message she reads and closes writes nothing, ever.
 
        See docs/updates/2026-09-10-unclassified-inbound-operator-surfacing-decision.md §4. */
-    return surfaceToOperator({ params, from, messageSid, occurredAt, shape, res });
+    return surfaceToOperator({ params, from, messageSid, occurredAt, shape, req, res });
   }
 
   if (decision.kind === "help") {
     /* Informational. Not a consent decision, so nothing is recorded. */
     log("twilio.inbound.help", shape);
-    return reply(res, 200, EMPTY_TWIML);
+    return reply(req, res, 200, EMPTY_TWIML);
   }
 
   /* ---- 3. THE DURABLE RECORD, FIRST --------------------------------- */
   if (!consentLedgerConfigured()) {
     log("twilio.inbound.ledger_absent", shape);
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   const isSuppression = decision.kind === "suppress";
@@ -436,7 +474,7 @@ export default async function handler(req, res) {
        retry changes that. Fail loudly rather than writing a row that does
        not say which line it concerns. */
     log("twilio.inbound.unrecordable", { ...shape, ...ledgerLogShape(buildErr) });
-    return reply(res, 400);
+    return reply(req, res, 400);
   }
 
   try {
@@ -454,13 +492,13 @@ export default async function handler(req, res) {
        Twilio's own MessageSid. That is idempotency, not a guarantee that a
        retry happens. */
     log("twilio.inbound.ledger_failed", { ...shape, ...ledgerLogShape(ledgerErr) });
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   /* ---- 4. THE PROJECTION, BEST-EFFORT AND BOUNDED ------------------- */
   await projectToHubSpot({ decision, from, occurredAt, shape, startedAt });
 
-  return reply(res, 200, EMPTY_TWIML);
+  return reply(req, res, 200, EMPTY_TWIML);
 }
 
 /* ---------------------------------------------------------------------
@@ -484,7 +522,7 @@ export default async function handler(req, res) {
    HubSpot's, which is why a ledger outage cannot suppress operator
    visibility.
    --------------------------------------------------------------------- */
-async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, res }) {
+async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, req, res }) {
   if (!isMailConfigured() || !operatorActionConfigured()) {
     /* The existing event name, now meaning SURFACING WAS IMPOSSIBLE
        rather than surfacing was not attempted. 503, never 200. */
@@ -493,7 +531,7 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
       mail_configured: isMailConfigured(),
       action_configured: operatorActionConfigured(),
     });
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   /* The consumer's words are capped BEFORE they are sealed, by the
@@ -513,7 +551,7 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
       ...shape, stage: "seal",
       ...(sealErr instanceof OperatorTokenError ? tokenLogShape(sealErr) : { token_error: "unknown" }),
     });
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   const started = Date.now();
@@ -529,7 +567,7 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
       ...shape, stage: "send", mail_error: classifyMailError(mailErr),
       ms: Date.now() - started,
     });
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   /* NOT SENT IS NOT SENT, even when it did not throw. sendInboundNotification()
@@ -544,11 +582,11 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
     log("twilio.inbound.unclassified_not_surfaced", {
       ...shape, reason: String(result?.reason || "not_sent"),
     });
-    return reply(res, 503);
+    return reply(req, res, 503);
   }
 
   log("twilio.inbound.unclassified_notified", { ...shape, ms: Date.now() - started });
-  return reply(res, 200, EMPTY_TWIML);
+  return reply(req, res, 200, EMPTY_TWIML);
 }
 
 /**
