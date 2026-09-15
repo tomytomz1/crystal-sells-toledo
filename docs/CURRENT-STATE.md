@@ -90,30 +90,104 @@ Schema in the production HubSpot portal:
   Vercel **Preview only**. **Gate 4 closed on 10 September 2026 — both stages.
   Gate 5 closed the same day.** Gates 6–10 remain.
 - **A2P/TCR readiness is a separate activation dependency. Gate 6 is still
-  OPEN, but what keeps it open changed on 12 and 15 September 2026.**
+  OPEN — but every blocker that previously kept it open is now CLOSED, and
+  what remains is different in kind.**
 
-  **The error-30753 / TCR allowlist hold is no longer the blocker.** The
-  operator reports that on **12 September 2026** Twilio Support stated TCR had
-  allowlisted `crystal@crystalsellstoledo.com`, and instructed her to **delete
-  the failed Brand, create a new Brand, and submit it for review**.
+  **FOUR TWILIO OBJECTS, AND THEY ARE NOT THE SAME THING.** Read this table
+  before anything else in this entry; nearly every way of getting A2P status
+  wrong is a collapse of two of these rows into one.
 
-  **Gate 6 is NOT closed.** The replacement registration is still pending, and
-  as of **15 September 2026** the Twilio **Primary Compliance Profile requires
-  Crystal Saylor to complete Persona identity verification with her ID** — an
-  outstanding operator action. No live SMS test is possible until the
-  replacement registration completes.
+  | Twilio object | State — 15 September 2026 | Evidence |
+  |---|---|---|
+  | **Primary / Individual Customer Profile** | **APPROVED** | operator-supplied Twilio email |
+  | **A2P 10DLC Brand** | **APPROVED** | operator-supplied console screenshot |
+  | **Brand identity** | **VERIFIED** | same screenshot |
+  | **A2P Campaign** | **NOT ESTABLISHED as created, submitted or approved** | no evidence of any Campaign |
 
-  **Both facts above were supplied by the operator and are NOT independently
-  verified from this repository or by any agent session.** Nothing here can
-  advance them.
+  **THE PRIMARY CUSTOMER PROFILE IS APPROVED — 15 September 2026.** The
+  operator supplied a Twilio email titled *"Twilio Primary Customer Profile
+  Approved"* stating that **Crystal Saylor's Individual Profile has been
+  approved**. That resolves the **Primary Compliance Profile rejection**
+  recorded here, and it is the **direct** evidence that the **Persona /
+  identity-verification remediation is complete** — the email names the profile
+  outcome rather than leaving it to be inferred from a Brand field. The email
+  also showed an Account SID and a Bundle SID; their values are deliberately
+  **not** recorded here.
+
+  This is **in addition to**, not a substitute for, the Brand evidence below.
+  A Customer Profile and a Brand are different registrations, and approval of
+  one is not approval of the other.
+
+  **THE BRAND IS APPROVED — 15 September 2026.** The operator supplied a
+  screenshot of Twilio Console → Trust Hub → Registrations → A2P 10DLC Brands →
+  Brand Details showing:
+
+  | | |
+  |---|---|
+  | Brand / program | **Crystal Sells Toledo** |
+  | Registration | A2P 10DLC Brand · SMS · United States |
+  | **Brand status** | **APPROVED** |
+  | **Brand type** | **Sole proprietor** |
+  | **Identity** | **VERIFIED** |
+  | Created · last updated | 15 September 2026 |
+  | Notification email | `crystal@crystalsellstoledo.com` |
+
+  The view also showed a Brand SID, an External Brand ID, a Bundle SID and a
+  **"Create campaign"** button, with **no linked Campaign visible**.
+
+  **THREE BLOCKERS ARE CLOSED.**
+
+  1. **The error-30753 / TCR email-allowlist hold — CLOSED.** Superseded on
+     12 September 2026, and now moot: the approved Brand carries
+     `crystal@crystalsellstoledo.com` as its notification address, so that
+     address is no longer rejecting a registration.
+  2. **Persona identity verification, and the Primary Compliance Profile
+     rejection behind it — CLOSED, on direct evidence.** The Twilio email
+     *"Twilio Primary Customer Profile Approved"* states the Individual Profile
+     is **approved**, which is exactly the object the blocker named. The Brand
+     Details view independently reports **Identity: VERIFIED**. Two separate
+     Twilio objects agreeing, neither of them inferred.
+  3. **Replacement Brand review — CLOSED.** The replacement registration is no
+     longer pending: the screenshot shows a Brand created **15 September 2026**
+     in status **Approved**.
+
+  **WHAT THIS EVIDENCE DOES NOT ESTABLISH, and must not be read as:**
+  a Campaign created, a Campaign submitted, a Campaign approved, a phone number
+  assigned to a Campaign, a Messaging Service configured or ready, or live SMS
+  readiness. **A "Create campaign" button is the opposite of a campaign** — the
+  supplied view showed no linked Campaign at all. **Brand approval is not
+  Campaign approval**, and collapsing the two is the specific error this entry
+  exists to prevent.
+
+  **GATE 6 REMAINS OPEN for A2P Campaign readiness and approval.** The gate is
+  defined by what must be true before a **live SMS test** is possible
+  (`docs/updates/2026-09-10-stop-dnc-suppression-decision.md` §5), and no
+  definition in this repository closes it on Brand approval alone. Still
+  required: **create and submit the Campaign, have it approved, attach the
+  number to a Messaging Service under that Campaign.** None has begun.
+
+  **The immediate dependency is not Twilio's — it is ours.** The Campaign must
+  not be submitted until the reviewer can visit the live opt-in URL and
+  actually see the production SMS consent checkbox, unchecked and optional,
+  with its disclosure. That needs `COMMUNICATIONS_CONSENT_ENABLED=true` in
+  Vercel **Production**, which is deliberately **not** set — it is set in
+  **Preview only**. The full pre-submission checklist, and the sequencing
+  reason behind it, is
+  `docs/updates/2026-09-09-a2p-campaign-answers.md` §7. **That sequencing is
+  unchanged by the Brand approval and must not be reordered without a separate
+  decision.**
+
+  **PROVENANCE. All of the above is OPERATOR-SUPPLIED EVIDENCE** — one console
+  screenshot and one Twilio email. No agent session logged into Twilio, queried
+  the Twilio API, or independently verified any of it. **No Twilio action was performed or simulated**, no
+  Campaign was created, no Messaging Service was configured, no number was
+  assigned, no webhook was configured and no SMS was sent.
 
   **Statements elsewhere in this file and in the merged documents that Twilio
-  configuration is "frozen under the TCR hold" are therefore STALE.** They are
-  corrected in place below where they affect current truth; the historical
-  decision documents keep their original wording with a dated correction beside
-  it. What has not changed: Twilio configuration should still not be altered
-  casually while a replacement registration is in review, and **no Twilio action
-  was performed or simulated** by the session that recorded this.
+  configuration is "frozen under the TCR hold", or that a replacement
+  registration is pending, are STALE.** They are corrected in place below where
+  they affect current truth; the historical decision documents keep their
+  original wording with a dated correction beside it.
 
 ## Consent evidence architecture — approved direction
 
@@ -552,9 +626,10 @@ action, 10 September 2026** (`api/operator-action.js`,
 - **Voice ingress.** Nothing receives a Retell webhook, so a *spoken*
   do-not-call reaches none of the above.
 - **Webhook retry** on the Messaging Service — unconfigured. *(It was recorded
-  as "frozen under the TCR hold"; that hold is no longer the blocker — see gate
-  6 above. It remains a Messaging Service change that should wait for the
-  replacement registration.)*
+  as "frozen under the TCR hold"; that hold is CLOSED and the Brand is now
+  approved — see gate 6 above. It remains a Messaging Service change, and the
+  Messaging Service is still not configured under an approved Campaign, so
+  there is nothing to change it on yet.)*
 
 **Operator surfacing and the operator suppression action moved out of this list
 on 10 September 2026 — both are now BUILT, MERGED AND INERT**; see the section
@@ -601,8 +676,9 @@ and one activation prerequisite is new:
   dependency rather than an undesigned hole.**
 - **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
   redeliver** an incoming-message webhook. Until retry is configured — a
-  Messaging Service change, and one that should wait for the replacement A2P
-  registration rather than the superseded TCR hold — a ledger outage during a
+  Messaging Service change, which cannot be made until a Messaging Service
+  exists under an approved Campaign; the Brand is approved, the Campaign is
+  not created — a ledger outage during a
   real STOP loses the evidence permanently. Twilio still blocks the number, so
   the consumer is protected; our record of why would not exist. **The same is now
   true of a failed notification:** the 503 is loud, and nothing redelivers it.
