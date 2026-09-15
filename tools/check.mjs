@@ -1302,6 +1302,84 @@ for (const file of pages) {
     if (/RETURNS\s+TABLE\s*\([^)]*reason_code/i.test(migCode))
       fail(migRel, "returns reason_code - the sender decides from the PRESENCE of a suppression, and returning it invites the independent-aggregate mis-pairing");
   }
+
+  /* ---------------------------------------------------------------------
+     db/003 — THE UNSUPPRESSION FOLD
+     ---------------------------------------------------------------------
+     Every invariant below is one a refactor could delete without breaking a
+     visible behaviour, on a migration nothing calls yet. The semantic ones
+     are the point: if the two clearance kinds stop being distinguished, a
+     correction of one erroneous row silently erases unrelated legitimate
+     consumer refusals again, and the audit trail says otherwise.
+     --------------------------------------------------------------------- */
+  const unsupRel = "db/003_unsuppression_lookup.sql";
+  const unsupPath = join(ROOT, "..", unsupRel);
+  if (!existsSync(unsupPath))
+    fail(unsupRel, "missing - the unsuppression fold has no migration and suppression stays permanent by construction");
+  else {
+    const raw = readFileSync(unsupPath, "utf8");
+    const code = raw.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+
+    /* The same hardening db/002 requires, on two more functions. */
+    if ((code.match(/SECURITY DEFINER/g) || []).length < 2)
+      fail(unsupRel, "fewer than two SECURITY DEFINER functions - both read wrappers must run with the owner's rights or they return nothing");
+    if ((code.match(/SET\s+search_path\s*=/g) || []).length < 3)
+      fail(unsupRel, "a function has no SET search_path - a caller could shadow the table and have it read with the owner's rights");
+    for (const fn of ["_active_consent_blocks", "get_suppression_state", "get_active_blocks"])
+      if (!new RegExp(`REVOKE\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+${fn}\\s*\\(text\\)\\s+FROM\\s+PUBLIC`, "i").test(code))
+        fail(unsupRel, `does not REVOKE EXECUTE ON ${fn} FROM PUBLIC - PostgreSQL grants EXECUTE to PUBLIC by default, so every role including the website's would get it`);
+
+    /* THE SENDER MUST NOT GET EVENT IDENTITY. Gate 8 asks "may I send?" and
+       needs allow/deny plus a timestamp; handing it dedupe_keys widens the
+       live send path for nothing. */
+    if (/GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+get_active_blocks\s*\(text\)\s+TO\s+<sender_role>/i.test(code))
+      fail(unsupRel, "grants get_active_blocks to the sender - the send path has no use for event identity");
+
+    /* No role gains a READ or a MUTATION on the table. The operator's INSERT
+       is approved and is the one table grant this migration may make. */
+    if (/GRANT\s+(?:SELECT|UPDATE|DELETE|TRUNCATE|ALL)[\s\S]{0,80}?ON\s+(?:TABLE\s+)?communication_consent_events/i.test(code))
+      fail(unsupRel, "grants a table read or mutation - append-only is a database grant, and no role may read this table");
+
+    /* db/002's mis-pairing correction, preserved. */
+    if (/min\s*\(\s*[a-z_.]*reason_code\s*\)/i.test(code))
+      fail(unsupRel, "aggregates reason_code independently of occurred_at - it would return a reason belonging to a different row than the timestamp");
+
+    /* ---- THE SEMANTICS THAT ACTUALLY PROTECT A CONSUMER REFUSAL ----
+       A lane clearance MUST be scoped to consumer_request. Without that
+       predicate every unsuppressed row clears the whole lane again - which
+       is precisely the defect db/003 exists to correct, and it is one
+       deleted line away. */
+    if (!/event_type\s*=\s*'unsuppressed'[\s\S]{0,200}?reason_code\s*=\s*'consumer_request'/i.test(code))
+      fail(unsupRel, "the lane-clearance branch is not scoped to reason_code = 'consumer_request' - every unsuppressed row would clear the whole lane and erase unrelated legitimate refusals");
+    if (!/reason_code\s*=\s*'recorded_in_error'/i.test(code))
+      fail(unsupRel, "no targeted-invalidation branch - recorded_in_error would clear nothing or everything, never the events it names");
+    if (!/metadata\s*->\s*'invalidates'/i.test(code))
+      fail(unsupRel, "the fold never reads metadata.invalidates - naming the corrected event would be decorative, which is the defect this migration corrects");
+
+    /* FINDING B: jsonb_array_elements_text RAISES on a scalar or an object,
+       so a malformed invalidates aborted the whole fold instead of being
+       inert. The typeof guard is what makes non-array metadata fail toward
+       MORE blocking. */
+    if (!/jsonb_typeof\s*\([\s\S]{0,60}?'invalidates'[\s\S]{0,40}?=\s*'array'/i.test(code))
+      fail(unsupRel, "no jsonb_typeof array guard - a malformed metadata.invalidates raises instead of invalidating nothing");
+
+    /* FINDING A: the lane-clearance test asks "does this block SURVIVE", so
+       an exact tie must answer YES. Strict '>' cleared on a tie while the
+       design's own prose said the block wins. */
+    if (!/occurred_at\s*>=\s*c\.cleared_at/i.test(code))
+      fail(unsupRel, "the lane-clearance survival test is not >= - an exact timestamp tie would clear the block, and equality must fail closed");
+    if (!/recorded_at\s*>=\s*c\.cleared_recorded_at/i.test(code))
+      fail(unsupRel, "the second clock is not consulted with >= - a delayed or redelivered STOP would be discarded");
+
+    /* PRE-EXISTENCE: the invalidation test asks "is this block KILLED", so
+       an exact tie must answer NO. Strict '<', never '<='. */
+    if (!/e\.recorded_at\s*<\s*v\.killed_at/.test(code) || /e\.recorded_at\s*<=\s*v\.killed_at/.test(code))
+      fail(unsupRel, "the pre-existence rule is not a strict < - an invalidation could kill a block recorded at the same instant or later");
+
+    /* SAME LANE ONLY. */
+    if (!/v\.channel\s*=\s*e\.channel/i.test(code))
+      fail(unsupRel, "the invalidation join is not scoped to the same lane - a correction in one channel could reach another");
+  }
 }
 
 /* ---------------------------------------------------------------------

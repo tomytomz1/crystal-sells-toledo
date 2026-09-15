@@ -588,11 +588,17 @@ and one activation prerequisite is new:
 - **No voice ingress at all.** *"stop calling me"* arriving by SMS suppresses
   voice, but nothing receives a Retell webhook, so a **spoken** do-not-call
   cannot reach any of it.
-- **Unsuppression is DESIGNED and NOT BUILT.** The operator action deliberately
-  cannot clear what it writes, so a mistaken entry is still permanent today and
-  the only correction today is still a database owner. The design that removes
-  that was settled on 15 September 2026 — see the section below — and **gate 9
-  now has a named dependency rather than an undesigned hole.**
+- **Unsuppression is DESIGNED, its DATABASE LAYER IS APPLIED, and the WORKFLOW
+  IS NOT BUILT.** The operator action deliberately cannot clear what it writes,
+  and no endpoint writes an `unsuppressed` event, so a mistaken entry is still
+  uncorrectable by any application path today. `db/003` is applied in
+  production as of 15 September 2026 — so the database would now *read* a
+  clearing event correctly, and a direct holder of the owner or
+  `consent_ledger_operator` credential could write one by hand — but that is a
+  manual database action with no endpoint, no token, no attestation and no
+  HubSpot projection behind it. The design that closes this was settled on
+  15 September 2026 — see the section below — and **gate 9 now has a named
+  dependency rather than an undesigned hole.**
 - **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
   redeliver** an incoming-message webhook. Until retry is configured — a
   Messaging Service change, and one that should wait for the replacement A2P
@@ -785,11 +791,170 @@ preferable for either is **unresolved and not decided here**.
 before activation, not a production incident, and **no production behaviour
 changed**.
 
-## Unsuppression / re-opt-in — DESIGNED, NOT BUILT
+## Unsuppression / re-opt-in — DATABASE FOUNDATION APPLIED IN PRODUCTION, WORKFLOW NOT BUILT
 
-Settled 15 September 2026. **Design only — no code, no migration, no endpoint,
-no test, no configuration, and nothing in production changed.** Full reasoning:
-`docs/updates/2026-09-15-unsuppression-reoptin-decision.md`.
+Design settled 15 September 2026:
+`docs/updates/2026-09-15-unsuppression-reoptin-decision.md`. The **database
+layer** of that design is now written, verified and **applied to production
+Neon**; **nothing else is built.**
+
+**Production DATABASE changed: YES** — `db/003`'s three functions, the
+`consent_ledger_operator` role and its grants now exist on the live Neon
+`Primary` branch. **Production APPLICATION behaviour changed: NO** — nothing in
+`api/` or `src/` calls either new function, no endpoint or sender was
+activated, and no outbound messaging, Twilio or Retell capability was turned
+on.
+
+### What exists
+
+**`db/003_unsuppression_lookup.sql` — WRITTEN, VERIFIED AT A REAL POSTGRESQL
+BOUNDARY, AND APPLIED TO PRODUCTION NEON ON 15 SEPTEMBER 2026.** Both halves
+were established separately, and by different parties:
+
+- **Verified pre-application:** the migration applies cleanly on top of
+  `db/001` and `db/002` against a **real PostgreSQL 16.13** cluster with
+  **real roles**, and all **36** assertions in
+  `tests/unsuppression-fold.test.mjs` pass there — the six approved semantic
+  cases, every fail-closed rule, and the whole privilege matrix read back from
+  `pg_proc` and `has_*_privilege()` rather than from the migration text. This
+  is what CI re-runs on every pull request.
+- **Applied to production by the operator, not by an agent.** The table-owner
+  credential is deliberately in no environment and reached no agent session.
+  The **operator** applied the PR #33 head's migration by hand to the Neon
+  project `crystal-sells-toledo-consent-ledger`, branch **`Primary`**,
+  database `neondb`, as `neondb_owner`, wrapped in `BEGIN; … COMMIT;`, with
+  every statement reporting success. **Production PostgreSQL is 18.6**; the
+  pre-application agent verification ran on **16.13**, so the production
+  result is the authoritative one for production and is recorded from the
+  operator's own observations below. **Standing consequence, stated rather than
+  softened:** CI's regression gate runs a `postgres:16` service, so it exercises
+  16, not 18.6. A regression that appears only on PostgreSQL 18 would not be
+  caught by CI; production's 18.6 result was established once, by hand, and is
+  not re-established on every pull request.
+
+**Verified in production by the operator**, read back from the catalogue
+rather than asserted from the migration text. These are the operator's reported
+observations; no agent session held a production credential:
+
+- All three functions exist, owned by `neondb_owner`.
+  `_active_consent_blocks` is **`SECURITY DEFINER` = false**; both wrappers are
+  **`SECURITY DEFINER` = true**; all three carry
+  `search_path = pg_catalog, public`.
+- `get_suppression_state(text)`'s result is unchanged —
+  `TABLE(channel text, suppressed_at timestamp with time zone)` — so gate 8's
+  future caller contract is intact and `CREATE OR REPLACE` did not drift it.
+- `consent_ledger_operator` now exists alongside `consent_ledger_app` and
+  `consent_ledger_sender`. Before the migration it did not.
+- The **production privilege matrix matches the intended one exactly** (table
+  privileges from `has_table_privilege()`, function privileges from
+  `has_function_privilege()`): no role holds table `SELECT`, `UPDATE`,
+  `DELETE` or `TRUNCATE`; only `consent_ledger_app` and
+  `consent_ledger_operator` hold `INSERT`; `consent_ledger_sender` holds
+  `EXECUTE` on `get_suppression_state` and **not** on `get_active_blocks`;
+  `consent_ledger_app` holds neither; `_active_consent_blocks` is executable by
+  **no** application role; and `PUBLIC` holds `EXECUTE` on none of the three.
+
+**Six synthetic semantic cases were run against production inside ONE
+transaction, which was then rolled back. All six returned `pass = true`:**
+
+| Case | Scenario | Observed |
+|---|---|---|
+| **A** | legitimate STOP `K1`, erroneous suppression `K2`, `recorded_in_error` invalidates `K2` | blocked, `suppressed_at` = `2026-09-15 14:00:00+00`, 1 active block |
+| **B** | two legitimate STOPs, one incorrectly invalidated | blocked, `suppressed_at` = `2026-09-15 14:01:00+00`, 1 active block |
+| **C** | one erroneous suppression only, `recorded_in_error` invalidates it | **not** blocked, 0 active blocks |
+| **D** | multiple earlier same-lane blocks, `consumer_request` clearance | **not** blocked, 0 active blocks |
+| **E** | malformed `metadata.invalidates` | blocked, `suppressed_at` = `2026-09-15 14:00:00+00`, 1 active block |
+| **F** | exact timestamp tie between a STOP and a `consumer_request` clearance | blocked, `suppressed_at` = `2026-09-15 14:00:00+00`, 1 active block |
+
+Cases **E** and **F** are the two defects found on first execution (below),
+confirmed closed **on production**, not only locally.
+
+**The transaction executed `ROLLBACK`, and a final query across all six
+synthetic numbers returned `residue = 0`.** So no synthetic row remains in the
+production ledger, the append-only evidence was not polluted by the check, and
+**no application role was granted `DELETE` to clean up** — the rollback did the
+work that a weakened grant would otherwise have needed.
+
+**`db/003` adds three functions and one role:**
+
+| | |
+|---|---|
+| `_active_consent_blocks(text)` | **Internal.** The ONE definition of "an active blocking event". `SECURITY INVOKER`, granted to **nobody**, reachable only from inside the two wrappers. Two definitions would let the operator see a set the enforcement path rejects. |
+| `get_suppression_state(text)` | **Replaced body, identical contract** — same name, same argument, same `TABLE(channel text, suppressed_at timestamptz)`. Gate 8 needs no new caller contract. |
+| `get_active_blocks(text)` | **New.** Names the blocking events so a future correction can say which one it is fixing. |
+| `consent_ledger_operator` | **New role.** `INSERT` + `EXECUTE` on the two wrappers, and nothing else. |
+
+**The observed privilege matrix** (read from PostgreSQL in the local
+verification and again in production, not asserted):
+
+| role | table `SELECT` | `INSERT` | `UPDATE`/`DELETE`/`TRUNCATE` | `get_suppression_state` | `get_active_blocks` | `_active_consent_blocks` |
+|---|---|---|---|---|---|---|
+| `consent_ledger_app` (website) | no | **yes** | no | no | no | no |
+| `consent_ledger_sender` (gate 8) | no | no | no | **yes** | **no** | no |
+| `consent_ledger_operator` | no | **yes** | no | **yes** | **yes** | no |
+| `PUBLIC` | — | — | — | **revoked** | **revoked** | **revoked** |
+
+**Two defects were found in the approved design's SQL on its first execution**,
+both failing OPEN, both fixed and both regression-tested:
+
+1. **The lane-clearance tie was fail-open.** The design's prose said an exact
+   timestamp tie leaves the block standing; its SQL used strict `>` for the
+   survival test, which **cleared** on a tie. Now `>=` on both clocks.
+2. **Malformed `metadata.invalidates` raised instead of being inert.**
+   `jsonb_array_elements_text()` errors on a JSON scalar or object, aborting
+   the whole fold rather than invalidating nothing. Now guarded by
+   `jsonb_typeof(...) = 'array'`.
+
+**`db/001` and `db/002` are untouched.** They remain applied historical
+artifacts.
+
+### What does NOT exist
+
+- **No unsuppression endpoint.** `api/operator-unsuppress.js` **does not
+  exist**, and nothing in `api/` calls either new function.
+- **No HubSpot unsuppression projection.** Nothing clears a `cst_*` flag or a
+  consent artefact.
+- **No token, minting tool or operator UI.**
+- **Gate 8 send-time enforcement has not begun.** Nothing calls
+  `get_suppression_state()` from application code — the sender connection
+  string is still in no environment.
+- **No outbound automation is activated**, and no Twilio Consent Management
+  API call is made. **One external system WAS touched:** the production Neon
+  database, by the operator, to apply this migration. Twilio, HubSpot, Retell,
+  Vercel configuration and DNS were not.
+
+**So no consumer-visible behaviour changed, and no suppression can be cleared
+by any application path.** The production database can now answer the questions
+the future workflow will ask; **nothing asks them.** The one route that does
+exist is a human holding the owner or `consent_ledger_operator` credential
+writing a row by hand — deliberate, manual, and outside the application.
+
+### Credential rotation — COMPLETED, operator-confirmed
+
+**Operator confirmed `consent_ledger_operator` credential rotation completed
+after accidental visual disclosure; old credential invalidated.** The initial
+password had been visible in an operator screenshot. The operator replaced it
+manually in Neon using the owner account.
+
+**This is OPERATOR-CONFIRMED, not agent-verified.** No agent session accessed
+Neon, held any `consent_ledger_operator` credential, or observed the rotation.
+The record is the operator's statement. No secret material of any kind is
+recorded here or in any handoff — not the old password, not the new one, not a
+connection string, not a length or any other characteristic.
+
+**The item is closed.** For the record of what the exposure could have reached
+while it stood: the role's grants are the matrix above — `INSERT` on the ledger
+and `EXECUTE` on the two wrappers, which is **append-only**. A holder could have
+appended ledger rows, including an `unsuppressed` row, and read one number's
+state at a time. It could not `SELECT` the table, could not `UPDATE`, `DELETE`
+or `TRUNCATE`, could not enumerate (both functions take one number and neither
+has an argument-free form), and could not cause a message to be sent — there is
+no send path at all: gate 8 is not built, no application code calls either
+function, and no outbound messaging is activated. **No evidence of misuse was
+sought or is claimed either way** — the ledger was not audited for unexpected
+rows, and the least-privilege bound is the reason that is an acceptable
+position, not a substitute for having looked.
+
 
 **The core rule:** an `unsuppressed` event **lifts a block and never grants
 anything**. Sending requires **two independent keys** — no active block **and** a
