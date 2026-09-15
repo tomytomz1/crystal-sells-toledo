@@ -13,6 +13,24 @@
        * calls are not recorded or transcribed (nothing enables that)
        * consent IP addresses are not stored (api/_lib/consent.mjs
          deliberately omits them from the evidence it builds)
+
+     THREE SENTENCES HERE ARE LOAD-BEARING FOR A2P 10DLC REGISTRATION and
+     must not be softened or removed. Twilio rejects a campaign with error
+     30908 ("Compliant Privacy Policy Required") when the policy behind a
+     website opt-in does not carry, in the policy itself:
+       * that mobile information and messaging consent are NOT shared with
+         third parties or affiliates for marketing or promotional purposes
+       * the message frequency
+       * "Message and data rates may apply"
+     The last is required VERBATIM in the US. Do not paraphrase it; the
+     variant using the word "standard" is rejected by carriers, and this
+     comment deliberately does not spell that variant out, because build
+     output keeps HTML comments and a reviewer reads the page source.
+
+     The opt-in checkbox already carries all three, from
+     api/_lib/consent.mjs. They are repeated here because 30908 is about
+     the POLICY PAGE, which is reviewed on its own. The two are worded
+     consistently on purpose; if one changes the other has to.
      ===================================================================== -->
       <h3>Text messages and automated calls</h3>
       <p>The forms on this site have two <strong>optional</strong> tick boxes: one to allow text
@@ -26,6 +44,11 @@
         in HubSpot. Your IP address is <strong>not</strong> stored as part of it &mdash; addresses
         are held briefly in server memory to limit repeated submissions, as described above, and are
         not added to your contact record.</p>
+      <p><strong>Message frequency varies.</strong> Texts are a reply to something you asked for,
+        so how many you get depends on your own inquiry &mdash; there is no scheduled or recurring
+        send, and no broadcast list. <strong>Message and data rates may apply</strong>, depending on
+        your mobile plan; that is between you and your carrier, and nothing is charged by this
+        site.</p>
       <p>Permission is tied to the number you gave at the time. If your number changes, the earlier
         permission does not follow you to the new one.</p>
 

@@ -39,10 +39,42 @@ Twilio number in hand: **+1 419-724-2789** (SMS, MMS, Voice).
 
 ## 2. Campaign
 
+> **CORRECTED 15 September 2026 — the use case is `Sole Proprietor`, not
+> "Customer Care / Conversational".** This worksheet said the latter from
+> 9 September until the Brand was approved as a **Sole proprietor** brand.
+>
+> Per Twilio's own documentation, **a Sole Proprietor Brand has exactly one
+> campaign use case available in the Console dropdown: `Sole Proprietor`.**
+> The multi-use-case menu (Customer Care, Marketing, Account Notification and
+> so on) belongs to Standard and Low-Volume Standard brands. There is no
+> "Customer Care" option to pick here, so the old answer described a choice
+> the Console will not offer.
+>
+> **Two different fields, and keeping them apart is the point:**
+>
+> | | |
+> |---|---|
+> | **Campaign use case** | the Twilio *registration category*. For this brand it is fixed: **`Sole Proprietor`**. |
+> | **Campaign description** | free text explaining what the traffic actually is — here, **conversational customer-care** messages answering consumer-initiated inquiries. |
+>
+> Twilio is explicit that the Sole Proprietor use case *"doesn't give any
+> substantive indication of the Campaign's purpose, which is why the Campaign
+> description field is an important field in determining whether your Campaign
+> is approved."* **The description now carries the whole burden of explaining
+> the traffic**, which is why it is written out in full below.
+>
+> Also per Twilio: a **Sole Proprietor campaign may have only ONE 10DLC phone
+> number attached**. That matches the single number in hand and needs no change
+> here, but it rules out adding a second number later without rethinking the
+> registration.
+>
+> **This records what to select. No Campaign has been created or submitted.**
+
 | Field | Answer |
 |---|---|
-| Use case | Customer Care / Conversational (low volume) |
-| Campaign description | Replies and follow-up to people who submitted a real estate inquiry on crystalsellstoledo.com and ticked a checkbox agreeing to text messages. Messages relate to that inquiry: responses, requested home-valuation follow-up, appointment scheduling and reminders, requested information, and closely related property or service updates. Not a marketing or promotional list. |
+| **Campaign use case** (the Twilio registration category) | **Sole Proprietor** |
+| **Traffic description** (what the messages actually are) | Conversational customer-care messages. See the campaign description below. |
+| Campaign description | Replies and follow-up to people who submitted a real estate inquiry on crystalsellstoledo.com and ticked a separate, optional, unchecked box agreeing to text messages. Messages relate to that consumer-initiated inquiry: replies and follow-up about it, requested home-valuation follow-up, appointment scheduling and reminders, requested information, and closely related property or service updates. **Not a marketing list. No affiliate marketing.** Consent is not a condition of service. |
 | Message frequency | Varies. Conversational and triggered by the consumer's own inquiry; no scheduled or recurring campaign sends. |
 | Does the campaign include marketing? | **No.** Inquiry-related customer care only. Any future marketing program would be registered separately with its own consent. |
 | Are links used in messages? | **No** in the current samples. If added later they will be to crystalsellstoledo.com only, never a public URL shortener. |
