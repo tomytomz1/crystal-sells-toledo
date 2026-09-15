@@ -8,8 +8,49 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # A REAL POSTGRES, because db/003's fold is compliance logic.
+    #
+    # tests/unsuppression-fold.test.mjs applies db/001, db/002 and db/003 and
+    # exercises the six approved unsuppression cases, the fail-closed rules and
+    # the full privilege matrix against a real server with real roles. Without
+    # a database it SKIPS, and a skipped suite reports "tests 0" — invisible
+    # inside this job's aggregate. That is the vacuous guard this repository
+    # has already paid for three times, so the gate runs it for real.
+    #
+    # A service container, NOT apt. The comment on the Playwright step below
+    # records why `apt-get update` is avoided here; a pinned image and the
+    # psql client already present on ubuntu-latest keep that promise.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pgowner
+          POSTGRES_PASSWORD: pgowner
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        # Without this the job can reach `npm test` before the server accepts
+        # connections, and the suite fails on a race rather than on a defect.
+        options: >-
+          --health-cmd "pg_isready -U pgowner"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Set unconditionally: the suite must never silently skip on the gate.
+      CST_TEST_PG_URL: postgresql://pgowner:pgowner@127.0.0.1:5432/postgres
+
     steps:
       - uses: actions/checkout@v4
+
+      # The suite drives psql as a subprocess rather than adding `pg` as a
+      # production dependency for a test-only need. ubuntu-latest ships the
+      # client; fail here with a clear message if that ever stops being true,
+      # rather than inside the first migration.
+      - name: Confirm the psql client is present
+        run: psql --version
 
       - uses: actions/setup-node@v4
         with:

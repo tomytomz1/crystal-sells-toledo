@@ -785,11 +785,77 @@ preferable for either is **unresolved and not decided here**.
 before activation, not a production incident, and **no production behaviour
 changed**.
 
-## Unsuppression / re-opt-in — DESIGNED, NOT BUILT
+## Unsuppression / re-opt-in — DATABASE FOUNDATION BUILT, WORKFLOW NOT BUILT
 
-Settled 15 September 2026. **Design only — no code, no migration, no endpoint,
-no test, no configuration, and nothing in production changed.** Full reasoning:
-`docs/updates/2026-09-15-unsuppression-reoptin-decision.md`.
+Design settled 15 September 2026:
+`docs/updates/2026-09-15-unsuppression-reoptin-decision.md`. The **database
+layer** of that design is now written and verified; **nothing else is.**
+
+### What exists
+
+**`db/003_unsuppression_lookup.sql` — WRITTEN AND VERIFIED AT A REAL POSTGRESQL
+BOUNDARY, AND NOT YET APPLIED TO NEON.** Both of those halves matter:
+
+- **Verified:** the migration applies cleanly on top of `db/001` and `db/002`
+  against a **real PostgreSQL 16.13** cluster with **real roles**, and all
+  **36** assertions in `tests/unsuppression-fold.test.mjs` pass there —
+  the six approved semantic cases, every fail-closed rule, and the whole
+  privilege matrix read back from `pg_proc` and `has_*_privilege()` rather
+  than from the migration text.
+- **NOT applied to the production Neon branch.** That needs the table-owner
+  credential, which is deliberately in no environment and reached no agent
+  session. **It is an outstanding operator action**, and until it is done the
+  production database has only `db/001` and `db/002`.
+
+It adds three functions and one role:
+
+| | |
+|---|---|
+| `_active_consent_blocks(text)` | **Internal.** The ONE definition of "an active blocking event". `SECURITY INVOKER`, granted to **nobody**, reachable only from inside the two wrappers. Two definitions would let the operator see a set the enforcement path rejects. |
+| `get_suppression_state(text)` | **Replaced body, identical contract** — same name, same argument, same `TABLE(channel text, suppressed_at timestamptz)`. Gate 8 needs no new caller contract. |
+| `get_active_blocks(text)` | **New.** Names the blocking events so a future correction can say which one it is fixing. |
+| `consent_ledger_operator` | **New role.** `INSERT` + `EXECUTE` on the two wrappers, and nothing else. |
+
+**The observed privilege matrix** (read from PostgreSQL, not asserted):
+
+| role | table `SELECT` | `INSERT` | `UPDATE`/`DELETE`/`TRUNCATE` | `get_suppression_state` | `get_active_blocks` | `_active_consent_blocks` |
+|---|---|---|---|---|---|---|
+| `consent_ledger_app` (website) | no | **yes** | no | no | no | no |
+| `consent_ledger_sender` (gate 8) | no | no | no | **yes** | **no** | no |
+| `consent_ledger_operator` | no | **yes** | no | **yes** | **yes** | no |
+| `PUBLIC` | — | — | — | **revoked** | **revoked** | **revoked** |
+
+**Two defects were found in the approved design's SQL on its first execution**,
+both failing OPEN, both fixed and both regression-tested:
+
+1. **The lane-clearance tie was fail-open.** The design's prose said an exact
+   timestamp tie leaves the block standing; its SQL used strict `>` for the
+   survival test, which **cleared** on a tie. Now `>=` on both clocks.
+2. **Malformed `metadata.invalidates` raised instead of being inert.**
+   `jsonb_array_elements_text()` errors on a JSON scalar or object, aborting
+   the whole fold rather than invalidating nothing. Now guarded by
+   `jsonb_typeof(...) = 'array'`.
+
+**`db/001` and `db/002` are untouched.** They remain applied historical
+artifacts.
+
+### What does NOT exist
+
+- **No unsuppression endpoint.** `api/operator-unsuppress.js` **does not
+  exist**, and nothing in `api/` calls either new function.
+- **No HubSpot unsuppression projection.** Nothing clears a `cst_*` flag or a
+  consent artefact.
+- **No token, minting tool or operator UI.**
+- **Gate 8 send-time enforcement has not begun.** Nothing calls
+  `get_suppression_state()` from application code — the sender connection
+  string is still in no environment.
+- **No outbound automation is activated**, no Twilio Consent Management API
+  call is made, and no external system was touched by this work.
+
+**So no consumer-visible behaviour changed, and no suppression can yet be
+cleared by anything.** The database can now answer the questions the future
+workflow will ask; nothing asks them.
+
 
 **The core rule:** an `unsuppressed` event **lifts a block and never grants
 anything**. Sending requires **two independent keys** — no active block **and** a
