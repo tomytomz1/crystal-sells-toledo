@@ -37,6 +37,10 @@
    db/001_communication_consent_events.sql.
    ===================================================================== */
 
+import {
+  UNSUPPRESSION_REASON, UNSUPPRESSION_ERROR_ORIGIN,
+} from "./consent.mjs";
+
 /* ---------------------------------------------------------------------
    CONFIGURATION
    ---------------------------------------------------------------------
@@ -146,6 +150,55 @@ export const SUPPRESSION_COLUMNS = Object.freeze([
   "reason_code",
   "evidence_text",
   "metadata",
+]);
+
+/* ---------------------------------------------------------------------
+   THE CLOSED SUPPRESSION-PATH VOCABULARIES
+   ---------------------------------------------------------------------
+   WHAT THIS BUILDER MAY WRITE, exhaustively. Until 15 September 2026
+   buildSuppressionEvent() validated `event_type` and `channel` with
+   requireText(), which accepts ANY non-empty string. A typo'd event type
+   -- `supressed`, `revoke`, `unsupressed` -- was therefore inserted
+   successfully into an append-only table and then matched no fold in
+   db/002 or db/003 for the rest of its life. It could not be updated
+   (no UPDATE grant), could not be deleted (no DELETE grant) and could not
+   be seen (no SELECT grant). A silent, permanent, unfixable row that
+   every downstream reader treats as though it were not there.
+
+   That is the worst failure this module can have, and it needed no
+   unsuppression feature to happen: it has been reachable since gate 7.
+   Design: docs/updates/2026-09-15-unsuppression-reoptin-decision.md §12.1.
+
+   DELIBERATELY NARROWER THAN EVENT_TYPE. `consent_selected` and
+   `consent_not_selected` are real members of EVENT_TYPE and are REFUSED
+   here: they are written only by buildLedgerEvents() from a website form
+   submission, they carry a disclosure version and text, and a suppression
+   row asserting one would claim a consent decision that no visitor made.
+   A closed vocabulary that merely echoed the enum would not have caught
+   that, which is why this is its own list rather than Object.values(). */
+export const SUPPRESSION_EVENT_TYPES = Object.freeze([
+  EVENT_TYPE.SUPPRESSED,
+  EVENT_TYPE.REVOKED,
+  EVENT_TYPE.REOPTIN_REQUESTED,
+  /* Formally admitted 15 September 2026. The enum member has existed since
+     gate 7, but the builder's contract did not name it and nothing
+     validated what an `unsuppressed` row had to carry. An enum member
+     existing is not the same as the contract admitting it. */
+  EVENT_TYPE.UNSUPPRESSED,
+]);
+
+/** The lanes. `all` dominates, but dominance is applied in permission.mjs. */
+export const SUPPRESSION_CHANNELS = Object.freeze([
+  CHANNEL.SMS, CHANNEL.AI_VOICE, CHANNEL.ALL,
+]);
+
+/* The event types a `recorded_in_error` correction may name as a target.
+   db/003's fold only ever treats `suppressed` and `revoked` as blocking,
+   so a key naming anything else invalidates NOTHING -- fail-closed for the
+   consumer, but it would let an operator believe she had fixed something
+   when she had not. Refused here instead, where it can still be reported. */
+const INVALIDATABLE_EVENT_TYPES = Object.freeze([
+  EVENT_TYPE.SUPPRESSED, EVENT_TYPE.REVOKED,
 ]);
 
 /* ---------------------------------------------------------------------
@@ -481,7 +534,21 @@ async function neonExecutor(text, params, { url, signal }) {
   /* The HTTP query path: no connection pool, which is what makes this
      usable inside a Vercel function, and parameterised, which is what
      makes it usable for a table that exists to be trustworthy. */
-  const sql = neon(url, { fetchOptions: { signal } });
+  /* `fullResults: true` is REQUIRED, not a preference. The driver's
+     default returns the ROWS ONLY — a bare array — and this statement has
+     no RETURNING clause, so every append would come back as `[]` whether
+     it inserted two rows or none. `rowCount` is the only signal that
+     distinguishes a genuine append from an ON CONFLICT DO NOTHING replay,
+     and without it §9.1's first defence cannot exist.
+
+     RETURNING WAS CONSIDERED AND IS IMPOSSIBLE HERE. `INSERT ... RETURNING`
+     requires SELECT on the returned columns, and the application role
+     holds INSERT and nothing else — deliberately, so a leaked
+     CONSENT_LEDGER_URL cannot enumerate this table. It would fail with
+     SQLSTATE 42501, exactly as naming a conflict target did on
+     10 September 2026. `fullResults` reads the command tag Postgres
+     already sends, and needs no privilege at all. */
+  const sql = neon(url, { fetchOptions: { signal }, fullResults: true });
   return sql.query(text, params);
 }
 
@@ -491,10 +558,37 @@ let executor = neonExecutor;
 export function _setExecutor(fn) { executor = fn; }
 export function _resetExecutor() { executor = neonExecutor; }
 
+/* ---------------------------------------------------------------------
+   HOW MANY ROWS ACTUALLY LANDED
+   ---------------------------------------------------------------------
+   `null` means UNKNOWN, and unknown is NOT zero and NOT one.
+
+   That distinction is the whole point. A caller deciding whether to run
+   the unsuppression projection must treat unknown as "do not project",
+   the same as a replay — because projecting on a lane that is currently
+   and correctly suppressed silently reopens the door this workflow exists
+   to open only deliberately (§9.1). `null` compares false against every
+   `> 0` test, so the fail-closed answer is also the default one.
+
+   Deliberately strict about what counts as a real number: a driver, proxy
+   or stub that omits `rowCount`, sends it as a string, or sends something
+   negative or fractional yields `null` rather than a guess. A guess here
+   would be indistinguishable from a measurement to every caller. */
+export function rowsAffectedOf(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const n = result.rowCount;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 0) return null;
+  return n;
+}
+
 /**
  * Send one statement, bounded. Shared by every append in this module so
  * that the timeout, the abort and the error containment cannot drift apart
  * between the consent path and the suppression path.
+ *
+ * RETURNS THE DRIVER'S RESULT. Until 15 September 2026 it discarded it,
+ * which is why appendSuppressionEvents() could only report the count it
+ * was given rather than the count Postgres applied.
  */
 async function runStatement(text, params, { url, timeoutMs }) {
   const ctrl = new AbortController();
@@ -508,8 +602,11 @@ async function runStatement(text, params, { url, timeoutMs }) {
 
   try {
     /* The race is the guarantee, not the signal: a driver that ignores an
-       abort must still not be able to hold a request open. */
-    await Promise.race([
+       abort must still not be able to hold a request open.
+
+       The winner's VALUE is now returned. `deadline` only ever rejects, so
+       a resolved race is always the executor's own result. */
+    return await Promise.race([
       executor(text, params, { url, signal: ctrl.signal }),
       deadline,
     ]);
@@ -542,12 +639,22 @@ export async function appendConsentEvents(evidence, {
 
   const rows = buildLedgerEvents(evidence, { source });
   const { text, params } = buildInsert(rows);
-  await runStatement(text, params, { url, timeoutMs });
+  const result = await runStatement(text, params, { url, timeoutMs });
 
   /* Deliberately silent on success. api/lead.js logs the append against
      the submission it belongs to; a second line here would say the same
-     thing about the same event from a module that knows less about it. */
-  return { appended: true, events: rows.length };
+     thing about the same event from a module that knows less about it.
+
+     `events` KEEPS ITS MEANING HERE — the number of rows BUILT — and that
+     is not the trap it was on the suppression path, because the question
+     this path asks is different. api/lead.js sets `consent.durable = true`
+     when this resolves, and on a replay 0 rows are inserted precisely
+     BECAUSE the events are already in the ledger. Durable is the correct
+     answer to "are they recorded?" at 0 rows and at 2. The unsuppression
+     path asks "did I just record a NEW clearance?", where 0 must mean no.
+     Same number, opposite meaning; hence `rowsAffected` is reported
+     separately rather than folded into one field that must serve both. */
+  return { appended: true, events: rows.length, rowsAffected: rowsAffectedOf(result) };
 }
 
 /* =====================================================================
@@ -590,20 +697,175 @@ export function capEvidence(text) {
   return cut + "…[truncated]";
 }
 
+/** One value from a closed list, or a refusal naming the FIELD, never the value. */
+function requireOneOf(value, allowed, field) {
+  const v = requireText(value, field);
+  if (!allowed.includes(v))
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, field + ":unknown");
+  return v;
+}
+
+/* ---------------------------------------------------------------------
+   THE `unsuppressed` CONTRACT
+   ---------------------------------------------------------------------
+   Enforced here, BEFORE any database call, because this table has no
+   UPDATE and no DELETE grant: a row that is wrong is wrong forever.
+
+   WHAT IS AND IS NOT CHECKED AT THIS LAYER, stated plainly so a reader
+   does not assume more:
+
+   PROVABLE FROM BUILDER INPUT ALONE, and therefore enforced —
+   * the reason code is one of exactly two;
+   * `recorded_in_error` carries a known `error_origin`;
+   * `recorded_in_error` names at least one target, and every target is a
+     well-formed `dedupe_key`;
+   * every target's CHANNEL matches this event's own lane. A dedupe_key is
+     `source:source_event_id:channel:event_type` by construction, so the
+     lane is readable from the key itself with no table access
+     (§5.4 rule 2 requires this in the builder AND in the fold);
+   * every target names an event type the fold can actually treat as
+     blocking;
+   * `consumer_request` names nothing, so it can never act as a targeted
+     correction, and carries no `error_origin` to assert.
+
+   NOT PROVABLE HERE, and deliberately NOT pretended —
+   * THAT A NAMED TARGET EXISTS, or is currently active. That needs a read
+     (`get_active_blocks`), which this module holds no privilege for and
+     must not acquire — the whole point of the INSERT-only grant. The
+     endpoint does it as its pre-append read (§4.2, §7.4) and a target that
+     is not active is a 400 that writes nothing. A key matching no row is
+     inert in the fold, so this gap fails CLOSED for the consumer; what it
+     cannot do is stop an operator believing she fixed something.
+   * CONSUMER ATTESTATION AND TOKEN SEMANTICS. They belong to the endpoint
+     that authenticates the human, not to the module that formats a row.
+   --------------------------------------------------------------------- */
+function validateUnsuppression(ch, src, reasonCode, metadata) {
+  /* RETURNS THE METADATA THAT WILL BE STORED, canonicalised. Validating one
+     value and storing a different one is how a rule becomes decorative:
+     see the `invalidates` trim below. */
+
+  /* ONLY A HUMAN MAY LIFT A BLOCK. The approved design's first decision is
+     that NO AUTOMATIC PATH WRITES `unsuppressed` (§4.1, §11: source is
+     `operator`, "a human did this, and no other source may"). Refusing only
+     SOURCE_WEBSITE — which is all the general check below does — leaves
+     `twilio` and `retell` able to format a perfectly valid clearance, so
+     an inbound webhook could lift the suppression a STOP had just created.
+     That is the one direction this whole workflow exists to keep manual. */
+  if (src !== SOURCE_OPERATOR)
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "source:not_operator");
+
+  const reason = requireOneOf(reasonCode, Object.values(UNSUPPRESSION_REASON), "reason_code");
+
+  /* A JSON scalar, an array or null where an object belongs is refused
+     rather than coerced to `{}` — the coercion would turn a malformed
+     `recorded_in_error` into one naming nothing, which §5.4 rule 3 says
+     must never become a lane clearance in disguise. */
+  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata))
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata");
+
+  const targets = metadata.invalidates;
+  const origin = metadata.error_origin;
+
+  if (reason === UNSUPPRESSION_REASON.CONSUMER_REQUEST) {
+    /* A LANE CLEARANCE names nothing. Absent or `[]` only: anything else
+       would be a targeted correction wearing a lane clearance's reason
+       code, and db/003 would apply the LANE rule to it — clearing far more
+       than the operator named. Refused, not silently ignored. */
+    if (targets !== undefined && targets !== null) {
+      if (!Array.isArray(targets))
+        throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates");
+      if (targets.length)
+        throw new ConsentLedgerError(
+          LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:not_empty");
+    }
+    /* No cause is being asserted, so none may be recorded. */
+    if (origin !== undefined && origin !== null)
+      throw new ConsentLedgerError(
+        LEDGER_EVIDENCE_INCOMPLETE, "metadata.error_origin:not_applicable");
+    return metadata;
+  }
+
+  /* recorded_in_error — a TARGETED INVALIDATION. */
+  requireOneOf(origin, Object.values(UNSUPPRESSION_ERROR_ORIGIN), "metadata.error_origin");
+
+  if (!Array.isArray(targets))
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates");
+  /* §5.4 rule 3: naming nothing invalidates nothing, and must never
+     degrade into a lane clearance. Refused at the builder AND inert in the
+     fold — the original defect in its mirror image. */
+  if (!targets.length)
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:empty");
+
+  const seen = new Set();
+  /* THE CANONICAL KEYS, and they are what gets stored. db/003's fold joins
+     `metadata.invalidates` to `dedupe_key` with `=`, so a key stored with
+     surrounding whitespace matches NOTHING — the correction would be
+     silently inert while the operator was told it worked, which is the
+     precise failure §5.4 is written to prevent. Trimming for the check and
+     storing the raw value would have made every rule below decorative. */
+  const canonical = [];
+  for (const raw of targets) {
+    if (typeof raw !== "string")
+      throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:not_a_key");
+    const key = raw.trim();
+    if (!key)
+      throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:empty_key");
+
+    /* dedupeKey() joins exactly four colon-free components, so a target
+       must split into exactly four non-empty parts. Anything else was not
+       produced by this system and cannot identify one of its rows. */
+    const parts = key.split(":");
+    if (parts.length !== 4 || parts.some((x) => !x))
+      throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:malformed_key");
+
+    /* CROSS-LANE REFUSAL. db/003's fold joins invalidations to blocking
+       events within one lane, so a cross-lane key would be silently inert
+       there. Refused here, where the operator can still be told. */
+    if (parts[2] !== ch)
+      throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:cross_channel");
+
+    if (!INVALIDATABLE_EVENT_TYPES.includes(parts[3]))
+      throw new ConsentLedgerError(
+        LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:not_a_blocking_event");
+
+    /* Rejected, not de-duplicated. Repeating a key cannot widen the fold
+       (it is a NOT EXISTS), so this changes no semantics — but a duplicate
+       means the operator's view of what she selected and the record of it
+       disagree, and this repository refuses malformed input rather than
+       quietly repairing it. */
+    if (seen.has(key))
+      throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "metadata.invalidates:duplicate");
+    seen.add(key);
+    canonical.push(key);
+  }
+
+  /* Only `invalidates` is rewritten. Everything else the caller recorded —
+     the attestation, the intent block, the approval id — is stored as
+     given, because this function validates a contract and is not licensed
+     to edit an operator's account of what she did. */
+  return { ...metadata, invalidates: canonical };
+}
+
 /**
  * One suppression-class row.
  *
  * `channel` is `sms`, `ai_voice` or `all`; `eventType` is `suppressed`,
- * `revoked` or `reoptin_requested`. The caller has already classified —
- * this function records, it does not decide.
+ * `revoked`, `reoptin_requested` or `unsuppressed`. Both are validated
+ * against CLOSED vocabularies and an unknown value is refused BEFORE any
+ * database call — see SUPPRESSION_EVENT_TYPES above for why that matters
+ * more here than almost anywhere else in the repository.
+ *
+ * The caller has already classified — this function records, it does not
+ * decide. What it does do is refuse to record something the folds could
+ * never read.
  */
 export function buildSuppressionEvent({
   occurredAt, channel, eventType, phone, source, sourceEventId,
   reasonCode = null, evidenceText = null, metadata = null,
 } = {}) {
   const at = requireInstant(occurredAt, "occurred_at");
-  const ch = requireText(channel, "channel");
-  const type = requireText(eventType, "event_type");
+  const ch = requireOneOf(channel, SUPPRESSION_CHANNELS, "channel");
+  const type = requireOneOf(eventType, SUPPRESSION_EVENT_TYPES, "event_type");
   const src = requireText(source, "source");
   const eventId = requireText(sourceEventId, "source_event_id");
   /* Fails closed exactly as the consent path does: a suppression whose
@@ -613,6 +875,13 @@ export function buildSuppressionEvent({
 
   if (src === SOURCE_WEBSITE)
     throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "source:website");
+
+  /* An `unsuppressed` row LIFTS A BLOCK, so it is the only event this
+     builder writes that can make a number contactable again. It gets the
+     strictest validation in the module. */
+  const meta = type === EVENT_TYPE.UNSUPPRESSED
+    ? validateUnsuppression(ch, src, reasonCode, metadata)
+    : metadata;
 
   return {
     occurred_at: at,
@@ -631,7 +900,9 @@ export function buildSuppressionEvent({
     schema_version: SCHEMA_VERSION,
     reason_code: reasonCode === null ? null : String(reasonCode),
     evidence_text: evidenceText === null ? null : capEvidence(evidenceText),
-    metadata: JSON.stringify(metadata && typeof metadata === "object" ? metadata : {}),
+    /* `meta` is the VALIDATED, canonical object for an unsuppression and
+       the caller's own for every other event type. */
+    metadata: JSON.stringify(meta && typeof meta === "object" ? meta : {}),
   };
 }
 
@@ -664,6 +935,37 @@ export async function appendSuppressionEvents(events, {
   if (!url) throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, LEDGER_URL_VAR);
 
   const { text, params } = buildInsert(events, { columns: SUPPRESSION_COLUMNS });
-  await runStatement(text, params, { url, timeoutMs });
-  return { appended: true, events: events.length };
+  const result = await runStatement(text, params, { url, timeoutMs });
+  const rowsAffected = rowsAffectedOf(result);
+
+  /* THREE ANSWERS, AND THEY MUST STAY DISTINGUISHABLE.
+
+       rowsAffected > 0    this append wrote something NEW
+       rowsAffected === 0  every row was already there — a replay, a no-op
+       rowsAffected null   the driver did not say; treat as NOT new
+       (throws)            the database failed, and nothing is recorded
+
+     Until 15 September 2026 this returned `events: events.length` — the
+     count it was HANDED, which is the same number on a genuine append and
+     on a replay that inserted nothing. §9.1 names the failure that
+     enables: unsuppress a lane, the consumer sends STOP again, the old
+     approval URL is replayed. The ledger stays correct — the dedupe key is
+     unchanged, 0 rows are inserted, the fold still reads the lane as
+     blocked by the new STOP — but a caller trusting the old field sees
+     "1 event appended", runs the HubSpot projection, and clears
+     `cst_sms_suppressed` for a number that is currently and correctly
+     suppressed. The ledger never lied; the return value did.
+
+     `requested` is reported beside it, named for what it is. A caller that
+     wants "did all of them land?" compares the two rather than assuming
+     one from the other. */
+  return {
+    appended: true,
+    requested: events.length,
+    rowsAffected,
+    /* Retained so an existing reader cannot silently get `undefined`, and
+       now ACCURATE rather than assumed. Null when the driver was silent —
+       never the input count standing in for a measurement. */
+    events: rowsAffected,
+  };
 }
