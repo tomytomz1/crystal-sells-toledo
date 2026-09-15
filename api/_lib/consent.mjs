@@ -188,6 +188,56 @@ export const SUPPRESSION_REASON = Object.freeze({
 });
 
 /* ---------------------------------------------------------------------
+   UNSUPPRESSION
+   ---------------------------------------------------------------------
+   Why a block was LIFTED. Closed and frozen, exactly as SUPPRESSION_REASON
+   above is, and for a sharper reason: these two values are not labels on a
+   row, they SELECT WHICH FOLD RULE APPLIES.
+
+   `consumer_request` is a LANE CLEARANCE - it supersedes every earlier
+   blocking event in the lane it names, because the consumer asked for that
+   channel back and the request speaks to the channel, not to rows.
+
+   `recorded_in_error` is a TARGETED INVALIDATION - it kills only the
+   blocking events it names by `dedupe_key` in `metadata.invalidates`, and
+   everything it does not name survives. So correcting one erroneous
+   suppression cannot erase an unrelated legitimate STOP.
+
+   db/003_unsuppression_lookup.sql reads `reason_code` directly and scopes
+   the lane clearance to `consumer_request`. An unknown or typo'd value is
+   therefore NOT an inert label: it is a row the fold will read as neither
+   kind, sitting permanently in an append-only table. Hence closed here and
+   validated in the ledger builder BEFORE any database call.
+
+   BOTH ARE ORIGIN-NEUTRAL. Neither asserts who or what caused the
+   underlying error - `recorded_in_error` says the record was wrong, not
+   whose fault it was. That is what `error_origin` is for, and why it is
+   mandatory rather than inferred: an append-only compliance row must not
+   assert a cause it cannot establish.
+   See docs/updates/2026-09-15-unsuppression-reoptin-decision.md §4.2.
+   --------------------------------------------------------------------- */
+export const UNSUPPRESSION_REASON = Object.freeze({
+  CONSUMER_REQUEST: "consumer_request",
+  RECORDED_IN_ERROR: "recorded_in_error",
+});
+
+/**
+ * Where a suppression recorded in error came FROM. Mandatory whenever
+ * `reason_code` is `recorded_in_error`, and never guessed.
+ *
+ * `undetermined` is a first-class member and not a failure to fill the
+ * field in: "we cannot establish which of these it was" is a true and
+ * useful statement, and an append-only row that guessed `operator` instead
+ * would be recording false provenance about a named human.
+ */
+export const UNSUPPRESSION_ERROR_ORIGIN = Object.freeze({
+  OPERATOR: "operator",       // a person recorded it in error
+  CLASSIFIER: "classifier",   // the deterministic opt-out classifier misfired
+  SYSTEM: "system",           // an integration or replay wrote it
+  UNDETERMINED: "undetermined", // genuinely not established
+});
+
+/* ---------------------------------------------------------------------
    EVIDENCE
    ---------------------------------------------------------------------
    One snapshot per submission. It is the answer to "what exactly did this

@@ -396,7 +396,11 @@ describe("the INSERT statement", () => {
   test("one parameterised multi-row INSERT, with the conflict clause", async () => {
     const calls = captureExecutor();
     const res = await appendConsentEvents(evidenceFor({ sms_consent: true }), { env: ENV });
-    assert.deepEqual(res, { appended: true, events: 2 });
+    /* `events` still means ROWS BUILT on the consent path — see the note
+       in appendConsentEvents(). `rowsAffected` is null here because this
+       stub returns a bare array and says nothing about rowCount, which is
+       the honest answer: unknown, not zero. */
+    assert.deepEqual(res, { appended: true, events: 2, rowsAffected: null });
     assert.equal(calls.length, 1, "the two channel rows were not written in one statement");
 
     const { text, params } = calls[0];
@@ -640,7 +644,8 @@ describe("failure semantics", () => {
     /* A FULLY duplicated retry inserts nothing and succeeds: Postgres
        answers it with no rows, which is not an error and is not treated as
        one. Nothing was written and nothing needed to be. */
-    assert.deepEqual(await appendConsentEvents(evidence, { env: ENV }), { appended: true, events: 2 });
+    assert.deepEqual(await appendConsentEvents(evidence, { env: ENV }),
+      { appended: true, events: 2, rowsAffected: null });
   });
 
   /* THE PER-ROW SEMANTICS, stated exactly, because the convenient summary

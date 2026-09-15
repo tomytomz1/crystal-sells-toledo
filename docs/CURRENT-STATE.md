@@ -908,6 +908,113 @@ both failing OPEN, both fixed and both regression-tested:
 **`db/001` and `db/002` are untouched.** They remain applied historical
 artifacts.
 
+### The ledger module is hardened — 15 September 2026
+
+`api/_lib/consent-ledger.mjs` and `api/_lib/consent.mjs`, the first code
+slice of the approved design (§12.1, §12.2). **No endpoint, no projection, no
+enforcement, and no migration** — `db/003` is unchanged and still
+byte-identical to what production runs.
+
+**The suppression-path vocabularies are CLOSED.** `buildSuppressionEvent()`
+validated `event_type` and `channel` with `requireText()`, which accepts any
+non-empty string. A typo'd event type was therefore written successfully into
+an append-only table and then matched no fold in `db/002` or `db/003` for the
+rest of its life — no `UPDATE` grant to correct it, no `DELETE` grant to
+remove it, no `SELECT` grant to find it. **That gap did not need unsuppression
+to be reachable; it has existed since gate 7.** Both are now validated against
+closed lists and refused **before any database call**, which is asserted at the
+executor seam rather than inferred from the throw.
+
+- `SUPPRESSION_EVENT_TYPES` — `suppressed`, `revoked`, `reoptin_requested`,
+  `unsuppressed`. **Deliberately narrower than `EVENT_TYPE`:**
+  `consent_selected` and `consent_not_selected` are refused, because a
+  suppression row asserting one would claim a consent decision no visitor
+  made.
+- `SUPPRESSION_CHANNELS` — `sms`, `ai_voice`, `all`.
+
+**`unsuppressed` is formally admitted by the builder contract**, not merely
+present in the enum, and carries the design's rules: `reason_code` from the new
+closed **`UNSUPPRESSION_REASON`** (`consumer_request`, `recorded_in_error`);
+`metadata.error_origin` from the new closed **`UNSUPPRESSION_ERROR_ORIGIN`**
+(`operator`, `classifier`, `system`, `undetermined`) and **mandatory** for
+`recorded_in_error`; `metadata.invalidates` empty or absent for a lane
+clearance and **non-empty, same-lane, duplicate-free, naming only blocking
+event types** for a targeted invalidation. Malformed metadata and an unknown
+reason code both fail closed. **What this layer cannot prove it does not
+pretend to:** that a named target exists or is currently active needs a read
+this module holds no privilege for, and stays the endpoint's pre-append check.
+
+**`appendSuppressionEvents()` now reports the rows PostgreSQL actually
+inserted.** It returned `events: events.length` — the **input** count, which
+is identical on a genuine append and on an `ON CONFLICT DO NOTHING` replay that
+inserted nothing; `runStatement()` discarded the driver's result entirely. The
+Neon executor now requests `fullResults`, and the append returns
+`{ appended, requested, rowsAffected, events }` where **`rowsAffected` is
+`null` when the driver was silent — unknown, which is neither zero nor one and
+fails closed against every `> 0` test.**
+
+`INSERT … RETURNING` was considered and is impossible here: it requires
+`SELECT` on the returned columns and the application role holds `INSERT` and
+nothing else, deliberately. `fullResults` reads the command tag Postgres
+already sends and needs no privilege.
+
+**This is §9.1's first defence, and without it the second stands alone.**
+Replay an old approval URL after a new STOP and the ledger stays correct — the
+dedupe key is unchanged, nothing is inserted, the fold still reads the lane as
+blocked — but a caller trusting the old field would see "1 event appended",
+run the HubSpot projection, and clear `cst_sms_suppressed` for a number that is
+currently and correctly suppressed.
+
+**The consent path is deliberately NOT changed in the same way.**
+`appendConsentEvents()` keeps `events` meaning *rows built*, because it answers
+a different question: `api/lead.js` sets `consent.durable = true` when the
+append resolves, and a 0-row replay means the events are **already** in the
+ledger. Durable is correct at 0 rows and at 2. Same number, opposite meaning.
+
+**Verified at a real boundary, not from mocks.** `tests/ledger-hardening.test.mjs`
+drives this module's own production executor — the real
+`@neondatabase/serverless` driver and its real result parsing — against a local
+endpoint speaking Neon's SQL-over-HTTP format whose row counts come from a
+**real PostgreSQL 16.13** running the real parameterised statement against
+`db/001`. Genuine append, replay and partial conflict report **1, 0 and 1**.
+**0 skipped**, and the boundary section **fails rather than skips** when
+`CST_TEST_PG_URL` is set but unreachable. A new `tools/check.mjs` guard pins
+every invariant above; **18 mutations against a throwaway tree, each caught by
+its own named guard.**
+
+**What that boundary does NOT prove, stated rather than left to be assumed:**
+the chain ends at a local endpoint reproducing Neon's SQL-over-HTTP format. It
+proves the real driver surfaces `rowCount` and that this module reads it
+correctly from a count real PostgreSQL produced. It does **not** prove that
+**Neon's own HTTP endpoint** populates `rowCount` for `INSERT … ON CONFLICT DO
+NOTHING`; that is inferred from the Postgres command tag the protocol carries,
+and no call was made to Neon. **The failure direction is safe** — if Neon were
+silent, `rowsAffectedOf()` returns `null`, which fails closed against every
+`> 0` test — but the capability would be absent rather than wrong, and the
+first real unsuppression caller must confirm it against Neon before relying on
+it.
+
+**Also enforced, beyond the letter of §12.1 and found in review:** an
+`unsuppressed` event must carry `source = operator`. The general rule refuses
+only `SOURCE_WEBSITE`, which left `twilio` and `retell` able to format a valid
+clearance — an inbound webhook could have lifted the suppression a STOP had
+just created. The design's first decision is that **no automatic path writes
+`unsuppressed`** (§4.1, §11), and nothing enforced it.
+
+**Named, sequenced follow-ups — NOT done here, and deliberately not absorbed
+into this change:**
+
+1. **`source` is still open text** in `buildSuppressionEvent()`. It is a
+   `dedupe_key` component, so a typo'd source produces a different key and
+   **breaks idempotency** — a redelivery would insert a duplicate row rather
+   than no-op. It does **not** break the folds, which never match on `source`.
+   Lower severity than the two closed here, and the same shape.
+2. **`reason_code` for `suppressed` / `revoked` is still open text.** Every
+   caller passes a `SUPPRESSION_REASON` value; nothing enforces it.
+3. **`metadata` has no size cap.** `evidence_text` is capped by
+   `capEvidence()`; `metadata` is not. Bounded upstream in practice by the
+   endpoint verifying each target is active, which does not exist yet.
+
 ### What does NOT exist
 
 - **No unsuppression endpoint.** `api/operator-unsuppress.js` **does not
@@ -915,6 +1022,8 @@ artifacts.
 - **No HubSpot unsuppression projection.** Nothing clears a `cst_*` flag or a
   consent artefact.
 - **No token, minting tool or operator UI.**
+- **Nothing writes an `unsuppressed` event.** The ledger builder can now
+  format and validate one; no code path constructs or appends one.
 - **Gate 8 send-time enforcement has not begun.** Nothing calls
   `get_suppression_state()` from application code — the sender connection
   string is still in no environment.

@@ -1602,6 +1602,139 @@ for (const file of pages) {
     fail("api/_lib/validate.mjs", "notes is rejected when blank - it is deliberately optional");
 }
 
+/* =====================================================================
+   LEDGER HARDENING — the closed vocabularies and real rows-affected
+   =====================================================================
+   Two invariants a refactor could delete without breaking any visible
+   behaviour, on code paths that are still inert. Both were real gaps until
+   15 September 2026, and both fail SILENTLY when reintroduced — which is
+   exactly the class this file exists to catch.
+
+   1  buildSuppressionEvent() must validate event_type and channel against
+      CLOSED lists. With requireText() there instead, a typo'd event type is
+      inserted into an append-only table and then matches no fold, forever:
+      no UPDATE grant to fix it, no DELETE grant to remove it, no SELECT
+      grant to find it.
+
+   2  appendSuppressionEvents() must report what POSTGRES DID. Reporting the
+      input count makes a genuine append and a replay that inserted nothing
+      indistinguishable, and a future unsuppression caller would clear a
+      HubSpot suppression for a number that is currently and correctly
+      suppressed (the decision document's §9.1).
+   --------------------------------------------------------------------- */
+{
+  const ledgerRel = "api/_lib/consent-ledger.mjs";
+  const ledgerPath = join(API, "_lib/consent-ledger.mjs");
+  if (!existsSync(ledgerPath)) {
+    fail(ledgerRel, "missing - the append-only ledger module is gone");
+  } else {
+    const src = readFileSync(ledgerPath, "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
+    /* 1. THE CLOSED VOCABULARIES EXIST AND ARE USED. Declaring the lists and
+          then still calling requireText() would pass a grep for the names
+          alone, so both the declaration AND the call site are pinned. */
+    for (const name of ["SUPPRESSION_EVENT_TYPES", "SUPPRESSION_CHANNELS"])
+      if (!new RegExp(`export const ${name}\\s*=\\s*Object\\.freeze`).test(code))
+        fail(ledgerRel, `${name} is not an exported frozen list - the suppression vocabulary is open again`);
+
+    const builderAt = code.indexOf("export function buildSuppressionEvent(");
+    if (builderAt === -1) {
+      fail(ledgerRel, "buildSuppressionEvent is gone");
+    } else {
+      const builder = code.slice(builderAt, builderAt + 1200);
+      if (!/requireOneOf\(\s*channel\s*,\s*SUPPRESSION_CHANNELS/.test(builder))
+        fail(ledgerRel, "buildSuppressionEvent does not validate channel against SUPPRESSION_CHANNELS - an unknown lane would be written to an append-only table");
+      if (!/requireOneOf\(\s*eventType\s*,\s*SUPPRESSION_EVENT_TYPES/.test(builder))
+        fail(ledgerRel, "buildSuppressionEvent does not validate eventType against SUPPRESSION_EVENT_TYPES - a typo'd event type would be invisible to every fold, forever");
+      /* The regression in its exact original shape. */
+      if (/\brequireText\(\s*(?:channel|eventType)\s*,/.test(builder))
+        fail(ledgerRel, "buildSuppressionEvent validates channel or eventType with requireText - that accepts ANY non-empty string, which is the defect closed on 15 September 2026");
+    }
+
+    /* 2. THE WEBSITE-ONLY EVENT TYPES STAY OUT. A vocabulary built from
+          Object.values(EVENT_TYPE) would admit them and look correct. */
+    const vocabAt = code.indexOf("export const SUPPRESSION_EVENT_TYPES");
+    if (vocabAt !== -1) {
+      const vocab = code.slice(vocabAt, code.indexOf("]", vocabAt));
+      for (const forbidden of ["CONSENT_SELECTED", "CONSENT_NOT_SELECTED"])
+        if (vocab.includes(forbidden))
+          fail(ledgerRel, `SUPPRESSION_EVENT_TYPES admits EVENT_TYPE.${forbidden} - a suppression row would assert a consent decision no visitor made`);
+      if (!vocab.includes("UNSUPPRESSED"))
+        fail(ledgerRel, "SUPPRESSION_EVENT_TYPES does not admit EVENT_TYPE.UNSUPPRESSED - the builder contract no longer names the event db/003 folds");
+      if (/Object\.values\(\s*EVENT_TYPE\s*\)/.test(vocab))
+        fail(ledgerRel, "SUPPRESSION_EVENT_TYPES is derived from EVENT_TYPE - it must be its own narrower list, or the website-only types come back in");
+    }
+
+    /* 3. THE UNSUPPRESSION CONTRACT. Each of these is a rule from §5.4 that
+          keeps a correction from becoming a lane clearance in disguise. */
+    if (!/function validateUnsuppression\(/.test(code))
+      fail(ledgerRel, "validateUnsuppression is gone - an `unsuppressed` row could carry anything");
+    if (!/type\s*===\s*EVENT_TYPE\.UNSUPPRESSED\s*[\s\S]{0,40}?validateUnsuppression\(/.test(code))
+      fail(ledgerRel, "buildSuppressionEvent no longer runs validateUnsuppression for an unsuppressed event");
+    /* MATCHED AS QUOTED LITERALS, not bare substrings. `invalidates:empty`
+       is a substring of `invalidates:empty_key`, so a bare-substring check
+       for it stayed satisfied by an unrelated refusal while the rule it
+       guards was gone — found by mutation, and the reason every needle
+       below carries its quotes. */
+    for (const [needle, why] of [
+      ["\"metadata.invalidates:not_empty\"",
+       "a consumer_request carrying targets is no longer refused - a targeted correction could wear a lane clearance's reason code and db/003 would clear the whole lane"],
+      ["\"metadata.invalidates:empty\"",
+       "a recorded_in_error naming nothing is no longer refused - §5.4 rule 3, and it would degrade into a lane clearance"],
+      ["\"metadata.invalidates:cross_channel\"",
+       "a cross-lane target is no longer refused - §5.4 rule 2 requires it in the builder as well as the fold"],
+      ["\"metadata.invalidates:duplicate\"",
+       "a duplicate target is no longer refused"],
+      ["\"metadata.invalidates:not_a_blocking_event\"",
+       "a target naming a non-blocking event type is no longer refused - it would be inert in the fold while the operator believed it worked"],
+      ["\"source:not_operator\"",
+       "an unsuppressed event no longer requires source=operator - an inbound webhook could format a clearance, and the design's first decision is that no automatic path writes one"],
+      ["\"metadata.error_origin:not_applicable\"",
+       "a consumer_request carrying error_origin is no longer refused - it would assert a cause nothing established"],
+    ])
+      if (!code.includes(needle))
+        fail(ledgerRel, why);
+    /* The canonical targets must be what is STORED. Validating a trimmed
+       key and writing the raw one makes every rule above decorative:
+       db/003 joins metadata.invalidates to dedupe_key with `=`. */
+    if (!/return\s*\{\s*\.\.\.metadata,\s*invalidates:\s*canonical\s*\}/.test(code))
+      fail(ledgerRel, "validateUnsuppression no longer returns the canonicalised invalidates - a target stored untrimmed matches no row in db/003 and the correction is silently inert");
+    if (!/validateUnsuppression\(ch,\s*src,\s*reasonCode,\s*metadata\)\s*\n?\s*:\s*metadata/.test(code))
+      fail(ledgerRel, "buildSuppressionEvent no longer stores the metadata validateUnsuppression validated - the validated value and the written value can drift");
+    /* And the written column must be that validated object. Writing the
+       caller's `metadata` instead would restore the exact defect found in
+       review: validated trimmed, stored raw, inert in the fold. */
+    if (!/metadata:\s*JSON\.stringify\(meta\s*&&/.test(code))
+      fail(ledgerRel, "the metadata column is not written from the validated object - a canonicalised value would be validated and then discarded");
+
+    if (!/UNSUPPRESSION_REASON/.test(code) || !/UNSUPPRESSION_ERROR_ORIGIN/.test(code))
+      fail(ledgerRel, "the unsuppression vocabularies are no longer imported - reason_code and error_origin are open text again");
+
+    /* 4. REAL ROWS AFFECTED. The executor must ask for them, runStatement
+          must return them, and the suppression append must report them. */
+    if (!/fullResults:\s*true/.test(code))
+      fail(ledgerRel, "the Neon executor no longer asks for fullResults - the driver returns rows only, so every append reports an unknown row count and §9.1's first defence disappears");
+    if (!/export function rowsAffectedOf\(/.test(code))
+      fail(ledgerRel, "rowsAffectedOf is gone");
+    if (!/return await Promise\.race\(/.test(code))
+      fail(ledgerRel, "runStatement discards the driver's result again - rows affected cannot be reported from a value that was thrown away");
+
+    const appendAt = code.indexOf("export async function appendSuppressionEvents(");
+    if (appendAt === -1) {
+      fail(ledgerRel, "appendSuppressionEvents is gone");
+    } else {
+      const append = code.slice(appendAt);
+      if (!/\browsAffected\s*(?:,|:\s*rowsAffected\b)/.test(append))
+        fail(ledgerRel, "appendSuppressionEvents does not report rowsAffected");
+      /* THE DEFECT IN ITS EXACT ORIGINAL SHAPE: the input count returned as
+         though it were a measurement. */
+      if (/\b(?:events|rowsAffected)\s*:\s*events\.length/.test(append))
+        fail(ledgerRel, "appendSuppressionEvents reports events.length - the INPUT count, which is identical on a genuine append and on a replay that inserted nothing (§9.1)");
+    }
+  }
+}
+
 /* --- report ---------------------------------------------------------- */
 const uniqWarn = [...new Set(warnings)];
 if (uniqWarn.length) {
