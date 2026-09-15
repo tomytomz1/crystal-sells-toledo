@@ -819,9 +819,21 @@ unsuppressed is still unsendable until a fresh grant is captured.
   keeps strictly more — including the full disclosure text HubSpot never held.
   **The stated cost:** clearing a global lane can destroy a live grant the
   consumer never withdrew, and re-consent is then required. Priced deliberately.
-- **An `unsuppressed` event clears exactly the lane it names.** `sms`, `ai_voice`
-  and `all` are independent lanes; `all` dominates both but clearing `all` does
-  not clear an older, independently given `sms` refusal.
+- **Two kinds of clearance, and the distinction is load-bearing.** `sms`,
+  `ai_voice` and `all` are independent lanes and `all` dominates both. A
+  **`consumer_request`** unsuppression clears the lane it names — the consumer
+  asked for that channel back. A **`recorded_in_error`** unsuppression
+  invalidates **only the specific blocking events it names, by `dedupe_key`**;
+  everything it does not name survives. So correcting one erroneous suppression
+  **cannot erase an unrelated legitimate STOP**, and a mistaken correction is
+  bounded to the row it targeted. Clearing `all` still does not clear an older,
+  independently given `sms` refusal.
+- **`db/003` needs TWO functions.** `get_suppression_state()` keeps its name,
+  signature and return shape for gate 8. A **new `get_active_blocks(phone)`**
+  is required so a correction can name what it invalidates — one number, no
+  enumeration, no table `SELECT`, `SECURITY DEFINER`, fixed `search_path`,
+  `REVOKE EXECUTE … FROM PUBLIC`. **The gate 8 sender role does not get it**;
+  it has no use for event identity.
 - **Send-time enforcement denies if EITHER the ledger or HubSpot says blocked.**
   A stale or failed projection therefore fails toward *less* communication, and
   a hand-edited CRM field cannot unsuppress anything.

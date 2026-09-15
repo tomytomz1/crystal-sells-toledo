@@ -102,7 +102,15 @@ not "already safely wired"; it is a gap (§12.1).
 | A new `unsuppressions` table | **Rejected.** A second table is a second truth and a second migration against a compliance store. The event vocabulary already has `unsuppressed`; the read is what is wrong. |
 | **A future `db/003` that replaces the function body, same name, same signature, same return shape** | **CHOSEN** — §6 |
 
-### 3.4 Twilio reconciliation
+### 3.4 What a `recorded_in_error` correction invalidates
+
+| Option | Verdict |
+|---|---|
+| **The whole lane** (the previous revision) | **Rejected — unsafe.** Correcting one erroneous row erased every other blocking event in the lane, including a legitimate consumer refusal, while the metadata said otherwise. §5.4. |
+| **B — whole lane, but only after the operator confirms EVERY active block is erroneous** | **Rejected.** Safety rests on one confirmation over a set, with a silent and total failure; it has a pre-append race it cannot close without acquiring event identity — at which point it is model A with worse semantics; and it cannot express "this row was wrong, the rest stand". |
+| **A — only the specifically named blocking events, by `dedupe_key`** | **CHOSEN** — §5.4. `consumer_request` remains a lane clearance. |
+
+### 3.5 Twilio reconciliation
 
 | Option | Verdict |
 |---|---|
@@ -240,43 +248,80 @@ classifier false positive recorded as `recorded_in_error` / `classifier` is
 also the only way this system will ever surface that its phrase matching is
 mis-firing.
 
-#### Which suppression is being corrected
+#### Which suppression is being corrected — rewritten 15 September 2026
 
-*"What exact suppression was this correcting?"* must be answerable years later,
-and the first draft did not answer it at all.
+**The previous model was wrong, and its own claim was the giveaway.** It said a
+`metadata.corrects` object answered *"what exact suppression was this
+correcting?"* while identifying the target by a **timestamp** taken from the
+fold. **A timestamp does not uniquely identify an event.** The fold can hold
+several blocking events in one lane; `suppressed_at` names only the earliest
+active one; and two events can share an `occurred_at`. So the field answered a
+narrower question than it claimed — *"when did this lane start being blocked"* —
+and dressed it as identity.
 
-An `unsuppressed` row carries a **`metadata.corrects` object**, built in three
-layers by how well each is known. **No layer is ever guessed.**
+Worse, **nothing read it**. It was narrative beside a fold that cleared the
+whole lane regardless (§5.4).
 
-| Field | Source | When present |
-|---|---|---|
-| `corrects.suppressed_at` | the **pre-append fold** — `get_suppression_state()` read **before** the append, for the lane being cleared | **always.** Machine-derived; never operator-supplied |
-| `corrects.source`, `corrects.source_event_id`, `corrects.event_type` | **operator-supplied** — she holds the `MessageSid` from the notification email and the confirmation page she used | when known |
-| `corrects.dedupe_key` | derived from the three fields above, matching the earlier row's own key (e.g. `twilio:<MessageSid>:sms:suppressed`) | **only when all three are present** |
+**The audit record must now carry two different things, and they must not be
+confused.**
 
-**Absent, never fabricated.** Where the operator cannot identify the originating
-event, the second and third layers are simply absent. A reconstructed
-`dedupe_key` that points at no row is false provenance in a new costume, and a
-partial reconstruction is worse than a gap because it looks authoritative.
+**1. What the operator intended to correct — STORED, and load-bearing.**
 
-**`corrects.provenance` records which of these are machine-derived and which
-are asserted by the operator**, so a future reader never has to guess whether a
-field came from a database read or from a human's recollection.
+| Field | Meaning |
+|---|---|
+| `metadata.invalidates` | a JSON array of **`dedupe_key`s**. **The only field the fold reads.** Each key identifies at most one row, because `dedupe_key` is `UNIQUE` |
+| `metadata.intent.targets` | for each named key, the row as the operator was shown it: `dedupe_key`, `event_type`, `source`, `source_event_id`, `occurred_at`, `recorded_at` |
+| `metadata.intent.observed_active` | **every** active blocking event in that lane at the pre-append read — the whole set she was shown, not only the ones she picked |
+| `metadata.intent.selected_of_active` | `"1 of 3"`. Derived, stored for readability |
 
-**This forces a read BEFORE the append, and that is an implementation
-constraint, not a nicety.** After the append the lane is cleared and
-`get_suppression_state()` no longer returns it, so `suppressed_at` is
-unrecoverable from the fold. The endpoint therefore performs **two** reads:
+`observed_active` is the field that makes case 3 of §5.5 legible years later:
+it proves the operator **was shown the legitimate STOP and did not select it**.
+Without it, a reader cannot tell a careful correction from a lucky one.
+
+**Why store it when it is recomputable?** The ledger is append-only, so folding
+as at that instant would reproduce it — but that proves what she *should* have
+been shown. Storing it records what she *was* shown, and if the two ever differ
+that difference is itself the evidence. Same reasoning as asserting an outcome
+from the observer's side.
+
+**2. What blocking state actually remained afterward — NOT stored, and
+deliberately.**
+
+The row is appended and then immutable, so it cannot contain a state that only
+exists after it. More importantly it **should not**: the remaining blocking
+state is a **function of the history**, and a stored snapshot is a denormalised
+copy that can disagree with the fold. The authoritative answer to *"what
+remained?"* is **fold the ledger as at that moment** — exact, always, and
+incapable of drifting.
+
+> **Store what cannot be recomputed. Recompute what can.**
+
+The post-append fold **is** rendered to the operator (§7.6) and logged PII-free,
+so there is an operational record too — but the ledger's answer is the fold, and
+that is the one an audit should use.
+
+**`consumer_request` carries `invalidates: []` and no targets**, because it is a
+lane clearance and names nothing. `observed_active` is still recorded — she
+should see, and the record should show, what the clearance swept.
+
+**Absent, never fabricated.** If the operator cannot identify a target, there is
+no target, and `recorded_in_error` with an empty `invalidates` is **refused**
+(§5.4 rule 3) rather than written as a lane clearance in disguise.
+
+**Two reads, and the order is an implementation constraint.**
 
 > **read (pre-append) → append → read (post-append) → project**
 
-The pre-read supplies `corrects.suppressed_at`; the post-read supplies the
-resulting blocked set the page must show (§7.6). Doing the pre-read at GET time
-instead would be wrong — the state can change between rendering and submitting.
+The pre-read supplies `intent.targets` and `intent.observed_active` **and
+verifies every named target is currently active** — after the append those rows
+are no longer active and the check becomes impossible. The post-read supplies
+the resulting blocked set the page must show. Doing the pre-read at GET time
+instead would be wrong: state can change between rendering and submitting.
 
-**This is also the strongest justification for the `EXECUTE` grant in §6.4**:
-without a read the event could not say what it corrected, and an unsuppression
-that cannot name what it undid is not an audit record.
+**This is the strongest justification for the `EXECUTE` grants in §6.4**, and
+now for the second function in §6.2a: without a read that **names events**, a
+correction cannot say what it corrected, and an unsuppression that cannot name
+what it undid is not an audit record.
 
 ### 4.3 C — Who may perform it, and how
 
@@ -303,12 +348,18 @@ shorthand for the other two; it is a third lane that **dominates** both.
 
 Fold each lane separately:
 
-| Event type in that lane | Effect on the lane |
+| Event in that lane | Effect on the lane |
 |---|---|
-| `suppressed` | lane becomes blocked |
-| `revoked` | lane becomes blocked |
-| `unsuppressed` | lane becomes unblocked |
+| `suppressed` | adds a blocking event |
+| `revoked` | adds a blocking event |
+| `unsuppressed`, `reason_code = consumer_request` | **lane clearance** — supersedes every blocking event before it |
+| `unsuppressed`, `reason_code = recorded_in_error` | **targeted invalidation** — kills ONLY the blocking events it names, by `dedupe_key`. Everything else in the lane survives |
 | `reoptin_requested`, `consent_selected`, `consent_not_selected` | **no effect on blocking** |
+
+**A blocking event is ACTIVE unless something specifically kills it**, and a
+lane is blocked while it holds at least one active blocking event. §5.4 is the
+rule; it was corrected on 15 September 2026 and the correction is the reason
+this table now has five rows instead of four.
 
 Then project lanes onto channels:
 
@@ -317,11 +368,11 @@ SMS is blocked       ⟺  lane(sms) is blocked      OR  lane(all) is blocked
 Voice is blocked     ⟺  lane(ai_voice) is blocked OR  lane(all) is blocked
 ```
 
-`suppressed_at` for a blocked lane is the **earliest** blocking event of the
-**current** blocked run — i.e. the earliest blocking event that is later than
-the lane's most recent clearance. The earliest refusal is still the one that
-matters; a duplicate STOP still does not restart the clock; but a clearance
-starts a new run.
+`suppressed_at` for a blocked lane is the **earliest ACTIVE blocking event** in
+it. The earliest refusal is still the one that matters and a duplicate STOP
+still does not restart the clock — but an event that has been superseded by a
+lane clearance, or killed by a targeted invalidation, is not active and does not
+set the clock.
 
 ### 5.2 The three scenarios, resolved
 
@@ -387,6 +438,128 @@ from one row.
 
 ---
 
+### 5.4 Two kinds of clearance — corrected 15 September 2026
+
+**The contradiction this fixes.** The previous revision made *every*
+`unsuppressed` event a lane clearance while letting `recorded_in_error` name one
+particular erroneous event in its metadata. **The fold never read that
+metadata**, so the naming was decorative:
+
+```
+t1  consumer legitimately sends SMS STOP
+t2  classifier or system erroneously records another SMS suppression
+t3  operator records unsuppressed, recorded_in_error, intending to correct t2
+    -> the lane clearance at t3 superseded EVERYTHING before it,
+       including the legitimate refusal at t1
+```
+
+**Correcting one bad row erased an unrelated consumer refusal**, and the record
+said otherwise. That is the worst class of defect this system can have: a
+compliance failure whose own audit trail describes it as something else.
+
+#### The two models, and why one of them is not merely weaker
+
+**Model B — whole-lane correction with full enumeration and confirmation.** Keep
+lane-level clearance, but permit `recorded_in_error` only after the system lists
+**every** currently active blocking event in the lane and the operator confirms
+that **all** of them are erroneous.
+
+**Rejected, and not on taste.** B is structurally incoherent:
+
+1. **Its safety rests entirely on a human confirmation over a set**, and its
+   failure is silent and total. Three active blocks, one erroneous, one
+   mis-click on "all of these are wrong" — and a legitimate STOP is gone with no
+   trace that anything went wrong.
+2. **It has a race it cannot close without becoming model A.** Between the
+   enumeration and the append, a new legitimate STOP can land. The confirmation
+   then covered a set that no longer exists. To fix that, B must pin the
+   confirmed set **by event identity** and refuse if it changed — at which point
+   B has acquired everything A needs and still keeps the semantics that destroy
+   unnamed events.
+3. **It cannot express the ordinary case.** "This one row was wrong, the rest
+   stand" is the actual shape of the problem, and B has no way to say it: the
+   operator's only options are clear everything or clear nothing.
+
+**Model A — event-specific error correction. CHOSEN.**
+
+> **`consumer_request` clears the lane. `recorded_in_error` invalidates only the
+> blocking events it names, by `dedupe_key`. Everything it does not name
+> survives.**
+
+The asymmetry is not a compromise; it is what the two things actually mean:
+
+- **A consumer asking to resume a channel** is a statement about the **channel**.
+  They are not auditing our rows. Clearing the lane is exactly what they asked
+  for, and §5.2's scenarios are unchanged.
+- **A correction of a mistaken record** is a statement about **one row**. It has
+  no bearing whatever on a different, legitimate refusal that happens to share a
+  channel.
+
+**Why A is safer, in one line:** under A, **a correction can only ever remove the
+effect of events it explicitly names.** An unnamed legitimate STOP survives *by
+construction*, not by the operator's diligence — and a mistaken correction is
+bounded to the row it targeted instead of taking the lane with it.
+
+**Nothing is deleted or updated.** The invalidation is a new appended row that
+*references* an older one. The ledger stays append-only and the erroneous event
+stays in the history, visibly marked as corrected, which is exactly what an
+audit needs to see.
+
+#### The identifier: `dedupe_key`, and why it is the right one
+
+The invalidation names its targets by **`dedupe_key`**, and that column is
+uniquely suited:
+
+- it is **`UNIQUE`** in `db/001`, so a key identifies at most one row;
+- it is **derivable by the caller without reading the table** —
+  `source:source_event_id:channel:event_type` — so the endpoint can name a target
+  while holding no `SELECT` privilege;
+- it is already this system's idempotency identity, so it is a first-class
+  identifier rather than one invented for this purpose;
+- `event_id` was considered and **rejected**: it is database-minted, so learning
+  it would require exactly the table read the privilege model forbids.
+
+**A key that matches no row invalidates nothing.** That is fail-closed — the
+lane stays blocked — but it would also let an operator believe she had fixed
+something. So the endpoint **verifies every target is currently active before
+appending** (§7.4, §9), and a target that is not active is a 400 that writes
+nothing.
+
+#### Three rules that keep it fail-closed
+
+1. **A targeted invalidation may only kill a blocking event that already
+   existed when the invalidation was recorded** — strictly
+   `blocking.recorded_at < invalidation.recorded_at`. Without this, naming a
+   `dedupe_key` that does not exist yet would pre-kill the row when it finally
+   lands. Strict `<`, so a tie does **not** invalidate.
+2. **The invalidation's own `channel` must match the channel encoded in every
+   `dedupe_key` it names.** Enforced in the builder *and* in the fold, which
+   only matches invalidations within the same lane. A cross-lane invalidation is
+   refused rather than silently applied.
+3. **A `recorded_in_error` naming nothing invalidates nothing** — it is **not**
+   a lane clearance, and must never degrade into one. This is the original
+   defect in its mirror image, and it is refused at the builder *and* inert in
+   the fold.
+
+### 5.5 The six cases, resolved explicitly
+
+`K1`, `K2` are `dedupe_key`s. "BLOCKED" is the lane's state after the fold.
+
+| # | History | Fold | Outcome |
+|---|---|---|---|
+| **1** | t1 legit SMS STOP (K1) · t2 erroneous SMS suppression (K2) · t3 `recorded_in_error` → [K2] | K2 killed; **K1 active** | **SMS BLOCKED**, `suppressed_at = t1`. **The legitimate refusal survives.** |
+| **2** | t1 erroneous suppression (K1) · t2 legit STOP (K2) · t3 `recorded_in_error` → [K1] | K1 killed; **K2 active** | **SMS BLOCKED**, `suppressed_at = t2` |
+| **3** | t1 legit STOP (K1) · t2 legit STOP (K2) · t3 `recorded_in_error` → [K1] *(operator mistaken)* | K1 killed; **K2 active** | **SMS BLOCKED**, `suppressed_at = t2`. **The mistake costs nothing.** Under model B this same mistake clears the lane. |
+| **4** | t1 erroneous suppression (K1) · t2 `recorded_in_error` → [K1] | K1 killed; none active | **SMS UNBLOCKED** — the intended correction, and the only case that unblocks |
+| **5** | t1 legit STOP · t2 legit STOP · t3 `unsuppressed`, `consumer_request` | lane clearance supersedes both | **SMS UNBLOCKED.** The consumer asked for the channel back; the request speaks to the channel, not to rows |
+| **6a** | global DNC (legit, lane `all`) · SMS STOP (erroneous, lane `sms`) · `recorded_in_error` → [K_sms] | `sms` lane: unblocked · `all` lane: **blocked** | **SMS still BLOCKED** — `sms` OR `all`. The legitimate global refusal still covers SMS. Voice unchanged: **BLOCKED** |
+| **6b** | global DNC (erroneous, lane `all`) · SMS STOP (legit, lane `sms`) · `recorded_in_error` → [K_all] | `all` lane: unblocked · `sms` lane: **blocked** | **SMS BLOCKED** by its own legitimate STOP; **VOICE UNBLOCKED**, because the only thing blocking it was the erroneous DNC |
+
+**Case 3 is the argument for model A**, and case 6 is the argument for keeping
+lanes independent: in **6a** and **6b** the *same* pair of events produces
+opposite, correct answers depending only on which one was erroneous, and no rule
+beyond "kill exactly what is named" is needed to get there.
+
 ## 6. E — `get_suppression_state()`, and the future `db/003`
 
 **`db/002` is applied and is a historical migration artifact. It is not edited.**
@@ -413,6 +586,12 @@ The SQL answers a fact; the resolver makes the decision.
 Illustrative, not final — it is SQL in a document and has been executed against
 nothing (§13).
 
+**Two clearance kinds, so two exclusions.** A blocking row is **active** unless
+a **lane clearance** (`consumer_request`) supersedes it *or* a **targeted
+invalidation** (`recorded_in_error`) names its `dedupe_key`. The `active_blocks`
+CTE below is the single definition of "active", and **both functions in §6.2a
+are built on it** so the detailed list and the summary can never disagree.
+
 ```sql
 CREATE OR REPLACE FUNCTION get_suppression_state(p_phone text)
 RETURNS TABLE (channel text, suppressed_at timestamptz)
@@ -422,6 +601,9 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
   WITH last_clear AS (
+    -- LANE CLEARANCE ONLY: reason_code = 'consumer_request'.
+    -- A recorded_in_error row is NOT a lane clearance and must never
+    -- be read as one -- that conflation is the defect this corrects.
     -- BOTH timestamps from ONE row. min()/max() as independent
     -- aggregates is the mis-pairing db/002 already paid for.
     SELECT DISTINCT ON (u.channel)
@@ -431,24 +613,118 @@ AS $$
     FROM public.communication_consent_events u
     WHERE u.phone_e164 = p_phone
       AND u.event_type = 'unsuppressed'
+      AND u.reason_code = 'consumer_request'
     ORDER BY u.channel, u.occurred_at DESC, u.recorded_at DESC, u.event_id
+  ),
+  invalidated AS (
+    -- TARGETED INVALIDATION: one row per (lane, killed dedupe_key),
+    -- carrying the invalidation's own recorded_at so the
+    -- pre-existence rule can be applied per target.
+    SELECT i.channel,
+           k.dedupe_key   AS killed_key,
+           i.recorded_at  AS killed_at
+    FROM public.communication_consent_events i
+    CROSS JOIN LATERAL jsonb_array_elements_text(
+           COALESCE(i.metadata -> 'invalidates', '[]'::jsonb)) AS k(dedupe_key)
+    WHERE i.phone_e164 = p_phone
+      AND i.event_type = 'unsuppressed'
+      AND i.reason_code = 'recorded_in_error'
+  ),
+  active_blocks AS (
+    SELECT e.channel, e.dedupe_key, e.occurred_at, e.recorded_at
+    FROM public.communication_consent_events e
+    LEFT JOIN last_clear c ON c.channel = e.channel
+    WHERE e.phone_e164 = p_phone
+      AND e.event_type IN ('suppressed', 'revoked')
+      -- not superseded by a lane clearance
+      AND (c.channel IS NULL                         -- never cleared
+           OR e.occurred_at > c.cleared_at           -- later by event time
+           OR e.recorded_at > c.cleared_recorded_at) -- or later by ingest time
+      -- and not killed by a targeted invalidation IN THE SAME LANE that
+      -- was recorded AFTER this row existed. Strict '<': a tie does NOT
+      -- invalidate, so an ambiguous simultaneity stays blocked.
+      AND NOT EXISTS (
+        SELECT 1 FROM invalidated v
+        WHERE v.channel    = e.channel
+          AND v.killed_key = e.dedupe_key
+          AND e.recorded_at < v.killed_at
+      )
   )
-  SELECT e.channel,
-         min(e.occurred_at) AS suppressed_at
-  FROM public.communication_consent_events e
-  LEFT JOIN last_clear c ON c.channel = e.channel
-  WHERE e.phone_e164 = p_phone
-    AND e.event_type IN ('suppressed', 'revoked')
-    AND (c.channel IS NULL                        -- never cleared
-         OR e.occurred_at > c.cleared_at          -- later by event time
-         OR e.recorded_at > c.cleared_recorded_at)-- or later by ingest time
-  GROUP BY e.channel;
+  SELECT a.channel, min(a.occurred_at) AS suppressed_at
+  FROM active_blocks a
+  GROUP BY a.channel;
 $$;
 ```
 
-`min(e.occurred_at)` is the only aggregate and no second column is returned
-beside it, so the mis-pairing `db/002` corrected cannot reappear. **A
+`min(a.occurred_at)` is still the only aggregate and no second column is
+returned beside it, so the mis-pairing `db/002` corrected cannot reappear. **A
 `reason_code` must still not be added to this result.**
+
+**`COALESCE(… , '[]')` is load-bearing**, not defensive clutter: a
+`recorded_in_error` row with no `invalidates` array yields **zero** killed keys,
+so it invalidates nothing and is **not** a lane clearance. That is rule 3 of
+§5.4 enforced in the fold itself, independently of whatever the application
+did.
+
+**A `dedupe_key` that matches no row kills nothing**, because the join simply
+finds nothing — fail-closed by construction rather than by a check.
+
+### 6.2a The second function — the narrow one-number lookup
+
+`get_suppression_state()` returns `(channel, suppressed_at)` and **cannot carry
+this workflow**: it says a lane is blocked and since when, but not *which*
+events block it, how many there are, or what to name in an invalidation. **An
+operator cannot correct an event the system will not name**, and this is the
+function that names it.
+
+```sql
+CREATE FUNCTION get_active_blocks(p_phone text)
+RETURNS TABLE (channel text, dedupe_key text, event_type text,
+               source text, source_event_id text,
+               occurred_at timestamptz, recorded_at timestamptz)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  -- The SAME active_blocks definition as above. It must be identical:
+  -- two definitions of "active" is two answers, and the operator would
+  -- be shown a set the enforcement path does not agree with.
+  ...
+$$;
+```
+
+**Why a second function rather than widening the first.** Gate 8 asks *"may I
+send?"* and needs allow/deny plus a timestamp. The operator workflow asks
+*"which rows are blocking, so I can name one?"* Different questions, different
+callers, **different privilege**:
+
+| Role | `get_suppression_state` | `get_active_blocks` | Table |
+|---|---|---|---|
+| `consent_ledger_sender` (gate 8) | `EXECUTE` | **no** — never needs event identity | none |
+| `consent_ledger_operator` | `EXECUTE` | `EXECUTE` | `INSERT` only |
+| `consent_ledger_app` (website) | **no** | **no** | `INSERT` only |
+| `PUBLIC` | **revoked** | **revoked** | — |
+
+Widening the existing function would have handed the **sender** event identity
+it has no use for, on the live send path. It gets nothing new.
+
+**Least privilege is preserved exactly.** `get_active_blocks` takes **one
+number** and answers only about that number: no enumeration, no listing, no way
+to discover a number the caller does not already hold. No `SELECT` on the table
+for anybody. `SECURITY DEFINER`, the fixed `search_path`, and
+`REVOKE EXECUTE … FROM PUBLIC` are mandatory on it exactly as on the first.
+
+**The disclosure it does add, stated rather than glossed:** for a number the
+caller already holds, it reveals how many blocking events exist, their types,
+their timestamps, and their `dedupe_key`s — which embed the provider's
+`source_event_id` (a Twilio `MessageSid`). That is a real widening over
+`(channel, suppressed_at)`, it is confined to one already-known number, and it
+is **unavoidable**: the alternative is a workflow that cannot name what it
+corrects, which is the defect §5.4 exists to fix.
+
+**No aggregates, so no mis-pairing hazard.** It returns whole rows; every
+column of a returned row comes from that row.
 
 ### 6.3 Privileges — unchanged, and re-stated rather than assumed
 
@@ -472,7 +748,9 @@ beside it, so the mis-pairing `db/002` corrected cannot reappear. **A
 ### 6.4 One new role, with its reason written beside it
 
 `db/003` also creates **`consent_ledger_operator`**: `INSERT` on
-`communication_consent_events` **plus** `EXECUTE` on `get_suppression_state`.
+`communication_consent_events` **plus** `EXECUTE` on **both**
+`get_suppression_state` and `get_active_blocks` (§6.2a). The sender role gets
+`EXECUTE` on the first only.
 Connection string `CONSENT_LEDGER_OPERATOR_URL`, Production only, added by a
 human and by no document.
 
@@ -502,7 +780,8 @@ accepted deliberately rather than argued away.
 | Append arbitrary ledger rows — **including `unsuppressed`** | **Yes.** The grant model constrains no `event_type`; only application code does. **This is not new**: the existing website `INSERT` credential has exactly the same power today, for the same reason. What is new is a *second* string that has it. |
 | Bypass the token, the 24-hour TTL, the attestation and the confirmation | **Yes**, by writing directly. Those controls guard the endpoint, not the grant. |
 | Probe whether a number it already holds is suppressed | **Yes**, one number at a time. |
-| Enumerate the ledger, or learn a number it does not already have | **No.** |
+| **List the blocking events for a number it already holds** — their types, timestamps and `dedupe_key`s (which embed a `MessageSid`) | **Yes**, via `get_active_blocks` (§6.2a). **Added 15 September 2026**, and a real widening over the previous `(channel, suppressed_at)` answer. Confined to one already-known number, and unavoidable: a correction that cannot name its target is the defect §5.4 fixes. |
+| Enumerate the ledger, or learn a number it does not already have | **No.** Both functions take one number and answer only about it. |
 | `SELECT`, `UPDATE`, `DELETE`, `TRUNCATE`, any DDL | **No.** |
 | Cause a message to be sent | **No.** The two-key rule holds: a forged `unsuppressed` row turns one key, and sending still requires a live evidenced grant this credential cannot create. |
 
@@ -661,9 +940,23 @@ GET renders and writes nothing — invariant 11, non-negotiable. POST requires
 6. **when the reason is `recorded_in_error`, an `error_origin`** — `operator`,
    `classifier`, `system` or `undetermined` — also unselected, also no default.
    A missing origin on an error correction is a 400 that writes nothing;
-7. **optionally, the originating event's identifiers** (`source`,
-   `source_event_id`) so the row can name the suppression it corrects (§4.2).
-   Left blank they are **absent** from the event, never reconstructed.
+7. **when the reason is `recorded_in_error`, an explicit selection of the
+   blocking events being invalidated** — chosen from the list
+   `get_active_blocks()` returned at the pre-read, each presented with its
+   type, source, timestamps and `dedupe_key`, **all unselected by default**.
+   **At least one must be selected**; a selection of none is a 400 that writes
+   nothing (§5.4 rule 3). This is the judgement only the human can make, and it
+   is the same argument the suppression endpoint makes for its own unselected
+   scope: *"stop texting me"* and *"that row was a mistake"* are different
+   claims, and the second one has to say **which** row.
+
+**The page must show the operator every active blocking event in the lane, not
+only the ones she is invalidating**, and must say plainly how many she has
+selected out of how many exist. Case 3 of §5.5 is why: an operator who cannot
+see the second, legitimate STOP cannot know that her correction leaves the lane
+blocked — and she must know, or she will believe she has finished. For a
+`consumer_request` the same list is shown, because a lane clearance sweeps all
+of it.
 
 ### 7.5 What is deliberately *not* added
 
@@ -795,12 +1088,13 @@ on 15 September 2026** because the event must be able to name what it corrected:
 > **read the fold (pre-append)** → append `unsuppressed` → **read the fold
 > (post-append)** → project to HubSpot → (later, separately, manually) Twilio.
 
-The **pre**-read supplies `corrects.suppressed_at` (§4.2) and is unrecoverable
-afterwards — once the lane is cleared the fold no longer returns it. The
-**post**-read drives the projection and the resulting-state page (§7.6). A
-failure of the **pre**-read is a 400 that appends nothing: an unsuppression that
-cannot say what it undid is not an audit record, and proceeding without one
-would trade the evidence for the convenience.
+The **pre**-read (`get_active_blocks`, §6.2a) supplies `intent.targets` and
+`intent.observed_active`, **and verifies every named target is currently
+active** — a check that becomes impossible after the append, because those rows
+are no longer active. The **post**-read drives the projection and the
+resulting-state page (§7.6). A failure of the **pre**-read is a 400 that appends
+nothing: an unsuppression that cannot say what it undid is not an audit record,
+and proceeding without one would trade the evidence for the convenience.
 
 **The property that makes every failure below survivable:** *unsuppression never
 grants*. A partially applied unsuppression cannot cause a message, because the
@@ -1053,7 +1347,7 @@ not allowed to hand back.
 | `dedupe_key` | `operator:<approval_id>:<channel>:unsuppressed`, via the existing `dedupeKey()` |
 | `reason_code` | `consumer_request` \| `recorded_in_error` — a **new closed vocabulary**, `UNSUPPRESSION_REASON`. Both are **origin-neutral**; neither asserts a cause (§4.2) |
 | `evidence_text` | the consumer's **verbatim words**, only when the operator holds them; otherwise `NULL`. **Never the operator's prose** |
-| `metadata` | `{ approval_id, approved_by: "operator", entered_via: "operator_unsuppress", token_v, attestation, request_channel, request_observed_at, prior_blocked_lanes, twilio_reconciled: false }`, plus **`error_origin`** (mandatory when `reason_code = recorded_in_error`: `operator` \| `classifier` \| `system` \| `undetermined`) and **`corrects`** (`{ suppressed_at, source?, source_event_id?, event_type?, dedupe_key?, provenance }` — §4.2; absent layers are absent, never fabricated) |
+| `metadata` | `{ approval_id, approved_by: "operator", entered_via: "operator_unsuppress", token_v, attestation, request_channel, request_observed_at, prior_blocked_lanes, twilio_reconciled: false }`, plus **`error_origin`** (mandatory when `reason_code = recorded_in_error`: `operator` \| `classifier` \| `system` \| `undetermined`), **`invalidates`** (a JSON array of `dedupe_key`s — **the only metadata field the fold reads**; `[]` for `consumer_request`, and **never empty** for `recorded_in_error`) and **`intent`** (`{ targets[], observed_active[], selected_of_active }` — §4.2) |
 | `submission_id`, `form_type`, `page_path`, `consent_copy_*` | `NULL` — an unsuppression is about a number, not a submission, and it agrees to no disclosure |
 
 **The years-later question — *"why did this number become eligible to
@@ -1188,6 +1482,17 @@ lowest practical real boundary, and for SQL semantics that is a real database):
    its new form).
 8. Lane independence: clearing `sms` does not clear `ai_voice` or `all`.
 9. Scenario 1, 2 and 3 of §5.2, each as an explicit test.
+9a. **All six cases of §5.5, each as an explicit test** — they are the whole
+    reason the fold distinguishes the two clearance kinds. Case 1 (legitimate
+    STOP survives the correction of a later bad suppression) and case 3 (a
+    mistaken correction costs nothing) are the two that fail under the previous
+    revision's semantics, so both must be shown failing against it.
+9b. **`consumer_request` still clears the lane** over multiple legitimate
+    blocking events (case 5) — the correction must not have narrowed it.
+9c. **`get_active_blocks()` and `get_suppression_state()` never disagree**: for
+    the same number, a lane is reported blocked by the summary if and only if
+    the detailed list returns at least one row for it. Two definitions of
+    "active" would show the operator a set the enforcement path does not accept.
 10. Privileges re-verified after `CREATE OR REPLACE`: `prosecdef`, `proconfig`,
     sender succeeds, sender refused on the table, website role refused on the
     function, `consent_ledger_operator` succeeds on both and is refused
@@ -1245,26 +1550,47 @@ lowest practical real boundary, and for SQL semantics that is a real database):
 29. `consumer_request` with an `error_origin` is refused — the field belongs to
     the error path only, and accepting it there would invite a meaningless
     origin on a consumer request.
-30. **`corrects.suppressed_at` is captured from the PRE-append read**, and is
-    present on every `unsuppressed` row. A test that appends first and reads
-    after must fail to produce it — that ordering is the point.
-31. **Absent layers are absent, not fabricated**: with no `source_event_id`
-    supplied, the row carries no `corrects.dedupe_key` and no
-    `corrects.source_event_id`, and `corrects.provenance` says so.
+30. **`intent.observed_active` is captured from the PRE-append read** and lists
+    the **whole** active set, not only the selected targets. A test that appends
+    first and reads after must fail to produce it — that ordering is the point.
+31. **A named target that is not currently active is refused**, 400, nothing
+    appended — a key that matches no row, and a key whose row a previous
+    correction already killed.
+32. **`recorded_in_error` with an empty `invalidates` is refused** at the
+    builder, **and** is inert in the fold — proven by inserting such a row
+    directly as the owner and folding: the lane must stay blocked. Both halves,
+    because either alone leaves the lane-clearance-in-disguise reachable.
+33. **A cross-lane target is refused**: an invalidation in lane `sms` naming a
+    `dedupe_key` ending `:all:suppressed`. Refused at the builder and unmatched
+    by the fold.
+34. **The pre-existence rule**: an invalidation naming a `dedupe_key` whose row
+    is recorded *later* does not kill it. Strict `<` — an equal `recorded_at`
+    does **not** invalidate.
+35. **A new, unnamed blocking event arriving between the pre-read and the POST
+    does not prevent the correction**, and the resulting page reports the lane
+    as still blocked by it.
 
 **Evidence:**
 
-32. No phone number, attestation or consumer words in any log line.
-33. No phone number in any URL.
-34. `dedupe_key` shape, and idempotency under a genuine double submit.
+36. No phone number, attestation or consumer words in any log line. **A
+    `dedupe_key` embeds a `MessageSid`, so `invalidates` must not be logged
+    either.**
+37. No phone number in any URL.
+38. `dedupe_key` shape, and idempotency under a genuine double submit.
 
 ---
 
 ## 14. What remains explicitly unproven
 
-- **Every line of SQL in §6.2 has been executed against nothing.** It is a
-  contract in a document. The folding, the tie-breaks, the `DISTINCT ON`
-  pairing and the planner's index use are all unmeasured.
+- **Every line of SQL in §6.2 and §6.2a has been executed against nothing.** It
+  is a contract in a document. The two-clearance-kind fold, the
+  `jsonb_array_elements_text` lateral join, both tie-breaks, the pre-existence
+  rule, the `DISTINCT ON` pairing and the planner's behaviour are all
+  unmeasured. **The six cases of §5.5 are reasoning**, which is why each one is
+  a required test rather than a worked example.
+- **The `metadata -> 'invalidates'` join's cost is unknown.** There is no index
+  on `metadata`, and whether the existing `(phone_e164, occurred_at DESC)` index
+  carries this shape has not been checked (§6.5).
 - **That `CREATE OR REPLACE FUNCTION` preserves the ACL** is a documented
   expectation, not a measurement taken here. `db/003` re-issues the grants so
   the outcome does not depend on it, and the verification block must confirm it.
@@ -1371,6 +1697,49 @@ and security even though the deliverable is prose. The full diff was re-read
 cold against `CLAUDE.md`, `docs/CURRENT-STATE.md`, `docs/WORKFLOW.md` and the
 modules the design touches.
 
+### The third pass — the lane/event contradiction
+
+**Found by independent review of `fbeac5e`, and it was the most serious defect
+in the design.** `unsuppressed` cleared the whole lane while `recorded_in_error`
+named one event, **and the fold never read the name** — so correcting one bad
+row erased unrelated legitimate consumer refusals, with an audit trail that said
+it had done something else.
+
+**Model A chosen over model B**, and B rejected as structurally incoherent
+rather than merely weaker (§3.4, §5.4). Consequences, all in this round:
+
+- the fold now distinguishes **lane clearance** (`consumer_request`) from
+  **targeted invalidation** (`recorded_in_error`), and reads
+  `metadata.invalidates` — so the naming is **load-bearing** instead of
+  decorative;
+- three fail-closed rules added: **pre-existence** (strict `<`), **same-lane
+  only**, and **an empty `invalidates` invalidates nothing and is never a lane
+  clearance** — the original defect in mirror image, refused in the builder
+  *and* inert in the fold;
+- **`db/003` gains a second function**, `get_active_blocks()` (§6.2a), because a
+  correction cannot target what the system will not name. The sender role does
+  not get it;
+- **`metadata.corrects` was replaced.** Its claim to answer *"what exact
+  suppression was this correcting?"* was **false**: it identified the target by
+  a **timestamp**, and a timestamp is not an identity when a lane holds several
+  blocking events and `suppressed_at` names only the earliest. Now
+  `invalidates` (identity, read by the fold) plus `intent.observed_active` (the
+  whole set she was shown) — with the **remaining state deliberately not
+  stored**, because it is a function of the history and a snapshot can disagree
+  with the fold.
+
+**Correction-delta review of this round** found one further thing, now fixed:
+the failure table treated "the lane is still blocked afterwards" as an implicit
+failure, when in cases 1, 2, 3 and 6a it is **the correct outcome** — so it is
+now an explicit row saying the append succeeded, no HubSpot write happens for
+that channel, and the page must say so. No further pass on this delta.
+
+**Preserved unchanged by this round:** the two-key rule; unsuppression never
+grants; fresh consent required; no automatic unsuppression; the separate
+operator endpoint; no Twilio API in the first implementation; `db/002`
+untouched; least privilege; the send-time union of ledger and HubSpot; and GET
+never changes state.
+
 ### The second pass — a correction round on the merged-but-unmerged draft
 
 **Four further corrections were made on 15 September 2026, after independent
@@ -1473,14 +1842,23 @@ the attestation says what happened in words. A reviewer may fairly say a
 self-reported diagnostic is weak evidence, and they would be correct; it is
 recorded as a diagnostic, not offered as proof.
 
-Fourth: **the Twilio provenance**, now materially narrower (§8.1). The four
+Fourth, **new and now the sharpest operational point**: under model A the
+operator selects **which** blocking events were erroneous, and a wrong selection
+is caught by nothing. The defence is that it **fails in the safe direction** —
+selecting the wrong row leaves the lane blocked (case 3 of §5.5), and selecting
+too few also leaves it blocked. The only way to over-clear is
+`consumer_request`, which claims a consumer asked and carries the attestation
+that goes with it. **A reviewer should check that asymmetry holds**, because it
+is the whole safety argument for letting one person name targets at all.
+
+Fifth: **the Twilio provenance**, now materially narrower (§8.1). The four
 capability statements are verified by independent review; the wire-level detail
 in §8.3 is not, and no agent in this session read the pages.
 
 > **"What guarantee does the prose claim that the proposed implementation would
 > still need to prove?"**
 
-Seven, and §14 exists so none of them is smuggled:
+Eight, and §14 exists so none of them is smuggled:
 
 - **that the folding SQL is correct** — it has run against nothing. The
   equal-timestamp tie-break and the delayed-webhook case are both reasoning, and
@@ -1498,8 +1876,12 @@ Seven, and §14 exists so none of them is smuggled:
 - **that the five cleared consent artefacts are genuinely not read anywhere
   else** — §10.3 argues it from `resolve()` and `applyChannel()`; only test 25's
   sweep proves no other reader exists;
-- **that the resulting-state page actually prevents the scenario-2
-  misunderstanding** — a claim about a human being, which no test settles.
+- **that the two-clearance-kind fold does what §5.5 says** — six cases, all
+  reasoning, none executed. Cases 1 and 3 are the ones that fail under the
+  previous revision, and both must be shown failing against it;
+- **that the resulting-state page prevents the scenario-2 misunderstanding, and
+  that an operator shown three active blocks reliably selects the right one** —
+  claims about a human being, which no test settles.
 
 ### Lesson promotion — nothing promoted, with the reason
 
