@@ -198,7 +198,15 @@ p:last-child { margin-bottom: 0; }
   padding: 0 .4rem; font-size: .75rem; font-weight: 600; letter-spacing: .13em;
   text-transform: uppercase; color: var(--muted);
 }
-.consent__optional { font-weight: 500; letter-spacing: .06em; opacity: .8; }
+/* De-emphasised by WEIGHT and TRACKING, not by opacity.
+   `opacity: .8` here compounded with whatever colour the legend had
+   and pushed this text under WCAG AA on the light ground: #6d665c at
+   .8 over white measures 3.66:1, against a 4.5:1 floor. Opacity is the
+   one de-emphasis that silently changes contrast on every ground it is
+   used over, so the marker now simply inherits the legend colour and
+   keeps its lighter weight and wider tracking to stay secondary.
+   Measured after: 5.67:1 on white, 9.8:1 on both dark grounds. */
+.consent__optional { font-weight: 500; letter-spacing: .06em; }
 .consent__item {
   display: grid; grid-template-columns: auto 1fr; gap: .7rem;
   align-items: start; margin-bottom: .85rem;
@@ -207,6 +215,56 @@ p:last-child { margin-bottom: 0; }
 .consent__label { font-size: .82rem; line-height: 1.55; cursor: pointer; }
 .consent__label a { color: inherit; text-decoration: underline; }
 .consent__note { margin: 0; font-size: .78rem; line-height: 1.5; color: var(--muted); }
+
+/* The consent block on a DARK form ground.
+   -----------------------------------------------------------------
+   The rules above are tuned for the cream ground: `.consent__label`
+   declares no colour at all and therefore inherits `body`'s
+   var(--ink-soft) (#2a2621), while the legend and note use var(--muted)
+   (#6d665c). Both are correct on `.form-card` (/contact, white) and both
+   are unreadable on the two dark grounds, where the consent fieldset
+   actually sits on three of the four opt-in surfaces:
+
+     /                      .hero .hv-form   (hero gradient, ~#17140f)
+     /home-value            .valueform       (#151412)
+     /43551-seller-review   .valueform       (#151412)
+
+   Measured before this rule existed: the disclosure label rendered at
+   1.23:1 against #151412 - near-black on near-black, effectively
+   invisible - and the legend and note at 3.25:1, both under the 4.5:1
+   WCAG AA floor for normal text. This is the text that carries the SMS
+   consent disclosure, so it is the one piece of copy on the page that
+   must be readable.
+
+   The cause is not a wrong colour, it is a MISSING override: every
+   sibling control in these panels already has one (see
+   `.hero .hv-form .field > label` and `.hero .hv-form .form__note`
+   below). The consent block was added later and never got the same
+   treatment. So the fix reuses those exact two alpha values rather than
+   inventing new ones - the disclosure now matches the field labels
+   beside it, and the helper note matches the form note beside it.
+
+   Scoped to the dark contexts only. /contact keeps the light values,
+   which already pass at 15.03:1 and 5.67:1. */
+.hero .hv-form .consent__label,
+.valueform .consent__label { color: rgba(255, 255, 255, .82); }   /* 12.5:1 */
+
+.hero .hv-form .consent__legend,
+.valueform .consent__legend,
+.hero .hv-form .consent__note,
+.valueform .consent__note { color: rgba(255, 255, 255, .72); }    /* 9.8:1 */
+
+/* The links stay `color: inherit` + underline, exactly as on the light
+   ground and as `.hv-form__privacy a` already does, so they ride the
+   corrected colour and remain distinguishable by the underline rather
+   than by a second colour the dark panel would have to justify. */
+
+/* Same root cause, one line: the fieldset border used var(--line)
+   (#e4ded4), a cream-ground hairline, which on these panels rendered as a
+   near-white box around the group and read as a rendering fault next to
+   `.valueform`'s own var(--desk-line). Matching the panel it sits in. */
+.hero .hv-form .consent,
+.valueform .consent { border-color: var(--desk-line); }
 
 .hv-form__privacy { margin-top: .5rem; font-size: .78rem; }
 .hv-form__privacy a { color: inherit; text-decoration: underline; opacity: .85; }

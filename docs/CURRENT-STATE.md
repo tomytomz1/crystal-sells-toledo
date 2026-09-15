@@ -219,23 +219,75 @@ Schema in the production HubSpot portal:
   description decides approval. Also recorded: a Sole Proprietor campaign may
   carry **only one** 10DLC number.
 
-  **THE NEXT OPERATOR ACTIONS, IN ORDER. None has been performed.**
+  **PRODUCTION CONSENT IS NOW LIVE — operator action, 15 September 2026.**
+  The operator has performed steps 1–4 below. Recorded as
+  **operator-supplied evidence**; no agent session touched Vercel, and no
+  agent has viewed the live site.
 
-  1. **Add or confirm the Production consent-ledger credential** if the current
-     implementation requires it — `CONSENT_LEDGER_URL` is set in **Preview
-     only** today, and `api/lead.js` withholds the `cst_*` grant when the
-     ledger append fails, so enabling the feature without it would capture
-     consent that is never made durable.
-  2. **Set `COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production.**
-  3. **Redeploy.**
-  4. **Verify the live opt-in and legal pages** — checkbox visible, unchecked,
-     optional; `/privacy` and `/communications-terms` reachable and carrying
-     the disclosures.
-  5. **Only then create and submit the A2P Campaign**, selecting use case
+  - **`CONSENT_LEDGER_URL` added to Vercel Production**, using the
+    **`consent_ledger_app`** Neon role — the `INSERT`-only application
+    credential, not an owner credential. *(The value is recorded nowhere;
+    variable name and role only.)*
+  - **`COMMUNICATIONS_CONSENT_ENABLED=true` set in Vercel Production.**
+  - **Production redeployed.**
+  - **Live page verified** at `/home-value`: the consent block renders on
+    Step 2 with an SMS checkbox and a **separate** AI/automated-voice
+    checkbox, **both unchecked**, the section marked **Optional**, the SMS
+    copy visibly carrying *message frequency varies*, *message and data
+    rates may apply*, **STOP**, **HELP** and *consent is not a condition of
+    service*, both the Privacy Policy and Communications Terms links
+    present, and the voice wording identifying automated technology and an
+    artificial, prerecorded or AI-generated voice.
+
+  **This closes blockers 1 and 2** of the three listed for Campaign
+  submission. **The STOP/HELP inbound webhook remains inert** —
+  `TWILIO_AUTH_TOKEN` is in no environment — and that was always the item
+  the worksheet calls *"the one that matters most"*, because every sample
+  message promises *"Reply STOP to opt out"*.
+
+  **A MATERIAL VISUAL DEFECT WAS FOUND ON THE LIVE PAGE and is fixed in
+  the source, not yet deployed.** The consent disclosure rendered at
+  **1.23:1** contrast against the dark form panel — near-black text on a
+  near-black ground, effectively invisible — with the legend and helper
+  note at **3.25:1**. All three are below the **4.5:1** WCAG AA floor for
+  normal text, on the one piece of copy that carries the SMS consent
+  disclosure.
+
+  The cause was a **missing dark-context override, not a wrong colour**:
+  `.consent__label` declares no `color` and inherited `body`'s
+  `--ink-soft`, while the legend and note used `--muted`, all three tuned
+  for the cream ground. Every sibling control in the same panels already
+  had an override; the consent block was added later and never received
+  one. Corrected by reusing the site's existing dark-form values, scoped to
+  the dark grounds only — `/contact`'s white card was already passing and
+  is untouched. Measured after: **12.5:1** for the disclosure, **9.8:1**
+  for the legend and note, on both dark grounds.
+
+  **CAMPAIGN STATUS IS UNCHANGED: NOT CREATED, NOT SUBMITTED, NOT
+  APPROVED.** Enabling the opt-in surface is a prerequisite for submission,
+  not a submission.
+
+  **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–4 are now DONE.**
+
+  1. ~~Add the Production consent-ledger credential.~~ **DONE** —
+     `CONSENT_LEDGER_URL`, `consent_ledger_app` role.
+  2. ~~Set `COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production.~~
+     **DONE.**
+  3. ~~Redeploy.~~ **DONE.**
+  4. ~~Verify the live opt-in page.~~ **DONE** — and it surfaced the contrast
+     defect above.
+  5. **Deploy the contrast fix and re-check the live page.** The disclosure
+     is currently live and hard to read; a reviewer sent to that URL would be
+     reading the consent copy at 1.23:1.
+  6. **Confirm `/privacy` and `/communications-terms` on the live domain** —
+     reachable, indexable, carrying the message-frequency and
+     message-and-data-rates disclosures error 30908 requires.
+  7. **Only then create and submit the A2P Campaign**, selecting use case
      **`Sole Proprietor`**.
 
-  **Steps 1–5 are operator actions in external systems and none was performed
-  or simulated by any agent session.**
+  **Every step here is an operator action in an external system. None was
+  performed or simulated by any agent session**, including the four now
+  marked done — those are the operator's own report.
 
   **PROVENANCE. All of the Twilio state above is OPERATOR-SUPPLIED EVIDENCE** —
   one console screenshot and one Twilio email. No agent session logged into
