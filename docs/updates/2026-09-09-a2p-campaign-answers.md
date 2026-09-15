@@ -9,7 +9,20 @@ in production), because the reviewer will visit the opt-in URL and expects to
 see the checkbox and disclosure described below.
 
 Twilio number in hand: **+1 419-724-2789** (SMS, MMS, Voice).
-Brand / Trust Hub is being resolved separately with Twilio/TCR.
+
+> **UPDATE — 15 September 2026.** Two Twilio registrations are now approved,
+> and they are different objects:
+>
+> - **Primary / Individual Customer Profile — APPROVED** (Twilio email,
+>   *"Twilio Primary Customer Profile Approved"*).
+> - **A2P 10DLC Brand — APPROVED**, type **Sole proprietor**, identity
+>   **Verified** (Trust Hub screenshot).
+>
+> Operator-supplied evidence; no agent queried Twilio. **The A2P Campaign is
+> still NOT created, submitted or approved** — the Brand Details view showed a
+> *"Create campaign"* button and no linked Campaign. **This changes nothing
+> about the sequencing below.** The Campaign must still not be submitted until
+> the reviewer can see the live opt-in surface.
 
 ---
 
@@ -135,7 +148,11 @@ rather than assumed.
 
 ## 7. Before submitting — checklist
 
-- [ ] Twilio Brand / Trust Hub resolved and approved
+- [x] **Twilio Brand / Trust Hub resolved and approved** — 15 September 2026,
+      operator-supplied evidence: Primary/Individual Customer Profile
+      **Approved**, Brand **Approved**, type **Sole proprietor**, identity
+      **Verified**. *(This box covers the Customer Profile and the BRAND only.
+      No Campaign item below is affected by it.)*
 - [ ] `COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production
 - [ ] Both checkboxes visible, unchecked, optional at the opt-in URL
 - [ ] https://crystalsellstoledo.com/communications-terms loads
@@ -147,3 +164,15 @@ rather than assumed.
 The last box is the one that matters most. Every sample message above promises
 "Reply STOP to opt out". Sending any of them before inbound handling is live
 would be making a promise the system cannot keep.
+
+**The blocking item as of 15 September 2026 is the second box, and it is ours,
+not Twilio's.** `COMMUNICATIONS_CONSENT_ENABLED` is set in Vercel **Preview
+only** and deliberately absent from **Production**, so the production opt-in URL
+does not yet show the SMS consent checkbox and disclosure the reviewer will look
+for. Submitting the Campaign before that is visible invites a rejection for an
+opt-in flow the reviewer cannot see — which is the reason this worksheet has
+said "do not submit until the consent flow is live" since 9 September 2026.
+
+**No Campaign item on this list is complete.** The Campaign has not been
+created, submitted or approved, no number is assigned to a Campaign, and no
+Messaging Service is configured. Brand approval advanced exactly one box.
