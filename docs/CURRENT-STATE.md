@@ -929,24 +929,31 @@ the future workflow will ask; **nothing asks them.** The one route that does
 exist is a human holding the owner or `consent_ledger_operator` credential
 writing a row by hand — deliberate, manual, and outside the application.
 
-### Outstanding operator action — credential rotation, OPEN
+### Credential rotation — COMPLETED, operator-confirmed
 
-**The initial `consent_ledger_operator` password was visible in an operator
-screenshot.** Rotating it and invalidating the old credential is an
-**outstanding operator action; this record carries no confirmation that it has
-been done.** Until such confirmation exists it must be treated as **not
-rotated**. The credential itself is recorded nowhere — not here, not in any
-handoff, not in any environment.
+**Operator confirmed `consent_ledger_operator` credential rotation completed
+after accidental visual disclosure; old credential invalidated.** The initial
+password had been visible in an operator screenshot. The operator replaced it
+manually in Neon using the owner account.
 
-The exposure's blast radius is bounded by the role's grants, which are the
-matrix above: `INSERT` on the ledger and `EXECUTE` on the two wrappers. That is
-**append-only** — a holder could write ledger rows, including an `unsuppressed`
-row, and read one number's state at a time. It cannot `SELECT` the table,
-cannot `UPDATE`, `DELETE` or `TRUNCATE`, cannot enumerate (both functions take
-one number and neither has an argument-free form), and **cannot cause a message
-to be sent** — there is no send path at all: gate 8 is not built, no application
-code calls either function, and no outbound messaging is activated. This bounds
-the exposure; it does not excuse it.
+**This is OPERATOR-CONFIRMED, not agent-verified.** No agent session accessed
+Neon, held any `consent_ledger_operator` credential, or observed the rotation.
+The record is the operator's statement. No secret material of any kind is
+recorded here or in any handoff — not the old password, not the new one, not a
+connection string, not a length or any other characteristic.
+
+**The item is closed.** For the record of what the exposure could have reached
+while it stood: the role's grants are the matrix above — `INSERT` on the ledger
+and `EXECUTE` on the two wrappers, which is **append-only**. A holder could have
+appended ledger rows, including an `unsuppressed` row, and read one number's
+state at a time. It could not `SELECT` the table, could not `UPDATE`, `DELETE`
+or `TRUNCATE`, could not enumerate (both functions take one number and neither
+has an argument-free form), and could not cause a message to be sent — there is
+no send path at all: gate 8 is not built, no application code calls either
+function, and no outbound messaging is activated. **No evidence of misuse was
+sought or is claimed either way** — the ledger was not audited for unexpected
+rows, and the least-privilege bound is the reason that is an acceptable
+position, not a substitute for having looked.
 
 
 **The core rule:** an `unsuppressed` event **lifts a block and never grants
