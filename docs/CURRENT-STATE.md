@@ -89,12 +89,31 @@ Schema in the production HubSpot portal:
   `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
   Vercel **Preview only**. **Gate 4 closed on 10 September 2026 — both stages.
   Gate 5 closed the same day.** Gates 6–10 remain.
-- **A2P/TCR readiness is a separate activation dependency, and gate 6 is
-  externally blocked.** An existing Twilio A2P Brand is in a support/TCR hold
-  for **error 30753** while Twilio works the email whitelist. **Do not create
-  another Brand, profile or campaign, and do not change the registration, while
-  that case is open.** Nothing in this repository can advance it. No live SMS
-  test is possible until it clears.
+- **A2P/TCR readiness is a separate activation dependency. Gate 6 is still
+  OPEN, but what keeps it open changed on 12 and 15 September 2026.**
+
+  **The error-30753 / TCR allowlist hold is no longer the blocker.** The
+  operator reports that on **12 September 2026** Twilio Support stated TCR had
+  allowlisted `crystal@crystalsellstoledo.com`, and instructed her to **delete
+  the failed Brand, create a new Brand, and submit it for review**.
+
+  **Gate 6 is NOT closed.** The replacement registration is still pending, and
+  as of **15 September 2026** the Twilio **Primary Compliance Profile requires
+  Crystal Saylor to complete Persona identity verification with her ID** — an
+  outstanding operator action. No live SMS test is possible until the
+  replacement registration completes.
+
+  **Both facts above were supplied by the operator and are NOT independently
+  verified from this repository or by any agent session.** Nothing here can
+  advance them.
+
+  **Statements elsewhere in this file and in the merged documents that Twilio
+  configuration is "frozen under the TCR hold" are therefore STALE.** They are
+  corrected in place below where they affect current truth; the historical
+  decision documents keep their original wording with a dated correction beside
+  it. What has not changed: Twilio configuration should still not be altered
+  casually while a replacement registration is in review, and **no Twilio action
+  was performed or simulated** by the session that recorded this.
 
 ## Consent evidence architecture — approved direction
 
@@ -435,8 +454,8 @@ SMTP is unconfigured, because a message that reaches nobody must fail loudly.
 **Gate 7 activation therefore also requires `OPERATOR_ACTION_SECRET` in
 Production — randomly generated and at least 32 bytes, since a shorter value is
 treated as absent — and `ZOHO_SMTP_*` confirmed there** — otherwise every ordinary lead
-reply to the number would answer 503. All three are absent today, and none is
-frozen by the TCR hold.
+reply to the number would answer 503. All three are absent today, and none of
+them was ever blocked by the A2P/TCR registration.
 
 **Also built, merged, and inert — operator surfacing and the operator suppression
 action, 10 September 2026** (`api/operator-action.js`,
@@ -523,13 +542,19 @@ action, 10 September 2026** (`api/operator-action.js`,
 
 - **Send-time enforcement.** Nothing in `api/` calls `get_suppression_state()`.
   That is gate 8, and it has not begun.
-- **Re-opt-in / unsuppression.** The `unsuppressed` event type exists and
-  **nothing writes it.** A `reoptin_requested` event is recorded, deliberately
-  without clearing anything — a suppression is never cleared automatically —
-  and no operator workflow exists to clear one deliberately.
+- **Re-opt-in / unsuppression — NOW DESIGNED, STILL NOT BUILT.** The
+  `unsuppressed` event type exists and **nothing writes it.** A
+  `reoptin_requested` event is recorded, deliberately without clearing anything
+  — a suppression is never cleared automatically — and **no operator workflow
+  exists to clear one deliberately.** The semantics were settled on
+  **15 September 2026** (`docs/updates/2026-09-15-unsuppression-reoptin-decision.md`);
+  **no code, migration, endpoint or test was written.** See the section below.
 - **Voice ingress.** Nothing receives a Retell webhook, so a *spoken*
   do-not-call reaches none of the above.
-- **Webhook retry** on the Messaging Service — frozen under the TCR hold.
+- **Webhook retry** on the Messaging Service — unconfigured. *(It was recorded
+  as "frozen under the TCR hold"; that hold is no longer the blocker — see gate
+  6 above. It remains a Messaging Service change that should wait for the
+  replacement registration.)*
 
 **Operator surfacing and the operator suppression action moved out of this list
 on 10 September 2026 — both are now BUILT, MERGED AND INERT**; see the section
@@ -563,13 +588,15 @@ and one activation prerequisite is new:
 - **No voice ingress at all.** *"stop calling me"* arriving by SMS suppresses
   voice, but nothing receives a Retell webhook, so a **spoken** do-not-call
   cannot reach any of it.
-- **Unsuppression is still not designed, and now matters more.** The operator
-  action deliberately cannot clear what it writes, so a mistaken entry is
-  permanent and the only correction today is a database owner — the very thing
-  that design removes from the workflow. **It must be settled before gate 9.**
+- **Unsuppression is DESIGNED and NOT BUILT.** The operator action deliberately
+  cannot clear what it writes, so a mistaken entry is still permanent today and
+  the only correction today is still a database owner. The design that removes
+  that was settled on 15 September 2026 — see the section below — and **gate 9
+  now has a named dependency rather than an undesigned hole.**
 - **Webhook retry is unconfigured, and a 5xx does not by itself make Twilio
   redeliver** an incoming-message webhook. Until retry is configured — a
-  Messaging Service change, frozen under the TCR hold — a ledger outage during a
+  Messaging Service change, and one that should wait for the replacement A2P
+  registration rather than the superseded TCR hold — a ledger outage during a
   real STOP loses the evidence permanently. Twilio still blocks the number, so
   the consumer is protected; our record of why would not exist. **The same is now
   true of a failed notification:** the 503 is loud, and nothing redelivers it.
@@ -758,6 +785,81 @@ preferable for either is **unresolved and not decided here**.
 before activation, not a production incident, and **no production behaviour
 changed**.
 
+## Unsuppression / re-opt-in — DESIGNED, NOT BUILT
+
+Settled 15 September 2026. **Design only — no code, no migration, no endpoint,
+no test, no configuration, and nothing in production changed.** Full reasoning:
+`docs/updates/2026-09-15-unsuppression-reoptin-decision.md`.
+
+**The core rule:** an `unsuppressed` event **lifts a block and never grants
+anything**. Sending requires **two independent keys** — no active block **and** a
+live, evidenced consent — and unsuppression turns exactly one of them. So
+`START` still cannot become a grant by any route, and a number that has been
+unsuppressed is still unsendable until a fresh grant is captured.
+
+**Decided, and binding on the future implementation:**
+
+- **A separate endpoint**, `api/operator-unsuppress.js`, with its own secret and
+  its own ledger credential. `api/operator-action.js` is **not** extended —
+  `tools/check.mjs` guard 7 and its tests, which forbid `EVENT_TYPE.UNSUPPRESSED`
+  there, **stay exactly as they are**.
+- **No automatic path writes `unsuppressed`.** Every such event carries a named
+  human actor, a written attestation, and one of two **origin-neutral** reason
+  codes — `consumer_request`, or **`recorded_in_error`** with a **mandatory**
+  `error_origin` (`operator` / `classifier` / `system` / `undetermined`). A
+  suppression recorded in error can originate from the operator, the classifier
+  or the system, and an append-only compliance row must not assert a cause it
+  cannot establish. Each event also names the suppression it corrects, in three
+  layers, **never guessed**. The capability token is minted off-platform, is
+  scoped to one number and one channel, and expires in 24 hours.
+- **A channel that becomes unblocked has its permission status written to
+  `never_granted` AND all five of its `cst_*_consent_*` artefacts cleared.**
+  A consent timestamp, number and disclosure version describing a grant no
+  longer in force is history parked in the current-state record. The ledger
+  keeps strictly more — including the full disclosure text HubSpot never held.
+  **The stated cost:** clearing a global lane can destroy a live grant the
+  consumer never withdrew, and re-consent is then required. Priced deliberately.
+- **Two kinds of clearance, and the distinction is load-bearing.** `sms`,
+  `ai_voice` and `all` are independent lanes and `all` dominates both. A
+  **`consumer_request`** unsuppression clears the lane it names — the consumer
+  asked for that channel back. A **`recorded_in_error`** unsuppression
+  invalidates **only the specific blocking events it names, by `dedupe_key`**;
+  everything it does not name survives. So correcting one erroneous suppression
+  **cannot erase an unrelated legitimate STOP**, and a mistaken correction is
+  bounded to the row it targeted. Clearing `all` still does not clear an older,
+  independently given `sms` refusal.
+- **`db/003` needs TWO functions.** `get_suppression_state()` keeps its name,
+  signature and return shape for gate 8. A **new `get_active_blocks(phone)`**
+  is required so a correction can name what it invalidates — one number, no
+  enumeration, no table `SELECT`, `SECURITY DEFINER`, fixed `search_path`,
+  `REVOKE EXECUTE … FROM PUBLIC`. **The gate 8 sender role does not get it**;
+  it has no use for event identity.
+- **Send-time enforcement denies if EITHER the ledger or HubSpot says blocked.**
+  A stale or failed projection therefore fails toward *less* communication, and
+  a hand-edited CRM field cannot unsuppress anything.
+- **`db/003` will be required.** `db/002`'s `get_suppression_state()` folds only
+  `suppressed`/`revoked` and is blind to `unsuppressed`, so suppression is
+  permanent by construction today. **`db/002` is applied and is not edited.**
+- **Twilio's opt-out lock is separate from ours** and the first implementation
+  will not touch it. **Verified by independent review against current official
+  Twilio documentation:** the Consent Management API supports re-opt-in; a
+  Messaging Service STOP can create opt-out records at **both** the Messaging
+  Service level and the individual sender level; an API re-opt-in must clear or
+  update **both**; and a consumer `START` or a configured opt-in keyword can
+  remove Twilio's block. That makes the merged claim *"nothing we write makes a
+  Twilio-blocked number deliverable again"* **stale** — corrected beside the
+  original in the gate 7 decision document. **The policy is unchanged**: the
+  capability sharpens the governance question rather than answering it. The
+  API's wire-level detail — request shapes, field names, rate limits — is
+  **not** covered by that verification and is still to be confirmed. No agent
+  session read those pages; egress to `twilio.com` is blocked here.
+
+**One gap in existing code was found and deliberately NOT fixed**, because the
+change was design-only: `buildSuppressionEvent()` validates `event_type` with
+`requireText()`, which accepts **any** non-empty string, so a typo'd event type
+could enter an unamendable table and be invisible to every fold. Recorded as
+implementation step 2 of the plan, not widened into.
+
 ## Sequenced follow-ups from the transport work
 
 0. ~~Both gate 7 endpoints answer without deciding the connection.~~ **Done** —
@@ -789,6 +891,7 @@ Open one of these only when the task actually needs it.
 |---|---|
 | **The lead body read** — the two defects, the 5 s arithmetic, the 408, the mutation proofs, the five follow-ups | `docs/updates/2026-09-11-lead-body-read-bounds.md` |
 | **The gate 7 connection lifecycle** — the shared predicate, both response boundaries, the static guard rewrite, the raw-socket matrix | `docs/updates/2026-09-11-gate-7-connection-lifecycle.md` |
+| **Unsuppression / re-opt-in** — the two-key rule, lane folding, the future `db/003` contract, the operator security model, Twilio reconciliation | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |
 | **Why this project's engineering rules exist** — the defects that earned them | **`docs/ENGINEERING-LESSONS.md`** — read the relevant entry, not the archive |
 | Rule rationale, Phase 1 contract | `docs/PHASE-1-HANDOFF.md` §6 — do not read wholesale |
 | HubSpot consent schema, §6/§6a verification, rollback | `docs/updates/2026-09-09-hubspot-consent-setup.md` |

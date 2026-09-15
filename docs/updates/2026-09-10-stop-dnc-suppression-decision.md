@@ -317,6 +317,37 @@ cleared. That asymmetry is deliberate and follows directly from §2.3.
 
 - **We cannot override Twilio.** Nothing we write makes a Twilio-blocked number
   deliverable again.
+
+  > **Correction, 15 September 2026 (unsuppression design).** The sentence above
+  > is **stale**, and the original is left unedited so the claim and its
+  > correction can both be seen. **Current Twilio documentation indicates a
+  > Consent Management API can clear an opt-out record programmatically** — and
+  > that a full re-opt-in requires clearing **two** records, one keyed by the
+  > Messaging Service SID and one by the specific `From` number, after which
+  > Twilio's blocks are lifted. So it is no longer true that nothing we write
+  > can make a blocked number deliverable.
+  >
+  > **This changes the capability, not the policy.** Writing an opt-in record to
+  > Twilio asserts to our provider that we hold consent, so
+  > `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` §8 decides that
+  > the first implementation **calls no Twilio API at all**: our lock and
+  > Twilio's stay separate, and Twilio reconciliation is a later, separately
+  > approved step. The consumer-originated `START` asymmetry described above is
+  > unchanged and still correct.
+  >
+  > **Provenance, updated 15 September 2026.** The capability statements above
+  > are **verified by independent review against current official Twilio
+  > documentation** — specifically: the Consent Management API supports
+  > re-opt-in; a Messaging Service STOP can create opt-out records at **both**
+  > the Messaging Service level and the individual sender level; an API
+  > re-opt-in must clear or update **both**; and a consumer `START` or a
+  > configured opt-in keyword can remove Twilio's block. The earlier caveat that
+  > these were unverified search summaries is withdrawn **for those statements
+  > only**. The API's wire-level detail — request shapes, field names, rate
+  > limits, timeouts — is **not** covered by that review and must still be
+  > confirmed before use. No agent session read those pages: egress to
+  > `twilio.com` and `help.twilio.com` is blocked by this environment's network
+  > proxy, so the verification is the reviewer's and is attributed to them.
 - **Our record can lag or fail without a message getting through.** That is a
   genuine safety margin, and not an excuse to treat the webhook as optional —
   the ledger is the evidence, and evidence that is missing is evidence we cannot
