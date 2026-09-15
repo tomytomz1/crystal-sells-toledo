@@ -177,9 +177,72 @@ Schema in the production HubSpot portal:
   unchanged by the Brand approval and must not be reordered without a separate
   decision.**
 
-  **PROVENANCE. All of the above is OPERATOR-SUPPLIED EVIDENCE** — one console
-  screenshot and one Twilio email. No agent session logged into Twilio, queried
-  the Twilio API, or independently verified any of it. **No Twilio action was performed or simulated**, no
+  **THE SOURCE IS NOW CAMPAIGN-READY; THE DEPLOYED SITE IS NOT — and the gap
+  between those two sentences is the whole remaining blocker.** Verified on
+  15 September 2026 by building with the flag ON and reading the generated
+  HTML rather than the templates:
+
+  - All **four** form pages — `index`, `contact`, `home-value`,
+    `43551-seller-review` — render the consent block **exactly once**: two
+    **separate** checkboxes, both **unchecked**, neither `required`, with
+    distinct field names, and no consent control among the required fields.
+  - The disclosure shown to the visitor is **byte-identical** to the string
+    `api/_lib/consent.mjs` records as the consent evidence — checked by
+    comparing the rendered label against `SMS_CONSENT.html` and
+    `AI_VOICE_CONSENT.html`, not by reading both and assuming.
+  - Every form page carries **both** the Privacy Policy and Communications
+    Terms links; `/privacy` and `/communications-terms` are both generated and
+    **indexable** (no `noindex`), so a reviewer can actually reach them.
+  - **With the flag OFF — production today — zero pages carry a checkbox,
+    `/communications-terms` is not built at all, and the privacy messaging
+    section is absent.** A reviewer visiting right now would find no opt-in
+    surface to approve.
+
+  **One real gap was found and closed in the source** (not in production): the
+  **Privacy Policy** did not state the message frequency or *"Message and data
+  rates may apply"*. Twilio rejects a website-opt-in campaign with **error
+  30908 — "Compliant Privacy Policy Required"** when the policy behind the
+  opt-in lacks those, alongside the mobile-information non-sharing statement
+  the page already had. The opt-in **checkbox** already carried both phrases
+  verbatim; **30908 is about the policy page, which is reviewed on its own.**
+  Both are now in `src/partials/privacy-messaging.html`, worded consistently
+  with the checkbox.
+
+  **The campaign use case was also wrong and is corrected.** The worksheet said
+  *"Customer Care / Conversational (low volume)"*. Per Twilio, a **Sole
+  Proprietor Brand has exactly one campaign use case available: `Sole
+  Proprietor`** — the multi-use-case menu belongs to Standard brands, so the
+  old answer named an option the Console will not offer. The **use case** is
+  the registration category; the **campaign description** is what explains that
+  the traffic is conversational customer care. Twilio states the Sole
+  Proprietor use case conveys nothing about purpose, which is why the
+  description decides approval. Also recorded: a Sole Proprietor campaign may
+  carry **only one** 10DLC number.
+
+  **THE NEXT OPERATOR ACTIONS, IN ORDER. None has been performed.**
+
+  1. **Add or confirm the Production consent-ledger credential** if the current
+     implementation requires it — `CONSENT_LEDGER_URL` is set in **Preview
+     only** today, and `api/lead.js` withholds the `cst_*` grant when the
+     ledger append fails, so enabling the feature without it would capture
+     consent that is never made durable.
+  2. **Set `COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production.**
+  3. **Redeploy.**
+  4. **Verify the live opt-in and legal pages** — checkbox visible, unchecked,
+     optional; `/privacy` and `/communications-terms` reachable and carrying
+     the disclosures.
+  5. **Only then create and submit the A2P Campaign**, selecting use case
+     **`Sole Proprietor`**.
+
+  **Steps 1–5 are operator actions in external systems and none was performed
+  or simulated by any agent session.**
+
+  **PROVENANCE. All of the Twilio state above is OPERATOR-SUPPLIED EVIDENCE** —
+  one console screenshot and one Twilio email. No agent session logged into
+  Twilio, queried the Twilio API, or independently verified any of it. The
+  campaign use-case and privacy-policy requirements were verified against
+  **Twilio's own published documentation**, which is a different claim: it
+  establishes what Twilio *requires*, not what our Twilio account *contains*. **No Twilio action was performed or simulated**, no
   Campaign was created, no Messaging Service was configured, no number was
   assigned, no webhook was configured and no SMS was sent.
 
