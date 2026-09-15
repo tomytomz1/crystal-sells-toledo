@@ -317,6 +317,29 @@ cleared. That asymmetry is deliberate and follows directly from §2.3.
 
 - **We cannot override Twilio.** Nothing we write makes a Twilio-blocked number
   deliverable again.
+
+  > **Correction, 15 September 2026 (unsuppression design).** The sentence above
+  > is **stale**, and the original is left unedited so the claim and its
+  > correction can both be seen. **Current Twilio documentation indicates a
+  > Consent Management API can clear an opt-out record programmatically** — and
+  > that a full re-opt-in requires clearing **two** records, one keyed by the
+  > Messaging Service SID and one by the specific `From` number, after which
+  > Twilio's blocks are lifted. So it is no longer true that nothing we write
+  > can make a blocked number deliverable.
+  >
+  > **This changes the capability, not the policy.** Writing an opt-in record to
+  > Twilio asserts to our provider that we hold consent, so
+  > `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` §8 decides that
+  > the first implementation **calls no Twilio API at all**: our lock and
+  > Twilio's stay separate, and Twilio reconciliation is a later, separately
+  > approved step. The consumer-originated `START` asymmetry described above is
+  > unchanged and still correct.
+  >
+  > **Provenance, stated rather than implied:** that research came from search
+  > results on official Twilio domains, **not** from pages fetched in that
+  > session — egress to `twilio.com` and `help.twilio.com` is blocked by this
+  > environment's network proxy. It must be re-verified against the live
+  > documentation before anything depends on it.
 - **Our record can lag or fail without a message getting through.** That is a
   genuine safety margin, and not an excuse to treat the webhook as optional —
   the ledger is the evidence, and evidence that is missing is evidence we cannot
