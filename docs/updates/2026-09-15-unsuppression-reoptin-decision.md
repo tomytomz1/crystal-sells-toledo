@@ -107,7 +107,7 @@ not "already safely wired"; it is a gap (§12.1).
 | Option | Verdict |
 |---|---|
 | Clear our lock and treat SMS as deliverable | **Rejected** — false, and §8 shows why. |
-| Automatically call Twilio's Consent Management API as part of unsuppression | **Rejected for the first implementation** — §8.3. It asserts consent to our provider on our own initiative. |
+| Automatically call Twilio's Consent Management API as part of unsuppression | **Rejected for the first implementation** — §8.4. It asserts consent to our provider on our own initiative. |
 | Clear our lock only; Twilio reconciliation is a **separate, explicit, later** operator step | **CHOSEN** |
 
 ---
@@ -144,6 +144,15 @@ that decided it:
   record that claims to be history. This document states that plainly because
   the enum's *name* invites the stronger reading, and the stronger reading would
   be false for someone who did once grant.
+
+  **Corrected 15 September 2026, and the correction largely dissolves the
+  tension.** The first draft wrote `never_granted` and said nothing about the
+  five `cst_*_consent_*` artefacts beside it, which would have left a status of
+  *"no permission"* sitting next to a consent timestamp, a consent phone and a
+  disclosure version — an incoherent pair, and history parked in a
+  current-state store. **Those five fields are now cleared with the status**
+  (§10.3). `never_granted` alongside five empty fields is an unambiguous
+  statement about **current permission**, which is what the property is for.
 - `revoked` was considered and **rejected as a deadlock**. `applyChannel()`
   returns `pending_reoptin` — not a grant — whenever the prior status is
   `REVOKED` or `SUPPRESSED`. Writing `revoked` on unsuppression would mean a
@@ -159,7 +168,7 @@ that decided it:
 | A new web form with the consent box ticked, against a suppressed state | `reoptin_requested` (today: `pending_reoptin`) | **No.** Invariant 4. |
 | A spoken request during a call | `reoptin_requested`, recorded by the operator | **No, not on its own.** |
 | **Crystal receives an explicit request from the consumer and acts on it** | `reoptin_requested` **and** `unsuppressed` | **Yes** — `reason_code = consumer_request`, with an attestation naming what she saw and when, and the consumer's verbatim words where she holds them. |
-| **The operator is correcting an accidental or mistaken suppression she made** | `unsuppressed` | **Yes** — `reason_code = operator_error`. No consumer request exists and none is claimed. |
+| **A suppression was recorded that should not have been** — whatever caused it | `unsuppressed` | **Yes** — `reason_code = recorded_in_error`, with a **mandatory** `error_origin`. No consumer request exists and none is claimed. |
 | A number may have been reassigned | nothing | **No.** A suspicion is not a request. Only an affirmative request from the **current** holder reaches the row above. Reassignment-detection services remain explicitly out of scope, as in gate 7 §2.3. |
 
 **The governing rule:**
@@ -168,17 +177,114 @@ that decided it:
 > named human actor, one of exactly two reason codes, and a written
 > attestation.**
 
-A prior `reoptin_requested` is **not required** — the `operator_error` case has
-none, and requiring one would push the operator toward manufacturing a request
-that did not happen. But the workflow records **which** of the two
-justifications applies, and they are not interchangeable.
+A prior `reoptin_requested` is **not required** — the error case has none, and
+requiring one would push the operator toward manufacturing a request that did
+not happen. But the workflow records **which** of the two justifications
+applies, and they are not interchangeable.
+
+#### `recorded_in_error`, not `operator_error` — corrected 15 September 2026
+
+The first draft named the second reason **`operator_error`**. That is wrong in
+an append-only compliance record, and wrong twice over.
+
+**It asserts a cause that may be false.** A suppression that should not exist
+can arise from at least three origins, and the operator is only one of them:
+
+| Origin | Example |
+|---|---|
+| **operator** | a misread message, a mis-click, the wrong scope chosen on the confirmation page |
+| **classifier** | `api/_lib/optout.mjs`'s deterministic phrase matching firing on a message that was not an opt-out. Gate 7 §2.5 **chose** a bias toward suppressing and named the false positive an accepted cost — *"recoverable by an explicit human unsuppression"*. This is that recovery, and filing it under operator error would misattribute a designed trade-off to a person. |
+| **system** | a mis-parsed webhook, a wrong number normalisation, a bad backfill, a replayed event — anything where neither a human nor the classifier judged wrongly but a row landed anyway |
+
+**And it names the wrong person.** `operator_error` labels the one human in the
+loop — the person *correcting* the problem — as the one who caused it, on a row
+that can never be amended. **An append-only compliance record must not record
+false provenance**, and a field that is right one time in three is a field that
+records false provenance two times in three.
+
+**Decision — a two-level model, and the second level is mandatory:**
+
+- **`reason_code` stays a closed set of exactly two**, and both are
+  **origin-neutral** about cause:
+
+  | `reason_code` | Means |
+  |---|---|
+  | `consumer_request` | the consumer asked to come back, and a human acted on it |
+  | `recorded_in_error` | **the suppression should not have been recorded.** It asserts nothing whatever about who or what caused it |
+
+  Keeping `reason_code` two-valued keeps the compliance-level answer — *did they
+  ask, or was it a mistake?* — readable by every future consumer without
+  knowing a taxonomy of causes.
+
+- **When `reason_code = recorded_in_error`, `metadata.error_origin` is
+  MANDATORY**, from a closed set:
+
+  `operator` · `classifier` · `system` · `undetermined`
+
+  Mandatory, because an optional provenance field is where truth goes to die:
+  the whole point is that the origin must be *stated*, and a blank is
+  indistinguishable from an unasked question.
+
+**`undetermined` is deliberate and is not an escape hatch.** The alternative is
+forcing the operator to pick a cause she cannot actually establish — and a
+plausible guess written into an unamendable compliance row is strictly worse
+than a recorded *"this was not determined"*. It fails honest rather than fails
+plausible, and it leaves the question visibly open for whoever reads the row.
+Where she **can** establish the origin she must record it; `undetermined` is for
+where she genuinely cannot, and the attestation says why.
+
+**Both levels are required and neither substitutes for the other.**
+`reason_code` answers the compliance question; `error_origin` answers the
+diagnostic one; the attestation says what actually happened in words. A
+classifier false positive recorded as `recorded_in_error` / `classifier` is
+also the only way this system will ever surface that its phrase matching is
+mis-firing.
+
+#### Which suppression is being corrected
+
+*"What exact suppression was this correcting?"* must be answerable years later,
+and the first draft did not answer it at all.
+
+An `unsuppressed` row carries a **`metadata.corrects` object**, built in three
+layers by how well each is known. **No layer is ever guessed.**
+
+| Field | Source | When present |
+|---|---|---|
+| `corrects.suppressed_at` | the **pre-append fold** — `get_suppression_state()` read **before** the append, for the lane being cleared | **always.** Machine-derived; never operator-supplied |
+| `corrects.source`, `corrects.source_event_id`, `corrects.event_type` | **operator-supplied** — she holds the `MessageSid` from the notification email and the confirmation page she used | when known |
+| `corrects.dedupe_key` | derived from the three fields above, matching the earlier row's own key (e.g. `twilio:<MessageSid>:sms:suppressed`) | **only when all three are present** |
+
+**Absent, never fabricated.** Where the operator cannot identify the originating
+event, the second and third layers are simply absent. A reconstructed
+`dedupe_key` that points at no row is false provenance in a new costume, and a
+partial reconstruction is worse than a gap because it looks authoritative.
+
+**`corrects.provenance` records which of these are machine-derived and which
+are asserted by the operator**, so a future reader never has to guess whether a
+field came from a database read or from a human's recollection.
+
+**This forces a read BEFORE the append, and that is an implementation
+constraint, not a nicety.** After the append the lane is cleared and
+`get_suppression_state()` no longer returns it, so `suppressed_at` is
+unrecoverable from the fold. The endpoint therefore performs **two** reads:
+
+> **read (pre-append) → append → read (post-append) → project**
+
+The pre-read supplies `corrects.suppressed_at`; the post-read supplies the
+resulting blocked set the page must show (§7.6). Doing the pre-read at GET time
+instead would be wrong — the state can change between rendering and submitting.
+
+**This is also the strongest justification for the `EXECUTE` grant in §6.4**:
+without a read the event could not say what it corrected, and an unsuppression
+that cannot name what it undid is not an audit record.
 
 ### 4.3 C — Who may perform it, and how
 
 The decisions are in §7. In summary: **a separate endpoint, a separate secret, a
 capability that is not minted online, a 24-hour scoped token, an explicit scope
-with no default, a mandatory attestation, a last-four-digits confirmation, and a
-GET that still writes nothing.**
+with no default, a mandatory attestation, a last-four-digits confirmation, an
+unselected reason code — plus a mandatory `error_origin` when that reason is
+`recorded_in_error` — and a GET that still writes nothing.**
 
 ### 4.4 D — Channel scope
 
@@ -370,17 +476,88 @@ beside it, so the mis-pairing `db/002` corrected cannot reappear. **A
 Connection string `CONSENT_LEDGER_OPERATOR_URL`, Production only, added by a
 human and by no document.
 
-**Why it must exist.** The unsuppression workflow has to append the event *and
-then read back the resulting state*, because the HubSpot projection is only
-truthful if it is computed from the folded ledger rather than from the
-operator's intent (§7.6, §9.2). Neither existing role can do both: the website
-role has no read, and the sender role has no `INSERT` and is reserved for gate 8.
+**Why it must exist.** The unsuppression workflow has to read the fold **twice**
+— once before the append, so the event can name the suppression it corrects
+(§4.2), and once after, so the HubSpot projection is computed from the folded
+ledger rather than from the operator's intent (§7.6, §9.2) — and append between
+them. Neither existing role can do both: the website role has no read, and the
+sender role has no `INSERT` and is reserved for gate 8.
 
-**What it still cannot do.** No `SELECT` on the table. No enumeration — the
-function answers about one number the caller already holds. No `UPDATE`, no
-`DELETE`, no `TRUNCATE`, no DDL. Its blast radius is: append a consent event, and
-ask about one number at a time. That is strictly smaller than the union of the
-two existing roles' *intended* powers and adds no new kind of access.
+#### The blast-radius claim, corrected 15 September 2026
+
+The first draft said this role's powers were *"strictly smaller than the union of
+the two existing roles' intended powers and adds no new kind of access."*
+**That was inaccurate, and in the flattering direction.**
+
+`{INSERT, EXECUTE}` is **exactly** that union, not a subset of it. And while it
+adds no new *kind* of privilege — both already exist, separately — it creates
+**the first credential that holds both at once**, so a single leaked string now
+yields both. That is a real increase in **per-secret** blast radius, and it is
+accepted deliberately rather than argued away.
+
+**What a leaked `consent_ledger_operator` string could actually do:**
+
+| | |
+|---|---|
+| Append arbitrary ledger rows — **including `unsuppressed`** | **Yes.** The grant model constrains no `event_type`; only application code does. **This is not new**: the existing website `INSERT` credential has exactly the same power today, for the same reason. What is new is a *second* string that has it. |
+| Bypass the token, the 24-hour TTL, the attestation and the confirmation | **Yes**, by writing directly. Those controls guard the endpoint, not the grant. |
+| Probe whether a number it already holds is suppressed | **Yes**, one number at a time. |
+| Enumerate the ledger, or learn a number it does not already have | **No.** |
+| `SELECT`, `UPDATE`, `DELETE`, `TRUNCATE`, any DDL | **No.** |
+| Cause a message to be sent | **No.** The two-key rule holds: a forged `unsuppressed` row turns one key, and sending still requires a live evidenced grant this credential cannot create. |
+
+That last row is the reason the accepted risk is bounded rather than open-ended.
+
+#### A vs B — one credential or two
+
+| | **A — one credential** (`INSERT` + `EXECUTE`) | **B — two credentials** held by the same endpoint |
+|---|---|---|
+| Secrets to provision and rotate | 1 | 2 |
+| A **single** leaked string yields | both capabilities | one capability |
+| A **compromised endpoint** yields | both | **both** — it holds both strings |
+| Failure modes | one connection, one auth path | two of each; partial-configuration states (one present, one absent) become reachable and must be handled fail-closed |
+| Reuses an existing credential? | no | only if it reuses `CONSENT_LEDGER_URL` (the **live lead path's** string) or the sender string reserved for gate 8 — **both rejected** |
+
+**Decision: A, one credential.**
+
+B's only real advantage is against a **partial** leak — one environment variable
+exposed without the other. It does nothing against the case that actually
+matters, a compromised endpoint, because the endpoint holds both strings either
+way. Against that narrow benefit it sets two costs: a second secret to
+provision, rotate and audit, and a new class of partial-configuration state.
+
+And B's clean form requires **two new** credentials. Reusing
+`CONSENT_LEDGER_URL` would couple the unsuppression surface to the **live lead
+path** — one leak becoming a leak for both, and one rotation forcing the other —
+and reusing the sender string would put a credential `docs/CURRENT-STATE.md`
+records as *"in no environment until gate 8"* into a gate 7 endpoint. Both are
+worse than the thing B is trying to fix.
+
+**Preserved under either option, and non-negotiable:** no table `SELECT`, no
+enumeration, no `UPDATE`, no `DELETE`, no `TRUNCATE`, the website role keeps no
+read of any kind, the sender role keeps no write, `SECURITY DEFINER`, the fixed
+`search_path`, and `REVOKE EXECUTE … FROM PUBLIC`.
+
+#### Option C, recorded and deferred — and it is arguably stronger
+
+**No `INSERT` at all.** Give the operator role `EXECUTE` on *two* functions — the
+existing lookup, and a new `SECURITY DEFINER` append function that can insert
+**only** `unsuppressed` rows — and **no table privilege whatsoever**. That is
+strictly smaller than A or B, it removes the forged-row row from the table
+above, and it would make *"this credential can only unsuppress"* a **database**
+property rather than a code convention. `db/001`'s own heading — *"APPEND-ONLY
+IS A DATABASE GRANT, NOT A CODE CONVENTION"* — is the argument for it, and it
+would deliver rows-affected reporting (§12.2) for free.
+
+**Not chosen now**, for one reason worth stating plainly: it moves the insert
+statement and its column discipline out of `appendSuppressionEvents()` and into
+SQL, creating a **second implementation** of a rule this repository keeps in one
+place — and `SUPPRESSION_COLUMNS` and the function signature would then be free
+to drift apart silently.
+
+**It can be adopted later without revisiting a single decision in this
+document**, because it only narrows a grant. Recorded as a sequenced option, not
+as a gap.
 
 ### 6.5 Indexes
 
@@ -420,7 +597,7 @@ touched.**
    `CONSENT_LEDGER_OPERATOR_URL` (§6.4).
 
 The existing guard 7 stays exactly as it is, and a **new** guard asserts the
-mirror invariant on the new file (§12.4).
+mirror invariant on the new file (§12.5).
 
 ### 7.2 The capability is not minted online
 
@@ -478,9 +655,15 @@ GET renders and writes nothing — invariant 11, non-negotiable. POST requires
    displays the number — it must, so she can see what she is acting on, the same
    disclosure the sealed token already carries — and re-typing four digits is a
    cheap, scanner-proof guard against clearing the wrong line;
-5. **the reason code**, `consumer_request` or `operator_error`, presented as an
-   unselected choice **with no default**. They are not interchangeable and the
-   system must not guess.
+5. **the reason code**, `consumer_request` or `recorded_in_error`, presented as
+   an unselected choice **with no default**. They are not interchangeable and the
+   system must not guess;
+6. **when the reason is `recorded_in_error`, an `error_origin`** — `operator`,
+   `classifier`, `system` or `undetermined` — also unselected, also no default.
+   A missing origin on an error correction is a 400 that writes nothing;
+7. **optionally, the originating event's identifiers** (`source`,
+   `source_event_id`) so the row can name the suppression it corrects (§4.2).
+   Left blank they are **absent** from the event, never reconstructed.
 
 ### 7.5 What is deliberately *not* added
 
@@ -491,7 +674,7 @@ GET renders and writes nothing — invariant 11, non-negotiable. POST requires
   one operator, a sealed capability, no session store to compromise.
 - **No "unsuppress any number" endpoint.** Every token is one number, one scope,
   24 hours.
-- **No automatic Twilio call** (§8.3).
+- **No automatic Twilio call** (§8.4).
 
 ### 7.6 The page must report the resulting state, not the intent
 
@@ -509,41 +692,69 @@ concludes the number is reachable while a global DNC still blocks it.
 
 ## 8. G — Twilio reconciliation
 
-### 8.1 Research provenance, stated before the findings
+### 8.1 Research provenance — updated 15 September 2026
 
-**The Twilio documentation pages could not be fetched from this environment** —
-`www.twilio.com` and `help.twilio.com` are blocked by the network egress proxy.
-What follows comes from **search results returned by official Twilio domains**,
-which surfaced Twilio's own documentation text in summary form.
+**The provider capabilities in §8.2 are VERIFIED.** An **independent review
+against current official Twilio documentation** confirmed them. The first draft
+of this section described them as unverified search-result summaries requiring
+re-verification before anything relied on them; **for the four capability
+statements below, that caveat no longer applies and has been withdrawn.**
 
-**Nothing below is quoted from a page this session actually read**, and every
-API-level specific must be re-verified against the live documentation and the
-Twilio Console **at implementation time, before any of it is relied on**. It is
-recorded here because it materially changes a decision, not because it is
-settled fact.
+**Two things remain true and are kept, because the distinction matters:**
 
-### 8.2 What current Twilio documentation indicates
+1. **This session still could not fetch the pages.** `www.twilio.com` and
+   `help.twilio.com` are blocked by this environment's network egress proxy, so
+   nothing here is quoted from a page an agent in this session read. The
+   verification is the independent review's, and is attributed to it rather than
+   claimed as this document's own.
+2. **The verification covers the four capability statements, not the API's
+   surface detail.** The request shapes, field names, rate limits and timeouts
+   in §8.3 came from search summaries and were **not** individually confirmed by
+   that review. They are still to be checked against the live documentation and
+   Console at implementation time.
 
-1. A STOP-class keyword puts the number on a **blocked list**; subsequent
-   outbound messages fail asynchronously with **error 21610**.
-2. **`START` and `UNSTOP` from the consumer undo the block**, and the `START`
-   must be sent **to the same sender ID** the `STOP` went to.
-3. A **Consent Management API** now exists and can record opt-in entries
-   programmatically. Per current documentation, a full re-opt-in requires
-   clearing **two** underlying records — one keyed by the **Messaging Service
-   SID** and one by the **specific `From` number** — after which Twilio's blocks
-   are lifted.
-4. That API reports rate limits (≈100 requests/minute), a ≈3 s timeout, and
-   fields including `contact_id`, `correlation_id`, `sender_id`, `status`,
-   `source` and `date_of_consent`. Toll-free network-level opt-out overrides are
-   handled separately.
+That split is the whole of the correction: **capabilities — settled; wire-level
+specifics — not yet.**
 
-### 8.3 What this changes, and what it must not
+### 8.2 Verified provider behaviour
 
-**A statement in the repository is now stale.** The gate 7 decision document
-§2.4 says *"We cannot override Twilio. Nothing we write makes a Twilio-blocked
-number deliverable again."* Per current Twilio documentation that is **no longer
-accurate**. A dated correction is added beside it; the original is not edited.
+Confirmed by independent review against current official Twilio documentation:
+
+1. **The Consent Management API supports re-opt-in.**
+2. **A Messaging Service STOP can create opt-out records at BOTH levels** — a
+   Messaging Service-level record **and** an individual sender-level record.
+3. **API re-opt-in requires clearing or updating both relevant records.**
+   Clearing one leaves the other blocking.
+4. **A consumer `START`, or a configured opt-in keyword, can remove Twilio's
+   block.**
+
+Point 2 is the one that changed most: the first draft recorded *that* two
+records must be cleared, and now records *why* — a single STOP can create both.
+
+### 8.3 Surrounding detail, NOT covered by that verification
+
+Still from search summaries, still to be confirmed at implementation time:
+
+- a STOP-class keyword puts the number on a blocked list, and subsequent
+  outbound messages fail asynchronously with **error 21610**;
+- a consumer `START` must be sent **to the same sender ID** the `STOP` went to;
+- the API's reported rate limit (≈100 requests/minute), its ≈3 s timeout, and
+  fields including `contact_id`, `correlation_id`, `sender_id`, `status`,
+  `source` and `date_of_consent`;
+- that toll-free network-level opt-out overrides are handled separately.
+
+**None of these changes a decision below.** They are recorded so the
+implementation knows which statements it inherited as verified and which it must
+still establish for itself.
+
+### 8.4 What this changes, and what it must not
+
+**A statement in the repository is stale, and this is now settled rather than
+suspected.** The gate 7 decision document §2.4 says *"We cannot override Twilio.
+Nothing we write makes a Twilio-blocked number deliverable again."* Independent
+review against current official Twilio documentation confirms that is **no
+longer accurate** (§8.2). A dated correction is added beside it; the original is
+not edited.
 
 **The capability existing does not make it ours to use casually. It sharpens the
 governance question rather than answering it.** Writing an opt-in record to
@@ -562,8 +773,11 @@ this workflow exists to fix.
 3. **The first implementation calls no Twilio API.** Our lock only. Twilio
    reconciliation is a separate, later, separately-approved step with its own
    decision document.
-4. **When it is built, it clears both records** — Messaging Service SID and
-   `From` number — because clearing one leaves the other blocking.
+4. **When it is built, it clears both records** — Messaging Service SID **and**
+   `From` number. **Verified:** a Messaging Service STOP can create an opt-out
+   record at *both* levels, and an API re-opt-in must clear or update **both**;
+   clearing one leaves the other blocking. A reconciliation that handled only
+   one would look successful and deliver nothing.
 5. **Nothing in this system may state that SMS is deliverable until Twilio's own
    state has been read back and observed compatible.** Not inferred from a 200
    on our own write. The same observer-side rule as everywhere else here.
@@ -575,10 +789,18 @@ this workflow exists to fix.
 ## 9. H — Failure semantics
 
 Order of operations, unchanged in shape from the suppression path and for the
-same reason — **evidence first, projection second**:
+same reason — **evidence first, projection second** — with a **second read added
+on 15 September 2026** because the event must be able to name what it corrected:
 
-> append `unsuppressed` → read back the folded state → project to HubSpot →
-> (later, separately, manually) Twilio.
+> **read the fold (pre-append)** → append `unsuppressed` → **read the fold
+> (post-append)** → project to HubSpot → (later, separately, manually) Twilio.
+
+The **pre**-read supplies `corrects.suppressed_at` (§4.2) and is unrecoverable
+afterwards — once the lane is cleared the fold no longer returns it. The
+**post**-read drives the projection and the resulting-state page (§7.6). A
+failure of the **pre**-read is a 400 that appends nothing: an unsuppression that
+cannot say what it undid is not an audit record, and proceeding without one
+would trade the evidence for the convenience.
 
 **The property that makes every failure below survivable:** *unsuppression never
 grants*. A partially applied unsuppression cannot cause a message, because the
@@ -665,10 +887,20 @@ alone.
 | `cst_sms_suppressed_at` | ✔ cleared to `""` | — | as above |
 | `cst_sms_suppression_reason` | ✔ cleared to `""` | — | as above |
 | `cst_sms_permission_status` | ✔ `never_granted` | — | as above |
+| `cst_sms_consent_at` | ✔ cleared to `""` | — | as above |
+| `cst_sms_consent_phone` | ✔ cleared to `""` | — | as above |
+| `cst_sms_consent_source` | ✔ cleared to `""` | — | as above |
+| `cst_sms_consent_page` | ✔ cleared to `""` | — | as above |
+| `cst_sms_consent_copy_version` | ✔ cleared to `""` | — | as above |
 | `cst_do_not_call` | — | ✔ `"false"` | ✔ **only if** the `ai_voice` lane is also unblocked |
 | `cst_do_not_call_at` | — | ✔ cleared to `""` | as above |
 | `cst_do_not_call_reason` | — | ✔ cleared to `""` | as above |
 | `cst_ai_voice_permission_status` | — | ✔ `never_granted` | as above |
+| `cst_ai_voice_consent_at` | — | ✔ cleared to `""` | as above |
+| `cst_ai_voice_consent_phone` | — | ✔ cleared to `""` | as above |
+| `cst_ai_voice_consent_source` | — | ✔ cleared to `""` | as above |
+| `cst_ai_voice_consent_page` | — | ✔ cleared to `""` | as above |
+| `cst_ai_voice_consent_copy_version` | — | ✔ cleared to `""` | as above |
 | `cst_do_not_contact` | — | — | ✔ `"false"` |
 | `cst_do_not_contact_at` | — | — | ✔ cleared to `""` |
 | `cst_do_not_contact_reason` | — | — | ✔ cleared to `""` |
@@ -687,7 +919,7 @@ easily missed requirement in this document.
 `toHubSpotSuppressionProperties()`'s discipline: that one only ever sets a flag
 *true* and never clears; this one only ever clears a block and sets
 `never_granted`, and **has no code path to `granted` at all**. A static guard
-enforces it (§12.4).
+enforces it (§12.5).
 
 **The two `cst_reoptin_requested_*` properties are left untouched.** They neither
 block nor grant; they record that someone asked. Clearing them would destroy the
@@ -698,6 +930,111 @@ read as a stale request after a clearance is accepted and stated.
 writes `cst_do_not_contact = false` but leaves `cst_sms_suppressed = true` when
 an independent SMS STOP is still in force — matching scenario 1 exactly, and the
 reason the projection must be computed rather than patched.
+
+### 10.3 The five consent artefacts are cleared with the status
+
+**Decided 15 September 2026, correcting a gap in the first draft**, which wrote
+`cst_*_permission_status = never_granted` and said nothing about the five
+`cst_*_consent_*` fields beside it.
+
+That silence would have produced this state, and it is not defensible:
+
+```
+cst_sms_permission_status  = never_granted      "we hold no permission"
+cst_sms_consent_at         = 2026-03-01T…       "…granted on 1 March"
+cst_sms_consent_phone      = +1419555…          "…for this number"
+cst_sms_consent_copy_version = v2               "…under disclosure v2"
+```
+
+**Decision: when a channel actually becomes unblocked, all five of that
+channel's consent artefacts are cleared to `""` alongside the status** —
+`consent_at`, `consent_phone`, `consent_source`, `consent_page` and
+`consent_copy_version`.
+
+**Why, in the architecture's own terms.** `docs/CURRENT-STATE.md` is explicit:
+the HubSpot `cst_*` properties are **current state**, the ledger is **history**.
+A `consent_at` describing a grant that is no longer in force is a historical
+fact stored in the current-state record — precisely the conflation the three-
+record architecture exists to prevent, and the same class of error as leaving a
+`suppressed` status behind a cleared flag.
+
+**Nothing evidential is lost, and this is checkable rather than asserted.** The
+original grant is in the ledger as a `consent_selected` row carrying
+`consent_copy_version` **and** `consent_copy_text` — the full disclosure, which
+HubSpot never held at all. The ledger is append-only and the application holds no
+`UPDATE` or `DELETE`, so clearing a CRM projection cannot touch it. **The
+evidence store keeps strictly more than the field being cleared.**
+
+**Nothing downstream needs them.** Checked against the code rather than assumed:
+
+- **The resolver never reads them after this.** `resolve()` returns
+  `NO_CONSENT` at step 4 on a `never_granted` status and never reaches the
+  `consent_phone` comparison at steps 5/6.
+- **A later grant overwrites them wholesale.** `applyChannel()` on a fresh
+  ticked submission returns a completely new channel object — `status`,
+  `consent_at`, `consent_phone`, `consent_version`, `consent_source`,
+  `consent_page` — so cleared fields are repopulated by the consent that
+  actually applies.
+- **On a submission with no new consent** `applyChannel()` spreads the prior
+  channel unchanged, so cleared fields stay cleared. No path resurrects them.
+
+**And leaving them is the actively dangerous option.** `fromHubSpotConsentProperties()`
+returns `consent_phone`, `consent_at` and `consent_version` from those fields
+regardless of status. Any future reader — gate 8, a HubSpot workflow, a report,
+a list-building query — that looks at `cst_sms_consent_at` without also reading
+the status would treat a dead grant as a live one. That is the exact mirror of
+the suppression bug this document is fixing: **a field combination a reader
+interprets as permission that is not there.** The two-key rule protects the
+resolver; it does not protect a CRM view or a workflow someone builds later.
+
+**Only when the channel actually becomes unblocked.** If the `sms` lane is
+cleared but SMS remains blocked by the `all` lane, **nothing is written for
+SMS** — not the status, not the artefacts. The whole projection follows the
+folded state (§9.2), and the artefacts follow the status they sit beside.
+
+**Cleared, not deleted, and only what changed is written.** The projection sets
+these to the empty string, consistent with `toHubSpotDateTime()`'s existing
+empty-string convention, and omits any field already empty — the same
+"write only what changed" discipline the consent path already uses.
+
+**Not relied upon:** whether HubSpot's own per-property history would retain the
+previous values. It may; it has not been verified here, and no part of this
+decision rests on it. The argument stands on the ledger alone.
+
+#### The cost this makes concrete, stated rather than discovered later
+
+Clearing the artefacts exposes a consequence the first draft never had to face,
+and it is a real cost:
+
+> A contact can hold a **live SMS grant** and *then* be blocked by a **global
+> DNC**, because `toHubSpotSuppressionProperties()`'s global cascade sets
+> `cst_sms_suppressed = true` and **does not touch
+> `cst_sms_permission_status`** — which can still read `granted`, with the
+> parser's conservative reading doing the blocking.
+>
+> Clear that `all` lane and SMS becomes unblocked. This projection then writes
+> `never_granted` and empties the five artefacts — **destroying a grant the
+> consumer never withdrew.**
+
+**That is intended, and it is not softened even for `recorded_in_error`.**
+
+Restoring the grant in the error case is option A from §3.1 arriving through the
+back door, and it would arrive on the **weakest evidence in the whole design** —
+an operator self-certifying that a suppression was a mistake. The two-key rule
+does not admit exceptions for the cases where the person turning the key is also
+the person attesting that it should be turned.
+
+**So the cost is: a suppression recorded in error, once cleared, also costs the
+consumer's prior grant, and re-consent is required before anything can be sent.**
+That is one lost lead and one conversation, against the alternative of a route by
+which a self-attested mistake resurrects a permission. Priced deliberately, and
+the operator runbook (§16, step 8) must say so in plain words, because an
+operator who does not know this will be surprised by it.
+
+**The grant itself is not lost as evidence** — the `consent_selected` row, with
+its disclosure version and full copy text, is in the ledger and cannot be
+altered. What is lost is its *force*, which is exactly what an unsuppression is
+not allowed to hand back.
 
 ---
 
@@ -714,9 +1051,9 @@ reason the projection must be computed rather than patched.
 | `source` | **`operator`** (`SOURCE_OPERATOR`) — a human did this, and no other source may |
 | `source_event_id` | the **approval id** minted with the token. **Not** a `MessageSid`: there may be no message. Colon-free |
 | `dedupe_key` | `operator:<approval_id>:<channel>:unsuppressed`, via the existing `dedupeKey()` |
-| `reason_code` | `consumer_request` \| `operator_error` — a **new closed vocabulary**, `UNSUPPRESSION_REASON` |
+| `reason_code` | `consumer_request` \| `recorded_in_error` — a **new closed vocabulary**, `UNSUPPRESSION_REASON`. Both are **origin-neutral**; neither asserts a cause (§4.2) |
 | `evidence_text` | the consumer's **verbatim words**, only when the operator holds them; otherwise `NULL`. **Never the operator's prose** |
-| `metadata` | `{ approval_id, approved_by: "operator", entered_via: "operator_unsuppress", token_v, attestation, request_channel, request_observed_at, prior_blocked_lanes, twilio_reconciled: false }` |
+| `metadata` | `{ approval_id, approved_by: "operator", entered_via: "operator_unsuppress", token_v, attestation, request_channel, request_observed_at, prior_blocked_lanes, twilio_reconciled: false }`, plus **`error_origin`** (mandatory when `reason_code = recorded_in_error`: `operator` \| `classifier` \| `system` \| `undetermined`) and **`corrects`** (`{ suppressed_at, source?, source_event_id?, event_type?, dedupe_key?, provenance }` — §4.2; absent layers are absent, never fabricated) |
 | `submission_id`, `form_type`, `page_path`, `consent_copy_*` | `NULL` — an unsuppression is about a number, not a submission, and it agrees to no disclosure |
 
 **The years-later question — *"why did this number become eligible to
@@ -760,8 +1097,11 @@ None of this is done. It is the implementation contract.
 - **Widen the documented contract** to name `unsuppressed`, and say what it
   means. Constraint 7 of the brief is correct: the enum existing is not the
   same as the contract admitting it.
-- Add `UNSUPPRESSION_REASON` (`consumer_request`, `operator_error`) — in
-  `api/_lib/consent.mjs` beside `SUPPRESSION_REASON`, which it parallels.
+- Add **`UNSUPPRESSION_REASON`** (`consumer_request`, `recorded_in_error`) and
+  **`UNSUPPRESSION_ERROR_ORIGIN`** (`operator`, `classifier`, `system`,
+  `undetermined`) — in `api/_lib/consent.mjs` beside `SUPPRESSION_REASON`, which
+  they parallel. Both closed and frozen; `error_origin` is **required** whenever
+  the reason is `recorded_in_error` and the builder must fail closed without it.
 
 ### 12.2 Rows-affected reporting
 
@@ -770,7 +1110,16 @@ count. `runStatement()` currently discards its result. Without this the
 unsuppression path cannot tell a genuine clearance from a replay, and §9.1's
 first defence does not exist.
 
-### 12.3 `api/_lib/permission.mjs`
+### 12.3 `api/_lib/hubspot-consent-state.mjs`
+
+- A new **unsuppression projection writer**, the mirror of
+  `toHubSpotSuppressionProperties()`. It clears blocks, writes
+  `never_granted`, and **clears all five `cst_*_consent_*` artefacts for any
+  channel that actually becomes unblocked** (§10.3). It has **no code path to
+  `granted`**, and writes nothing for a channel that stays blocked.
+- It takes the **folded state**, not a scope, so it cannot be driven from intent.
+
+### 12.4 `api/_lib/permission.mjs`
 
 - A new **pure** function `suppressionFromLedgerRows(rows)` turning lane rows
   into the `state.suppression` shape the resolver already consumes, applying the
@@ -780,7 +1129,7 @@ first defence does not exist.
 - `applySuppression()` gains **no** inverse. Nothing in this module clears
   anything; the comment saying so stays true.
 
-### 12.4 New endpoint and new guards
+### 12.5 New endpoint and new guards
 
 - `api/operator-unsuppress.js` — GET renders, POST writes, the response boundary
   decides the connection exactly as the other two endpoints now do.
@@ -794,19 +1143,23 @@ first defence does not exist.
     `CONSENT_SELECTED` must be unreachable from it;
   - a **new guard**: the unsuppress endpoint must contain no path writing
     `granted` to any `cst_*_permission_status`;
+  - a **new guard**: the projection writer must never emit
+    `permission_status = never_granted` without also clearing that channel's
+    five `cst_*_consent_*` artefacts — the incoherent pair of §10.3 must be
+    statically unreachable, not merely untested;
   - a **new guard**: its GET must not reach any write call — the mirror of guard
     6;
   - `OPERATOR_UNSUPPRESS_SECRET` and `CONSENT_LEDGER_OPERATOR_URL` added to
     `SECRET_NAMES`, so the build fails if either reaches a browser.
 
-### 12.5 `db/003`
+### 12.6 `db/003`
 
 Per §6. New function body, new role, restated hardening, restated grants, and
 its own verification block written in the same style as `db/001` and `db/002` —
 **stating which credential runs which statement**, because that is the point of
 the exercise.
 
-### 12.6 Not code — the operator's minting tool
+### 12.7 Not code — the operator's minting tool
 
 `tools/mint-unsuppress-token.mjs`, run off-platform. It must refuse to run
 against a secret shorter than the existing minimum, print exactly one URL, and
@@ -866,12 +1219,44 @@ lowest practical real boundary, and for SQL semantics that is a real database):
 20. No path writes `granted`; a mutation that introduces one fails
     `npm run check`.
 21. `cst_reoptin_requested_*` are untouched.
+22. **All five `cst_*_consent_*` artefacts are cleared** for a channel that
+    becomes unblocked — `consent_at`, `consent_phone`, `consent_source`,
+    `consent_page`, `consent_copy_version` (§10.3).
+23. **They are NOT cleared** for a channel that stays blocked by another lane —
+    the scenario-2 shape. Clearing them there would be the mirror defect.
+24. **The incoherent pair is unreachable**: no projection output contains
+    `permission_status = never_granted` together with a non-empty `consent_at`,
+    `consent_phone` or `consent_copy_version`. A mutation removing the artefact
+    clearing must fail this.
+25. **Nothing else reads the cleared fields.** A sweep over every reader of
+    `consent_at` / `consent_phone` / `consent_version` confirming each one also
+    reads the status, so a cleared field cannot strand a caller. This is the
+    test that turns §10.3's argument into evidence.
+26. **A fresh, evidenced consent after an unsuppression grants normally** and
+    repopulates all five — the end-to-end proof that the correction did not
+    deadlock the workflow the way `revoked` would have.
+
+**Reason provenance and the correction reference:**
+
+27. `reason_code` accepts **only** `consumer_request` and `recorded_in_error`;
+    any other value fails closed.
+28. **`recorded_in_error` without an `error_origin` is refused** and writes
+    nothing. `error_origin` accepts only the four closed values.
+29. `consumer_request` with an `error_origin` is refused — the field belongs to
+    the error path only, and accepting it there would invite a meaningless
+    origin on a consumer request.
+30. **`corrects.suppressed_at` is captured from the PRE-append read**, and is
+    present on every `unsuppressed` row. A test that appends first and reads
+    after must fail to produce it — that ordering is the point.
+31. **Absent layers are absent, not fabricated**: with no `source_event_id`
+    supplied, the row carries no `corrects.dedupe_key` and no
+    `corrects.source_event_id`, and `corrects.provenance` says so.
 
 **Evidence:**
 
-22. No phone number, attestation or consumer words in any log line.
-23. No phone number in any URL.
-24. `dedupe_key` shape, and idempotency under a genuine double submit.
+32. No phone number, attestation or consumer words in any log line.
+33. No phone number in any URL.
+34. `dedupe_key` shape, and idempotency under a genuine double submit.
 
 ---
 
@@ -883,11 +1268,18 @@ lowest practical real boundary, and for SQL semantics that is a real database):
 - **That `CREATE OR REPLACE FUNCTION` preserves the ACL** is a documented
   expectation, not a measurement taken here. `db/003` re-issues the grants so
   the outcome does not depend on it, and the verification block must confirm it.
-- **Every Twilio API specific in §8 comes from search-result summaries of
-  official Twilio documentation, not from pages this session fetched** — direct
-  access to `www.twilio.com` and `help.twilio.com` is blocked by this
-  environment's network egress proxy. It must be re-verified before anything
-  depends on it.
+- **Twilio, split as of 15 September 2026.** The four **capability** statements
+  in §8.2 are **verified** by independent review against current official Twilio
+  documentation and are no longer listed as unproven. What remains unproven is
+  the **wire-level detail** in §8.3 — request shapes, field names, rate limits,
+  timeouts, the 21610 behaviour and the same-sender `START` requirement — which
+  came from search summaries and was not individually confirmed. Direct access
+  to `www.twilio.com` and `help.twilio.com` is blocked by this environment's
+  egress proxy, so no agent in this session read those pages; the verification
+  is the reviewer's and is attributed to them.
+- **That Twilio's two-record clear behaves end-to-end as described** is still
+  unproven **in this system**: no call has been made, and the policy is that the
+  first implementation makes none.
 - **The externally supplied Twilio/TCR facts in §15 were supplied by the
   operator and are not independently verified from this environment.**
 - **Nothing here has run.** Both gate 7 endpoints are inert, no operator row has
@@ -941,18 +1333,24 @@ here.
    restated hardening and grants, and the verification block. Applied by the
    owner, off Vercel. Tests 1–10.
 2. **Ledger hardening** — closed vocabularies in `buildSuppressionEvent()`,
-   real rows-affected from `appendSuppressionEvents()`, `UNSUPPRESSION_REASON`.
+   real rows-affected from `appendSuppressionEvents()`, and both new closed
+   sets: `UNSUPPRESSION_REASON` and `UNSUPPRESSION_ERROR_ORIGIN`, with
+   `error_origin` **required** on `recorded_in_error`. Tests 27–29.
    Independently valuable and a prerequisite for §9.1. *(Steps 1 and 2 are the
    only two that could be reordered; everything after depends on both.)*
 3. **`suppressionFromLedgerRows()`** — the pure lane→channel fold, with
    scenarios 1–3 as tests. No endpoint yet.
 4. **The unsuppression projection** — the HubSpot writer, computed from the
-   folded state, with the round-trip test 18 and the guard forbidding `granted`.
+   folded state: clears the blocks, writes `never_granted`, **clears the five
+   consent artefacts** (§10.3), writes nothing for a channel that stays blocked.
+   Tests 18, 20–26 — which include the two guards forbidding `granted` and the
+   incoherent pair.
 5. **The token family** — separate secret, separate HKDF info, 24-hour TTL,
    sealed scope. Tests 13, 14, 16.
-6. **`api/operator-unsuppress.js`** — GET/POST split, the four POST
-   requirements, the resulting-state page. Tests 11, 12, 15, 17, 19, 22–24.
-   New `tools/check.mjs` guards.
+6. **`api/operator-unsuppress.js`** — GET/POST split, the **seven** POST
+   requirements (§7.4), the **two** ledger reads in the order
+   read → append → read → project, and the resulting-state page. Tests 11, 12,
+   15, 17, 19, 27–34. New `tools/check.mjs` guards.
 7. **`tools/mint-unsuppress-token.mjs`** — the off-platform minting tool.
 8. **Operator runbook**, in `docs/`: when to unsuppress, what an attestation
    must contain, and the explicit statement that clearing our lock does not make
@@ -973,7 +1371,47 @@ and security even though the deliverable is prose. The full diff was re-read
 cold against `CLAUDE.md`, `docs/CURRENT-STATE.md`, `docs/WORKFLOW.md` and the
 modules the design touches.
 
-### What the review changed
+### The second pass — a correction round on the merged-but-unmerged draft
+
+**Four further corrections were made on 15 September 2026, after independent
+review of the first version of this document** (PR #32 at `ce6d2e2`). They are
+listed first because three of them corrected statements that were *wrong*, not
+merely incomplete:
+
+1. **The projection left history in a current-state store.** It wrote
+   `permission_status = never_granted` and said nothing about the five
+   `cst_*_consent_*` artefacts beside it. Now they are cleared with the status
+   (§10.3) — and writing that section exposed a real cost the draft had never
+   had to face: clearing an `all` lane can destroy a live SMS grant the consumer
+   never withdrew. **Recorded and priced rather than softened.**
+2. **`operator_error` recorded false provenance.** A suppression that should not
+   exist can originate from the operator, the classifier or the system, and the
+   draft's single reason code asserted a cause that is wrong about two-thirds of
+   the time — while naming the person *correcting* the problem as its cause, on
+   a row that can never be amended. Now `recorded_in_error` (origin-neutral)
+   plus a **mandatory** closed `error_origin` (§4.2).
+3. **The event could not say what it corrected.** *"What exact suppression was
+   this correcting?"* had no answer at all. Now a three-layer `corrects` object,
+   never guessed — which forced a **second ledger read, before the append**,
+   because after it the fold no longer returns the cleared lane (§9).
+4. **The `consent_ledger_operator` blast-radius claim was inaccurate in the
+   flattering direction** — *"strictly smaller than the union"* when it is
+   **exactly** the union, and is the first credential to hold both capabilities
+   at once. Corrected, with an explicit A/B comparison, a chosen option, and a
+   stronger option C recorded rather than quietly omitted (§6.4).
+
+**Separately, the Twilio provenance was updated, not corrected**: independent
+review verified the four capability statements against current official Twilio
+documentation, so §8.2 no longer carries the unverified-search-summary caveat.
+The **policy is unchanged** — the first implementation still calls no Twilio
+API, and the two locks stay separate. The wire-level detail in §8.3 remains
+unverified and says so.
+
+**Correction-delta review of that round** found one further material item — the
+grant-destruction consequence in §10.3, now stated — and two numbering slips in
+test cross-references. No third pass.
+
+### What the first review changed
 
 Four things, all of them corrections to this document's own first draft:
 
@@ -1001,7 +1439,7 @@ Four things, all of them corrections to this document's own first draft:
 
 **The attestation.** One person, acting alone, can lift a block on her own
 written say-so, with no counter-signature and no artifact the consumer produced —
-because `evidence_text` is optional and `operator_error` has no consumer request
+because `evidence_text` is optional and `recorded_in_error` has no consumer request
 behind it at all. A reviewer would say: *your suppression path requires a
 consumer action and your unsuppression path requires a sentence.*
 
@@ -1020,15 +1458,29 @@ Second, a reviewer would point at **`never_granted` written for someone who did
 once grant** (§4.1) — literally false read as history. The defence is that the
 property is current state by architecture, the ledger is history, and the
 alternative deadlocks; but the document must not pretend the tension is absent,
-so §4.1 states it.
+so §4.1 states it. **The 15 September correction narrows this considerably**:
+with the five consent artefacts cleared alongside the status (§10.3), the CRM no
+longer holds a dead grant's timestamp, number and disclosure version beside a
+status that says there is no permission.
 
-Third: **the Twilio research provenance** (§8.1), which is search summaries
-rather than fetched pages.
+Third, and this is the sharpest thing left: **`error_origin` is asserted by the
+same person whose own mistake is one of its four possible values.** Nothing
+stops an operator recording `classifier` for what was in fact her own misreading.
+The design's answer is not that this is prevented — it is that
+`recorded_in_error` **does not depend on the origin being right**: the compliance
+classification is origin-neutral, `error_origin` is a diagnostic beside it, and
+the attestation says what happened in words. A reviewer may fairly say a
+self-reported diagnostic is weak evidence, and they would be correct; it is
+recorded as a diagnostic, not offered as proof.
+
+Fourth: **the Twilio provenance**, now materially narrower (§8.1). The four
+capability statements are verified by independent review; the wire-level detail
+in §8.3 is not, and no agent in this session read the pages.
 
 > **"What guarantee does the prose claim that the proposed implementation would
 > still need to prove?"**
 
-Six, and §14 exists so none of them is smuggled:
+Seven, and §14 exists so none of them is smuggled:
 
 - **that the folding SQL is correct** — it has run against nothing. The
   equal-timestamp tie-break and the delayed-webhook case are both reasoning, and
@@ -1040,7 +1492,12 @@ Six, and §14 exists so none of them is smuggled:
   round-trip proves it;
 - **that the projection cannot run on a replay** — it depends on a rows-affected
   report that does not exist yet;
-- **that Twilio's two-record clear behaves as described**;
+- **that Twilio's two-record clear behaves end-to-end in this system** — the
+  *capability* is verified (§8.2), but nothing here has exercised it, and the
+  wire-level detail in §8.3 is still unconfirmed;
+- **that the five cleared consent artefacts are genuinely not read anywhere
+  else** — §10.3 argues it from `resolve()` and `applyChannel()`; only test 25's
+  sweep proves no other reader exists;
 - **that the resulting-state page actually prevents the scenario-2
   misunderstanding** — a claim about a human being, which no test settles.
 

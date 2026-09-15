@@ -804,9 +804,21 @@ unsuppressed is still unsendable until a fresh grant is captured.
   `tools/check.mjs` guard 7 and its tests, which forbid `EVENT_TYPE.UNSUPPRESSED`
   there, **stay exactly as they are**.
 - **No automatic path writes `unsuppressed`.** Every such event carries a named
-  human actor, one of two reason codes (`consumer_request` / `operator_error`),
-  and a written attestation. The capability token is minted off-platform, is
+  human actor, a written attestation, and one of two **origin-neutral** reason
+  codes — `consumer_request`, or **`recorded_in_error`** with a **mandatory**
+  `error_origin` (`operator` / `classifier` / `system` / `undetermined`). A
+  suppression recorded in error can originate from the operator, the classifier
+  or the system, and an append-only compliance row must not assert a cause it
+  cannot establish. Each event also names the suppression it corrects, in three
+  layers, **never guessed**. The capability token is minted off-platform, is
   scoped to one number and one channel, and expires in 24 hours.
+- **A channel that becomes unblocked has its permission status written to
+  `never_granted` AND all five of its `cst_*_consent_*` artefacts cleared.**
+  A consent timestamp, number and disclosure version describing a grant no
+  longer in force is history parked in the current-state record. The ledger
+  keeps strictly more — including the full disclosure text HubSpot never held.
+  **The stated cost:** clearing a global lane can destroy a live grant the
+  consumer never withdrew, and re-consent is then required. Priced deliberately.
 - **An `unsuppressed` event clears exactly the lane it names.** `sms`, `ai_voice`
   and `all` are independent lanes; `all` dominates both but clearing `all` does
   not clear an older, independently given `sms` refusal.
@@ -817,12 +829,18 @@ unsuppressed is still unsendable until a fresh grant is captured.
   `suppressed`/`revoked` and is blind to `unsuppressed`, so suppression is
   permanent by construction today. **`db/002` is applied and is not edited.**
 - **Twilio's opt-out lock is separate from ours** and the first implementation
-  will not touch it. **Current Twilio documentation indicates a Consent
-  Management API can now clear it**, which makes the merged claim *"nothing we
-  write makes a Twilio-blocked number deliverable again"* **stale** — corrected
-  beside the original in the gate 7 decision document. That research came from
-  search summaries of official Twilio domains, **not** from pages fetched here
-  (egress to `twilio.com` is blocked), and must be re-verified before use.
+  will not touch it. **Verified by independent review against current official
+  Twilio documentation:** the Consent Management API supports re-opt-in; a
+  Messaging Service STOP can create opt-out records at **both** the Messaging
+  Service level and the individual sender level; an API re-opt-in must clear or
+  update **both**; and a consumer `START` or a configured opt-in keyword can
+  remove Twilio's block. That makes the merged claim *"nothing we write makes a
+  Twilio-blocked number deliverable again"* **stale** — corrected beside the
+  original in the gate 7 decision document. **The policy is unchanged**: the
+  capability sharpens the governance question rather than answering it. The
+  API's wire-level detail — request shapes, field names, rate limits — is
+  **not** covered by that verification and is still to be confirmed. No agent
+  session read those pages; egress to `twilio.com` is blocked here.
 
 **One gap in existing code was found and deliberately NOT fixed**, because the
 change was design-only: `buildSuppressionEvent()` validates `event_type` with

@@ -335,11 +335,19 @@ cleared. That asymmetry is deliberate and follows directly from §2.3.
   > approved step. The consumer-originated `START` asymmetry described above is
   > unchanged and still correct.
   >
-  > **Provenance, stated rather than implied:** that research came from search
-  > results on official Twilio domains, **not** from pages fetched in that
-  > session — egress to `twilio.com` and `help.twilio.com` is blocked by this
-  > environment's network proxy. It must be re-verified against the live
-  > documentation before anything depends on it.
+  > **Provenance, updated 15 September 2026.** The capability statements above
+  > are **verified by independent review against current official Twilio
+  > documentation** — specifically: the Consent Management API supports
+  > re-opt-in; a Messaging Service STOP can create opt-out records at **both**
+  > the Messaging Service level and the individual sender level; an API
+  > re-opt-in must clear or update **both**; and a consumer `START` or a
+  > configured opt-in keyword can remove Twilio's block. The earlier caveat that
+  > these were unverified search summaries is withdrawn **for those statements
+  > only**. The API's wire-level detail — request shapes, field names, rate
+  > limits, timeouts — is **not** covered by that review and must still be
+  > confirmed before use. No agent session read those pages: egress to
+  > `twilio.com` and `help.twilio.com` is blocked by this environment's network
+  > proxy, so the verification is the reviewer's and is attributed to them.
 - **Our record can lag or fail without a message getting through.** That is a
   genuine safety margin, and not an excuse to treat the webhook as optional —
   the ledger is the evidence, and evidence that is missing is evidence we cannot
