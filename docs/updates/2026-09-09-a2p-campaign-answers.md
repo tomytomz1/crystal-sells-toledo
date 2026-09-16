@@ -1,30 +1,29 @@
-# Twilio A2P 10DLC Campaign — prepared answers
+# Twilio A2P 10DLC Campaign — current registration answers
 
-**Date:** 2026-09-09
-**Status:** **PREPARED ONLY. Nothing has been submitted to Twilio or TCR.**
+**Originally prepared:** 2026-09-09  
+**Current status:** **REJECTED — error 30882 (Terms & Conditions), remediation in progress.**
 
-This is a worksheet for whoever registers the Campaign. Do not submit it until
-the website consent flow is actually live (`COMMUNICATIONS_CONSENT_ENABLED=true`
-in production), because the reviewer will visit the opt-in URL and expects to
-see the checkbox and disclosure described below.
+This is the operator worksheet for the existing Crystal Sells Toledo A2P 10DLC
+Campaign. Do not create a duplicate Campaign. Edit and resubmit the rejected one
+after the dedicated SMS legal pages are merged, deployed and verified live.
 
-Twilio number in hand: **+1 419-724-2789** (SMS, MMS, Voice).
+Twilio number: **+1 419-724-2789** (SMS, MMS, Voice).
 
-> **UPDATE — 15 September 2026.** Two Twilio registrations are now approved,
-> and they are different objects:
->
-> - **Primary / Individual Customer Profile — APPROVED** (Twilio email,
->   *"Twilio Primary Customer Profile Approved"*).
-> - **A2P 10DLC Brand — APPROVED**, type **Sole proprietor**, identity
->   **Verified** (Trust Hub screenshot).
->
-> Operator-supplied evidence; no agent queried Twilio. **The A2P Campaign is
-> still NOT created, submitted or approved** — the Brand Details view showed a
-> *"Create campaign"* button and no linked Campaign. **This changes nothing
-> about the sequencing below.** The Campaign must still not be submitted until
-> the reviewer can see the live opt-in surface.
+## Current Twilio object state — 16 September 2026
 
----
+| Object | State |
+|---|---|
+| Primary / Individual Customer Profile | **APPROVED** |
+| A2P 10DLC Brand | **APPROVED** — Sole proprietor, identity verified |
+| Messaging Service | Existing service with the one Crystal Sells Toledo 10DLC number |
+| A2P Campaign | **REJECTED** — error **30882**, Terms & Conditions |
+
+Campaign SID: `CM3425248ff3928f6f9c78894afe908ae6`.
+
+The first submission was received at `2026-09-16T04:43:54.522Z`, entered manual
+review, and was later rejected with 30882. Twilio Console presents **Edit &
+resubmit** for this same Campaign. Campaign rejection does not alter the approved
+Customer Profile or Brand.
 
 ## 1. Business and program
 
@@ -39,211 +38,140 @@ Twilio number in hand: **+1 419-724-2789** (SMS, MMS, Voice).
 
 ## 2. Campaign
 
-> **CORRECTED 15 September 2026 — the use case is `Sole Proprietor`, not
-> "Customer Care / Conversational".** This worksheet said the latter from
-> 9 September until the Brand was approved as a **Sole proprietor** brand.
->
-> Per Twilio's own documentation, **a Sole Proprietor Brand has exactly one
-> campaign use case available in the Console dropdown: `Sole Proprietor`.**
-> The multi-use-case menu (Customer Care, Marketing, Account Notification and
-> so on) belongs to Standard and Low-Volume Standard brands. There is no
-> "Customer Care" option to pick here, so the old answer described a choice
-> the Console will not offer.
->
-> **Two different fields, and keeping them apart is the point:**
->
-> | | |
-> |---|---|
-> | **Campaign use case** | the Twilio *registration category*. For this brand it is fixed: **`Sole Proprietor`**. |
-> | **Campaign description** | free text explaining what the traffic actually is — here, **conversational customer-care** messages answering consumer-initiated inquiries. |
->
-> Twilio is explicit that the Sole Proprietor use case *"doesn't give any
-> substantive indication of the Campaign's purpose, which is why the Campaign
-> description field is an important field in determining whether your Campaign
-> is approved."* **The description now carries the whole burden of explaining
-> the traffic**, which is why it is written out in full below.
->
-> Also per Twilio: a **Sole Proprietor campaign may have only ONE 10DLC phone
-> number attached**. That matches the single number in hand and needs no change
-> here, but it rules out adding a second number later without rethinking the
-> registration.
->
-> **This records what to select. No Campaign has been created or submitted.**
+| Field | Answer |
+|---|---|
+| Campaign use case | **Sole Proprietor** (Twilio records the submitted starter/Sole Proprietor campaign internally as `STARTER`) |
+| Traffic description | Conversational customer-care messages answering consumer-initiated real estate inquiries |
+| Campaign description | Crystal Sells Toledo, operated by Crystal Saylor, a licensed Ohio real estate salesperson affiliated with Key Realty LTD, sends conversational customer-care text messages to people who submit a real estate inquiry at crystalsellstoledo.com and explicitly opt in to SMS using a separate, optional, unchecked consent box. Messages may include replies to the consumer's inquiry, requested home-valuation follow-up, appointment scheduling and reminders, requested property information, and closely related service updates. Messages are sent only in response to or as follow-up on the consumer's own inquiry. This is not a marketing list and no affiliate marketing is conducted. |
+| Message frequency | Varies. Conversational and triggered by the consumer's inquiry; no scheduled marketing blasts. |
+| Marketing | **No.** Inquiry-related first-party customer care only. |
+| Embedded links | **No** in the submitted samples. |
+| Embedded phone numbers | **Yes** — Crystal's own published support number appears in the HELP-style sample. |
+| Age-gated content | **No.** |
+| Direct lending / loan arrangement | **No.** |
+| Affiliate marketing / third-party lead generation | **No.** |
+
+## 3. Opt-in and legal URLs — use these on resubmission
 
 | Field | Answer |
 |---|---|
-| **Campaign use case** (the Twilio registration category) | **Sole Proprietor** |
-| **Traffic description** (what the messages actually are) | Conversational customer-care messages. See the campaign description below. |
-| Campaign description | Replies and follow-up to people who submitted a real estate inquiry on crystalsellstoledo.com and ticked a separate, optional, unchecked box agreeing to text messages. Messages relate to that consumer-initiated inquiry: replies and follow-up about it, requested home-valuation follow-up, appointment scheduling and reminders, requested information, and closely related property or service updates. **Not a marketing list. No affiliate marketing.** Consent is not a condition of service. |
-| Message frequency | Varies. Conversational and triggered by the consumer's own inquiry; no scheduled or recurring campaign sends. |
-| Does the campaign include marketing? | **No.** Inquiry-related customer care only. Any future marketing program would be registered separately with its own consent. |
-| Are links used in messages? | **No** in the current samples. If added later they will be to crystalsellstoledo.com only, never a public URL shortener. |
-| Are phone numbers embedded in messages? | Only Crystal's own published business number, and only in the HELP reply. |
-| Age-gated content? | **No.** |
-| Lending / loan content? | **No.** Crystal is a real estate salesperson, not a lender. No loan offers, rates, terms or applications. |
-| Direct lending or loan arrangement? | **No.** |
-| Affiliate marketing? | **No.** |
+| Opt-in type | **Web Form only** |
+| Primary opt-in URL | https://crystalsellstoledo.com/home-value |
+| Privacy Policy URL | **https://crystalsellstoledo.com/sms-privacy** |
+| Terms & Conditions URL | **https://crystalsellstoledo.com/sms-terms** |
 
-## 3. Opt-in
+The same shared consent block also appears on `/`, `/contact` and
+`/43551-seller-review`.
 
-| Field | Answer |
-|---|---|
-| Opt-in type | Web form, single opt-in via an explicit unchecked checkbox |
-| Opt-in URL | https://crystalsellstoledo.com/home-value (also on `/`, `/43551-seller-review` and `/contact` — the same disclosure, from one shared source) |
-| Privacy policy URL | https://crystalsellstoledo.com/privacy |
-| Terms / messaging terms URL | https://crystalsellstoledo.com/communications-terms |
+### Message flow
 
-### Opt-in flow, as the reviewer will see it
+Users opt in through a web form on `https://crystalsellstoledo.com/home-value`.
+The user enters contact information and a phone number, then sees a separate
+section titled **"How may Crystal follow up? Optional."** The SMS checkbox is
+unchecked by default and is not required to submit the form.
 
-1. A visitor fills in a real estate inquiry form (name, email, phone, property
-   address, timeline, condition).
-2. Above the Submit button, in a bordered block headed **"How may Crystal follow
-   up? Optional"**, are two separate checkboxes. **Both start unchecked. Neither
-   is required. The form submits normally with both left unchecked.**
-3. The SMS checkbox's own label carries the full disclosure:
+To opt in to SMS, the user must affirmatively check the SMS box. The disclosure
+states:
 
 > I agree to receive text messages from Crystal Sells Toledo about my real
 > estate inquiry, appointments, requested information, and related services.
 > Message frequency varies. Message and data rates may apply. Reply STOP to opt
-> out or HELP for help. Consent is not a condition of service. See the
-> **Privacy Policy** and **Communications Terms**.
+> out or HELP for help. Consent is not a condition of service. See the Privacy
+> Policy and Communications Terms.
 
-Privacy Policy and Communications Terms are links.
+The canonical disclosure text and version remain
+`CST_SMS_CONSENT_2026_09_V1`. The 30882 remediation does **not** rewrite that
+historical consent text. The shared consent block adds direct adjacent links to
+the SMS-specific Privacy Policy and Terms & Conditions so the reviewer can move
+from the opt-in surface to the exact legal pages submitted with the Campaign.
 
-4. The second checkbox is a **separate** permission for automated/AI voice calls.
-   It is not part of the SMS consent and neither implies the other.
-5. On submission the server records the choice, the exact wording above, its
-   version identifier (`CST_SMS_CONSENT_2026_09_V1`), the normalised phone
-   number, the page, the timestamp and a submission reference, and stores that
-   with the contact in HubSpot.
+A separate checkbox is used for automated / AI voice calls; SMS consent does not
+imply voice consent. The form can be submitted normally with both permission
+boxes left unchecked.
 
-## 4. Sample consumer messages
+### Opt-in proof field (under 500 characters)
 
-**Sample 1 — first reply to an inquiry**
+> Live opt-in form: https://crystalsellstoledo.com/home-value
+>
+> On Step 2, under “How may Crystal follow up? Optional,” the SMS checkbox is
+> visible, unchecked by default, optional, and next to the full SMS disclosure.
+> The form can be submitted without selecting SMS consent. The same disclosure
+> is also used on the homepage, /contact, and /43551-seller-review.
 
-> Crystal Sells Toledo: Thanks for reaching out about your real estate inquiry.
-> I can help coordinate the next step. Reply STOP to opt out.
+## 4. Sample messages submitted
 
-**Sample 2 — appointment reminder**
+1. `Crystal Sells Toledo: Thanks for your real estate inquiry about [Property Address]. I'll follow up with the information you requested and help with the next step. Reply STOP to opt out.`
+2. `Crystal Sells Toledo: I have an update for your requested home valuation at [Property Address]. Reply here when convenient if you have any questions. Reply STOP to opt out.`
+3. `Crystal Sells Toledo: Your requested appointment is scheduled for [Date] at [Time]. Reply here if you need to reschedule or have any questions. Reply STOP to opt out.`
+4. `Crystal Sells Toledo: I have the property information you requested for [Property Address]. Let me know what questions you have or if you'd like to discuss next steps. Reply STOP to opt out.`
+5. `Crystal Sells Toledo: For help with your real estate inquiry, call (419) 245-4655 or email crystal@crystalsellstoledo.com. Reply STOP to opt out.`
 
-> Crystal Sells Toledo: Reminder about your requested appointment. Reply here if
-> you need to reschedule. Reply STOP to opt out.
+## 5. Initial keyword opt-in
 
-**Sample 3 — requested information**
+Leave the Campaign's initial **Opt-in Keywords** and **Opt-in Message** fields
+blank. Initial enrollment is through the web form, not a text-to-join campaign.
+Twilio Advanced Opt-Out re-subscription keywords such as START / UNSTOP are a
+separate provider configuration and do not change the registered initial consent
+method.
 
-> Crystal Sells Toledo: I have an update related to the information you
-> requested. Reply here when convenient. Reply STOP to opt out.
+## 6. Message contents
 
-## 5. HELP and STOP
+- Embedded links: **No**
+- Phone numbers: **Yes**
+- Direct lending: **No**
+- Age-gated content: **No**
 
-**HELP reply**
+## 7. STOP / HELP provider configuration
 
-> Crystal Sells Toledo: Crystal Saylor, Key Realty LTD. Call (419) 245-4655 or
-> email crystal@crystalsellstoledo.com. Reply STOP to opt out. Msg&data rates
-> may apply.
+The Messaging Service already carries the Crystal Sells Toledo number. Advanced
+Opt-Out has been configured with first-party Crystal Sells Toledo copy for
+opt-out, re-subscription and HELP. The application-side inbound webhook and
+suppression work remain a separate activation gate; provider configuration is not
+permission to send automated traffic.
 
-**STOP behaviour**
+## 8. Error 30882 remediation
 
-- Keywords honoured at minimum: `STOP`, `STOPALL`, `UNSUBSCRIBE`, `CANCEL`,
-  `END`, `QUIT`, plus whatever set Twilio handles at platform level.
-- One confirmation message, then nothing further.
-- Natural language ("please stop texting me") is also treated as an opt-out even
-  though it is not a keyword.
-- The opt-out is written to the contact's suppression record. **Submitting
-  another web form does not clear it** — restoring a stopped number requires a
-  deliberate re-opt-in, including clearing Twilio's own opt-out list.
-- An SMS opt-out does not by itself stop voice calls, and vice versa. A request
-  to stop all contact stops both.
+The first Campaign used the broad legal URLs:
 
-**Opt-out confirmation**
+- `https://crystalsellstoledo.com/privacy`
+- `https://crystalsellstoledo.com/communications-terms`
 
-> Crystal Sells Toledo: You will not receive further text messages. Reply HELP
-> for contact information.
+Those pages are legitimate general website / communications policies but include
+policy scope unrelated to the SMS Campaign. Twilio's current onboarding guidance
+recommends messaging-specific policies because they are easier to review and
+maintain. The remediation therefore creates:
 
-## 6. Crystal's internal operational alert — keep this separate
+- `/sms-privacy` — SMS-only Privacy Policy with explicit mobile / opt-in
+  non-sharing language and no unrelated transaction-sharing or AI-voice scope;
+- `/sms-terms` — SMS-only Terms & Conditions with program description, frequency,
+  rates, STOP, HELP, support contacts, carrier disclaimer, optional consent and
+  explicit no affiliate / third-party lead marketing.
 
-Distinct from everything above. Concept only, **not enabled**:
+See `docs/updates/2026-09-16-a2p-30882-remediation.md` for the implementation and
+verification contract.
 
-> Crystal Sells Toledo: New website lead received. Open HubSpot for details.
+## 9. Resubmission checklist
 
-- Recipient: Crystal's own mobile. One recipient, her own business.
-- Deliberately carries **no** seller name, phone, email, property address,
-  message or notes — a lead notification does not need PII and a phone lock
-  screen is not a private place.
+- [ ] Dedicated `/sms-privacy` merged to `main`
+- [ ] Dedicated `/sms-terms` merged to `main`
+- [ ] Production deployed
+- [ ] Live `/sms-privacy` verified with H1 `Privacy Policy`, Crystal Sells Toledo,
+      the exact SMS non-sharing sentence, and no unrelated transaction-sharing
+      ambiguity
+- [ ] Live `/sms-terms` verified with H1 `Terms & Conditions`, visible `SMS Terms`,
+      frequency, rates, STOP, HELP, support, Privacy link and exact carrier
+      disclaimer
+- [ ] Live `/home-value` verified to show direct adjacent links to both SMS pages
+- [ ] Open the existing rejected Campaign and choose **Edit & resubmit**
+- [ ] Preserve Sole Proprietor use case, campaign description, web-form-only
+      consent method, five sample messages and message-content declarations unless
+      Twilio presents a new field-level issue
+- [ ] Set Privacy Policy URL to `https://crystalsellstoledo.com/sms-privacy`
+- [ ] Set Terms & Conditions URL to `https://crystalsellstoledo.com/sms-terms`
+- [ ] Run **Check Campaign**
+- [ ] Review the final summary and confirm both exact SMS URLs before resubmitting
+- [ ] Resubmit the existing Campaign; do not create a duplicate
 
-**Do not describe this as categorically exempt from 10DLC.** Traffic sent from
-an A2P long code over a Messaging Service is subject to the same registration
-regime regardless of who the recipient is; internal use is a description of
-purpose, not a recognised exemption. If it is ever sent from this number it
-should be covered by a registered campaign, and it should be raised with Twilio
-rather than assumed.
-
-## 7. Before submitting — checklist
-
-- [x] **Twilio Brand / Trust Hub resolved and approved** — 15 September 2026,
-      operator-supplied evidence: Primary/Individual Customer Profile
-      **Approved**, Brand **Approved**, type **Sole proprietor**, identity
-      **Verified**. *(This box covers the Customer Profile and the BRAND only.
-      No Campaign item below is affected by it.)*
-- [x] **`COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production** —
-      set by the operator 15 September 2026, Production redeployed.
-      `CONSENT_LEDGER_URL` set alongside it, using the `consent_ledger_app`
-      `INSERT`-only role.
-- [x] **Both checkboxes visible, unchecked, optional at the opt-in URL** —
-      operator-verified on live `/home-value` after the contrast fix deployed.
-      Separate SMS and AI-voice boxes, both unchecked, section marked
-      Optional, disclosure plainly readable.
-- [x] **https://crystalsellstoledo.com/communications-terms loads** —
-      **reachability operator-verified** by screenshot on the live domain,
-      16 September 2026. **Content verified from deployed source:** message
-      frequency varies, message and data rates may apply, *Reply STOP to opt
-      out*, *Reply HELP for help*, separate AI/automated-voice consent,
-      consent not a condition of service, and the mobile / opt-in
-      non-sharing language. *(No agent loaded the page.)*
-- [x] **Privacy policy carries the mobile-information language** —
-      **reachability operator-verified** by screenshot on the live domain,
-      16 September 2026. **Content verified from deployed source:** mobile
-      information not shared with third parties or affiliates for marketing
-      or promotional purposes, text-messaging opt-in/consent data not shared
-      for third-party marketing, *message frequency varies*, *message and
-      data rates may apply* (error 30908), STOP/HELP language, the Twilio
-      messaging disclosure and a separate AI/automated-voice disclosure.
-      *(No agent loaded the page.)*
-- [ ] HubSpot properties created (see the HubSpot setup document) —
-      **not re-verified in this pass.** HubSpot is **not** a blocker for the
-      inbound endpoint: with it absent the projection is skipped and logged
-      and the ledger row still stands. Confirm separately.
-- [ ] **STOP/HELP inbound webhook actually implemented and LIVE** — the
-      endpoint exists and is audited, but **it is not activated**:
-      `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` (≥ 32 bytes) are in no
-      environment; **`ZOHO_SMTP_*` needs CONFIRMING in Production, not
-      adding** — see `docs/CURRENT-STATE.md` § STOP / HELP inbound activation;
-      no Messaging Service is known to exist and no webhook is configured.
-      **"In code" is not "live."**
-      Without those, every ordinary inbound message answers `503`.
-      **This remains the box that matters most**, and it is the only
-      website-side item still open. See `docs/CURRENT-STATE.md`
-      § STOP / HELP inbound activation for the audited requirement list.
-
-The last box is the one that matters most. Every sample message above promises
-"Reply STOP to opt out". Sending any of them before inbound handling is live
-would be making a promise the system cannot keep.
-
-**UPDATE — 15 September 2026, later the same day: the second box is now
-CLOSED.** `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are
-set in Production, Production is redeployed, and the live opt-in surface has
-been operator-verified. **The blocking item is now the LAST box — STOP/HELP
-inbound activation.** The paragraph below is kept because it records why the
-sequencing existed; it is no longer the open item.
-
-**The blocking item as of earlier on 15 September 2026 was the second box, and
-it was ours, not Twilio's.** `COMMUNICATIONS_CONSENT_ENABLED` is set in Vercel **Preview
-only** and deliberately absent from **Production**, so the production opt-in URL
-does not yet show the SMS consent checkbox and disclosure the reviewer will look
-for. Submitting the Campaign before that is visible invites a rejection for an
-opt-in flow the reviewer cannot see — which is the reason this worksheet has
-said "do not submit until the consent flow is live" since 9 September 2026.
-
-**No Campaign item on this list is complete.** The Campaign has not been
-created, submitted or approved, no number is assigned to a Campaign, and no
-Messaging Service is configured. Brand approval advanced exactly one box.
+**Campaign resubmission is not approval.** Automated outbound SMS remains disabled
+until Twilio approves the Campaign and application Gate 8 is activated and
+verified.
