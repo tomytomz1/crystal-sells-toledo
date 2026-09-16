@@ -1,0 +1,66 @@
+<!-- =====================================================================
+     Privacy: the SMS scope carve-out on the transaction-sharing clause.
+     =====================================================================
+     Rendered into src/pages/privacy.html ONLY when
+     COMMUNICATIONS_CONSENT_ENABLED is "true" at build time - the same
+     gate as privacy-messaging.html, and for two reasons, both load-
+     bearing:
+
+       1. It links to /sms-privacy, which is itself feature-gated. With
+          the flag off that page is not built, and an ungated paragraph
+          would leave a dead internal link on the one page a compliance
+          reviewer is most likely to open. tools/check.mjs catches it.
+       2. With no messaging programme running there is no SMS opt-in data
+          to carve out, and the privacy page's standing rule is that it
+          describes the runtime that actually ships.
+
+     WHY IT EXISTS AT ALL. The paragraph immediately above it in
+     src/pages/privacy.html is ordinary, correct real-estate practice:
+     closing a transaction requires a title company, a lender and an
+     inspector to receive the client's details. It is NOT marketing
+     sharing and it must never be deleted to make a carrier reviewer more
+     comfortable.
+
+     But Twilio rejected this campaign once with error 30882, whose
+     documented causes include policy language that appears to share
+     consumer or mobile opt-in data with third parties. A reviewer
+     arriving at the broad website policy reads "your information is
+     shared" a few lines before finding any SMS-specific answer. So the
+     scope is stated where the ambiguity is, rather than trusting a
+     reader to navigate to /sms-privacy for it.
+
+     WHAT IT MAY NOT SAY. Two overclaims are available here and both are
+     false, so the wording is deliberately narrower than either.
+
+     It may not say that mobile information is never shared in a
+     transaction. An earlier draft said this sharing "does not include
+     mobile information, SMS opt-in data, or SMS consent" - but a title
+     company, lender or inspector completing a transaction the consumer
+     asked for may perfectly legitimately receive that consumer's phone
+     number. Promising otherwise would have been a false promise made to
+     look good to a carrier reviewer, which is the opposite of the point.
+     What is actually true, and what is claimed, is narrower: the SMS
+     OPT-IN and the CONSENT do not travel with the number, so receiving
+     the number confers no permission to text; and mobile information is
+     not sold, nor shared with third parties or affiliates FOR THEIR OWN
+     marketing or promotional purposes.
+
+     It may not say that no system processes SMS information either.
+     Twilio, HubSpot, Neon and Vercel each do, as Crystal's processors,
+     and src/pages/sms-privacy.html names all four. Processing on
+     Crystal's behalf and disclosure to a third party for that party's
+     own marketing are different things, and this paragraph separates
+     them rather than blurring them in the flattering direction.
+     ===================================================================== -->
+      <p><strong>Your SMS opt-in and your SMS consent are never transferred as part of that
+        transaction-related sharing.</strong> A title company, lender or inspector you have chosen
+        to work with may legitimately need your contact details, including your phone number, to
+        complete the transaction you asked for &mdash; but your permission to be texted stays with
+        Crystal. It is not passed on, and nobody who receives your number that way has your
+        permission to text you.</p>
+      <p><strong>Mobile information is not sold, and is not shared with third parties or affiliates
+        for their own marketing or promotional purposes.</strong> The service providers named above
+        process information on Crystal&rsquo;s behalf to operate this website and her messaging and
+        contact systems; that is not permission for them, an affiliate or a lead buyer to market to
+        you. What is collected for text messages, and how consent and opt-out records are kept, is
+        set out in the Crystal Sells Toledo <a href="/sms-privacy">SMS Privacy Policy</a>.</p>

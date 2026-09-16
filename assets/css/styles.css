@@ -266,6 +266,67 @@ p:last-child { margin-bottom: 0; }
 .hero .hv-form .consent,
 .valueform .consent { border-color: var(--desk-line); }
 
+/* The STATIC consent reproduction on /sms-consent-evidence.
+   -----------------------------------------------------------------
+   A2P reviewers need to read the opt-in without running the form, so
+   that page redraws the consent group as plain markup: a <p> where the
+   live block has a <legend>, and a <span> where it has an <input>.
+
+   Every selector here is NEW. Nothing above is edited and no existing
+   element carries `--static`, so the live consent control on the four
+   opt-in surfaces is untouched by this block - which matters, because
+   the consent group has already been regressed twice by CSS that
+   reached it from the side. The group reuses `.consent`, `.consent__
+   item` and `.consent__label`, so the reproduction stays in step with
+   the real control's type, spacing and grid automatically.
+
+   `.consent__box` sizes a native checkbox and paints nothing; a bare
+   span would be invisible, so the static twin draws the box the
+   platform would have drawn. Empty on purpose - an unchecked box has
+   no tick, and the page says "unchecked" in words beside it for anyone
+   not looking at the picture. */
+.consent--static .consent__label,
+.consent--static .consent__legend { cursor: default; }
+.consent__box--static {
+  display: inline-block; box-sizing: border-box; cursor: default;
+  border: 1px solid var(--ink-soft); border-radius: 3px; background: #fff;
+}
+
+/* The evidence screenshot. Bounded by its column and never upscaled past
+   its own pixels, so it stays sharp on a phone and does not blow the
+   prose measure open on a desktop. */
+.evidence-shot { margin: 1.5rem 0; }
+.evidence-shot img {
+  display: block; width: 100%; max-width: 560px; height: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.evidence-shot figcaption {
+  margin-top: .6rem; font-size: .8rem; line-height: 1.5; color: var(--muted);
+}
+
+/* The program facts on /sms-consent-evidence, as a description list so a
+   reader and a parser see the same pairs. Stacked on a phone, two
+   columns once there is room for them. */
+.factlist { margin: 1rem 0 1.5rem; }
+.factlist dt {
+  font-size: .75rem; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.factlist dd { margin: .2rem 0 1rem; }
+.factlist dd a { word-break: break-word; }
+@media (min-width: 40rem) {
+  .factlist { display: grid; grid-template-columns: 13rem 1fr; gap: .1rem 1.5rem; }
+  .factlist dt { padding-top: .15rem; }
+  .factlist dd { margin: 0 0 .9rem; }
+}
+.flowlist li { margin-bottom: .5rem; }
+
+/* Literal URLs printed for a reviewer to copy. Without this they are one
+   unbreakable token: measured on a 360px viewport the list ran 9px past
+   the viewport and scrolled the whole document sideways. */
+.linklist li { margin-bottom: .4rem; }
+.linklist code, .factlist code { overflow-wrap: anywhere; word-break: break-word; }
+
 .hv-form__privacy { margin-top: .5rem; font-size: .78rem; }
 .hv-form__privacy a { color: inherit; text-decoration: underline; opacity: .85; }
 

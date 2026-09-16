@@ -805,11 +805,137 @@ for (const file of pages) {
                             "will not be shared with third parties"])
       if (!privacy.includes(required))
         fail("privacy.html", `does not disclose ${required}, but messaging is enabled`);
+
+    /* The broad website policy legitimately describes transaction-related
+       sharing with a title company, lender or inspector. An A2P reviewer
+       reading that sentence must not be left to guess whether it reaches
+       mobile and SMS opt-in data. The scope statement is what stops
+       error 30882 turning on ordinary real-estate prose.
+
+       Read from the page BODY, with comments stripped. A source comment
+       explaining a rule is not the rule being kept, and this repository
+       has already shipped four content checks that matched their own
+       commentary. */
+    const privacyBody = privacy.replace(/<!--[\s\S]*?-->/g, "");
+    const privacyText = privacyBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    if (!privacyText.includes("SMS opt-in and your SMS consent are never transferred"))
+      fail("privacy.html", "does not say the SMS opt-in and consent are not transferred by transaction-related sharing");
+    if (!privacyText.includes("not sold, and is not shared with third parties or affiliates for their own marketing"))
+      fail("privacy.html", "does not carry the mobile-information no-sale / no-marketing-sharing statement");
+    if (!privacyBody.includes('href="/sms-privacy"'))
+      fail("privacy.html", "does not point at the SMS Privacy Policy that actually governs SMS data");
+    if (!privacyText.includes("title company, lender or inspector"))
+      fail("privacy.html", "lost the transaction-sharing disclosure - the SMS clarification narrows it, it does not replace it");
+    /* The overclaim this wording was corrected AWAY from. A title company
+       completing a transaction the consumer asked for may legitimately
+       receive their phone number; promising otherwise is a false promise
+       that happens to read well to a carrier reviewer. */
+    if (/does not include mobile information/.test(privacyText))
+      fail("privacy.html", "claims transaction sharing excludes mobile information outright - it does not, and only the SMS opt-in and consent are withheld");
+
+    /* Step 1 of the two-step valuation form carries no SMS consent - the
+       checkbox is on step 2 - so its privacy link must not read as the
+       messaging campaign's policy to a crawler that never advances the
+       form. The destination stays /privacy; only the label is pinned.
+       Pages are DISCOVERED, not listed: /43551-seller-review renders the
+       shared partial too, and a hand-written pair of filenames silently
+       exempted it. */
+    const stepOnePages = FORM_PAGES.filter((f) =>
+      existsSync(join(ROOT, f)) && readFileSync(join(ROOT, f), "utf8").includes("hv-form__privacy"));
+    if (!stepOnePages.length)
+      fail("site", "no page renders the step-1 privacy note - the shared valuation form is gone or was renamed");
+    for (const file of stepOnePages) {
+      const html = readFileSync(join(ROOT, file), "utf8");
+      const stepOneLink = /<p class="form__note hv-form__privacy">([\s\S]*?)<\/p>/.exec(html)?.[1];
+      if (!stepOneLink) { fail(file, "step 1 has no privacy link at all"); continue; }
+      if (!stepOneLink.includes("Website Privacy Policy"))
+        fail(file, 'step 1\'s privacy link is not labelled "Website Privacy Policy" - an unqualified label reads as the SMS campaign policy');
+      if (!stepOneLink.includes('href="/privacy"'))
+        fail(file, "step 1's privacy link no longer points at the website policy");
+      if (/sms-privacy|sms-terms/.test(stepOneLink))
+        fail(file, "step 1 links to an SMS policy, but step 1 collects no SMS consent");
+    }
+
+    /* -----------------------------------------------------------------
+       /sms-consent-evidence - the static A2P verification surface.
+       -----------------------------------------------------------------
+       The real opt-in is on step 2 of a JavaScript two-step form, which a
+       crawler may never reach. This page republishes the same disclosure
+       as static text. Two failure modes are worth a build failure: it
+       stops being evidence (the words drift from the canonical source),
+       or it stops being INERT (it grows something submittable). */
+    const evidenceRel = "sms-consent-evidence.html";
+    const evidencePath = join(ROOT, evidenceRel);
+    if (!existsSync(evidencePath)) {
+      fail("site", "/sms-consent-evidence is not built, but it is the published A2P consent evidence surface");
+    } else {
+      const ev = readFileSync(evidencePath, "utf8");
+      /* Scope to <main>. The shared shell's header carries a nav-toggle
+         <button> and the sticky CTA sits after </main>; both are site
+         chrome on every page and neither collects anything. What must be
+         inert is the PAGE, so the guard reads the page's own region.
+         Comments are stripped next, so a guard can never be satisfied -
+         or tripped - by this page's own comment quoting a tag name. */
+      const evMain = /<main[^>]*>([\s\S]*?)<\/main>/.exec(ev)?.[1];
+      const evBody = (evMain ?? "").replace(/<!--[\s\S]*?-->/g, "");
+      const evFlat = evBody.replace(/\s+/g, " ");
+      /* One clear failure rather than a cascade of derived ones: with no
+         region to read, every check below would fail against "". */
+      if (evMain === undefined) fail(evidenceRel, "has no <main> region to check");
+      else {
+
+      /* INERT. A page that can be submitted is a second opt-in surface
+         with no server contract behind it, not evidence of consent. */
+      if (/<form\b/i.test(evBody))
+        fail(evidenceRel, "contains a <form> - the evidence page must not be submittable");
+      if (/<input\b/i.test(evBody))
+        fail(evidenceRel, "contains an <input> - the static representation must not be a real control");
+      if (/<(button|textarea|select)\b/i.test(evBody))
+        fail(evidenceRel, "contains a form control - the evidence page must collect nothing");
+      if (/type="submit"/i.test(evBody))
+        fail(evidenceRel, "contains a submit control");
+      if (evBody.includes("/api/lead"))
+        fail(evidenceRel, "references /api/lead - the evidence page must reach no endpoint");
+      for (const name of CONSENT_BOXES)
+        if (new RegExp('name="' + name + '"').test(evBody))
+          fail(evidenceRel, `carries a ${name} control - evidence must never be able to record consent`);
+
+      /* EVIDENCE. The disclosure must be the canonical one, byte for
+         byte, read from the RENDERED BODY - comments are stripped first
+         so a guard can never be satisfied by a comment quoting itself. */
+      for (const d of [SMS_CONSENT, AI_VOICE_CONSENT])
+        if (!evFlat.includes(d.html.replace(/\s+/g, " ")))
+          fail(evidenceRel, `the reproduced ${d.channel} disclosure does not match the canonical text in api/_lib/consent.mjs`);
+
+      /* The claims the page makes about the real control. */
+      for (const required of ["Crystal Sells Toledo", "/home-value", "/sms-privacy", "/sms-terms",
+                              "How may Crystal follow up?", "Optional",
+                              "starts unchecked", "not required",
+                              "does not collect consent"])
+        if (!evFlat.includes(required))
+          fail(evidenceRel, `is missing the required evidence statement "${required}"`);
+      if (!/consent__box--static/.test(evBody))
+        fail(evidenceRel, "draws no static checkbox representation");
+      if (!/sms-consent-step2\.png/.test(evBody))
+        fail(evidenceRel, "does not publish the opt-in screenshot");
+
+      /* An indexable page. Twilio has to be able to fetch it. */
+      if (/name="robots"[^>]*noindex/.test(ev))
+        fail(evidenceRel, "is noindex - a reviewer's crawler must be able to read it");
+      const sitemap = readFileSync(join(ROOT, "sitemap.xml"), "utf8");
+      if (!sitemap.includes("https://crystalsellstoledo.com/sms-consent-evidence"))
+        fail("sitemap.xml", "omits /sms-consent-evidence");
+      }
+    }
   } else {
     const privacy = readFileSync(join(ROOT, "privacy.html"), "utf8");
     for (const premature of ["Twilio", "Retell AI"])
       if (privacy.replace(/<!--[\s\S]*?-->/g, "").includes(premature))
         fail("privacy.html", `names ${premature} while messaging is off - the page must describe the runtime that ships`);
+    /* Gate off means gate off here too: a page describing an SMS opt-in
+       experience must not be published while there is no SMS programme. */
+    if (existsSync(join(ROOT, "sms-consent-evidence.html")))
+      fail("site", "/sms-consent-evidence is built while the feature is off - it documents a consent flow that does not render");
   }
 
   /* The server half. The browser sends two booleans; everything that gives
