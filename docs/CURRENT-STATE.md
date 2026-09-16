@@ -265,9 +265,11 @@ Schema in the production HubSpot portal:
   is untouched. Measured after: **12.5:1** for the disclosure, **9.8:1**
   for the legend and note, on both dark grounds.
 
-  **CAMPAIGN STATUS IS UNCHANGED: NOT CREATED, NOT SUBMITTED, NOT
+  **CAMPAIGN STATUS AS AT THAT ENTRY: NOT CREATED, NOT SUBMITTED, NOT
   APPROVED.** Enabling the opt-in surface is a prerequisite for submission,
-  not a submission.
+  not a submission. **That is no longer current** — the Campaign was later
+  submitted and rejected. See *A2P Campaign — SUBMITTED, REJECTED 30882*
+  below, which supersedes every campaign-status line in this entry.
 
   **THE WEBSITE-SIDE CAMPAIGN PREFLIGHT IS CLOSED — 16 September 2026.
   STOP/HELP ACTIVATION IS NOT.** Those are two different things and the
@@ -301,9 +303,11 @@ Schema in the production HubSpot portal:
   **What remains is NOT website work.** It is **inbound STOP/HELP activation** —
   Twilio and Vercel configuration. See the STOP/HELP activation section below.
 
-  **Campaign status is unchanged: NOT CREATED, NOT SUBMITTED, NOT APPROVED.**
-  A closed website-side preflight is a prerequisite for submission, not a
-  submission, and **the overall A2P activation is not complete.**
+  **Campaign status at the time of this entry: NOT CREATED, NOT SUBMITTED,
+  NOT APPROVED.** A closed website-side preflight is a prerequisite for
+  submission, not a submission, and **the overall A2P activation is not
+  complete.** **Superseded** — see *A2P Campaign — SUBMITTED, REJECTED
+  30882* below.
 
   **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–5 are now DONE.**
 
@@ -330,6 +334,154 @@ Schema in the production HubSpot portal:
   **Every step here is an operator action in an external system. None was
   performed or simulated by any agent session**, including the four now
   marked done — those are the operator's own report.
+
+### A2P Campaign — SUBMITTED, REJECTED 30882, NOT RESUBMITTED
+
+**This section supersedes every campaign-status claim above it.** The
+entries above were written before a Campaign existed; one now does, and it
+is rejected.
+
+| Twilio object | State — 16 September 2026 | Evidence |
+|---|---|---|
+| Primary / Individual Customer Profile | **APPROVED** | operator-supplied Twilio email |
+| A2P 10DLC Brand | **APPROVED**, Sole proprietor | operator-supplied console screenshot |
+| Messaging Service | **EXISTS**, one 10DLC number attached | operator report |
+| **A2P Campaign** | **SUBMITTED and REJECTED — error 30882, "Terms and Conditions issues"** | operator report |
+| Twilio support ticket **#29582556** | **OPEN**, transferred to Twilio's 10DLC Onboarding team | operator report |
+| Twilio Campaign **"Check for errors"** | still returns *"This registration needs additional review. Our pre-check was unable to verify some of the information you provided."* | operator report |
+
+**Everything in that table is the operator's own report of an external
+system. No agent session has ever opened the Twilio console, and nothing
+in this repository can observe it.**
+
+**THE CAMPAIGN HAS NOT BEEN RESUBMITTED.** The existing rejected Campaign
+is being **edited**, not replaced. The operator has already changed it, by
+hand, to point at the dedicated SMS surfaces — Privacy
+`https://crystalsellstoledo.com/sms-privacy`, Terms
+`https://crystalsellstoledo.com/sms-terms` — with a first-party
+conversational customer-care description, **web form only** as the initial
+opt-in method, **no** opt-in keywords, and an opt-in confirmation message
+carrying frequency, rates, HELP and STOP. **STOP and HELP configuration
+already exists in Twilio and is not this repository's to change.**
+
+#### What was added on 16 September 2026, and the one finding behind it
+
+**THE FINDING: the consent disclosure may not be machine-readable.** The
+real opt-in is on **step 2** of the two-step `/home-value` form. Steps
+toggle with the `hidden` attribute in `assets/js/main.js`, so a crawler
+that does not run the script — or runs it and never clicks *next* — reads
+step 1 and stops. A browser-based external extraction of production
+`/home-value` returned the page and **both SMS legal links**, but **did
+not surface the step-2 SMS disclosure in its extracted text**;
+`/sms-privacy` and `/sms-terms` were directly crawlable. That extraction
+is **operator-supplied evidence of an external tool's behaviour** — it is
+not a measurement of Twilio's verifier, and nobody here knows what
+Twilio's verifier does.
+
+**THE REMEDY: `/sms-consent-evidence`,** a new public page that
+republishes the same consent experience as **static, script-free text** at
+a stable URL. It is a **verification surface, not an opt-in surface**:
+
+- it has **no form, no input, no button, no submit control and no
+  reference to `/api/lead`** — asserted from the rendered page and in a
+  real browser;
+- the disclosure is **not retyped**. It is injected from the same build
+  variables the live checkbox label uses, fed by `api/_lib/consent.mjs`,
+  so the page cannot drift from the wording the server records. A test
+  asserts the evidence page and the live form display the **same string**;
+- the checkboxes are **drawn, unchecked**, and the page says so in words;
+- it carries a **screenshot of the real step 2**, generated by
+  `tools/consent-evidence-shot.mjs` driving the built site in a real
+  browser. The script refuses to publish the image if either box is
+  checked or required, or if any step-2 field carries a value, so the
+  picture cannot disagree with the product or contain anyone's data.
+
+**Two smaller disambiguations shipped with it.** `/privacy`'s legitimate
+transaction-sharing sentence — title company, lender, inspector — is
+**kept**, and a gated paragraph immediately after it now states that the
+**SMS opt-in and SMS consent are never transferred** by that sharing, and
+that **mobile information is not sold, nor shared with third parties or
+affiliates for their own marketing or promotional purposes**. It points
+at `/sms-privacy`.
+
+**It is deliberately narrower than it first shipped.** The first draft
+said the sharing *"does not include mobile information, SMS opt-in data,
+or SMS consent"* — which is **false**, because a title company, lender or
+inspector completing a transaction the consumer asked for may legitimately
+receive that consumer's phone number. Corrected on independent review: the
+page now says the number may be needed, and that what does **not** travel
+with it is the permission to text. It also still does **not** claim that no
+system processes SMS information — Twilio, HubSpot, Neon and Vercel each
+do, as Crystal's processors, and `/sms-privacy` names all four. Both
+overclaims are pinned against by `tools/check.mjs` and by the gate's
+mutation cases. And the
+**step-1 link label** changed from *"Privacy & terms"* to **"Website
+Privacy Policy"**; the destination is still `/privacy`, because step 1
+collects an address under the website policy and carries no SMS consent.
+
+**CONSENT SEMANTICS DID NOT CHANGE.** Not the SMS checkbox wording, not
+the voice wording, not `CST_SMS_CONSENT_2026_09_V1`, not
+`CST_AI_VOICE_CONSENT_2026_09_V1`, not the unchecked default, not the
+optional status, not `api/_lib/consent.mjs`, not the ledger, not
+suppression, not Gate 8.
+
+**NO OUTBOUND AUTOMATION WAS ACTIVATED.** No SMS was sent, no call placed,
+no Twilio object touched, no environment variable changed, no HubSpot,
+Neon or Retell write made.
+
+#### The CI gap this work found, and closed
+
+**`npm test` ran the release gate in the one state production is not in.**
+The gate is `node tools/build.mjs && node tools/check.mjs && node --test
+tests/*.test.mjs`, and `.github/workflows/test.yml` sets no
+`COMMUNICATIONS_CONSENT_ENABLED`. So the single `check.mjs` run in CI had
+`CONSENT_ON === false`, and **every guard inside `if (CONSENT_ON)` was
+never reached** — the checkbox defaults, the canonical-disclosure match,
+the legal-page contract and the A2P surfaces. The guards were real. They
+simply never ran on the gate, while **Vercel Production runs with the flag
+ON.**
+
+`tests/consent-build-gate.test.mjs` closes it. It builds and checks a
+throwaway copy of the repository in **both** flag states, and then proves
+the enabled-path guards are not vacuous: seven mutations — a pre-ticked
+box, a required box, an evidence page whose disclosure stops coming from
+the canonical source, an evidence page that grows a real consent control,
+a privacy page that loses the SMS opt-in carve-out, a privacy page that
+overclaims mobile information is never shared in a transaction, and a
+step-1 label relabelled back — each **pass with the flag OFF and fail with
+the flag ON**. That
+asymmetry is the gap, demonstrated on every run. The throwaway tree is a
+complete copy of every tracked and untracked-but-not-ignored file; the
+working tree is never mutated.
+
+**Production behaviour and environment variables are untouched by that
+fix.** It is a test, not a deployment change.
+
+#### What this does and does not establish
+
+**It does not prove Twilio will approve anything.** It adds
+machine-verifiable consent evidence intended to reduce ambiguity in
+Twilio's pre-check and human review. Whether the pre-check clears, and
+whether a reviewer accepts the surfaces, is unknown and unknowable from
+here.
+
+**Nothing is live until it is deployed.** These are source changes on a
+branch. The live site still serves the previous pages until `main` merges
+and Vercel redeploys, and **a resubmission before that redeploy would be
+reviewed against pages that do not yet carry any of this.**
+
+**THE HUMAN NEXT STEPS, IN ORDER.** Every one is an operator action in an
+external system; none was performed or simulated here.
+
+1. Independent review of the pull request.
+2. Merge, once reviewed and CI is green.
+3. Let Vercel Production deploy.
+4. Verify live: `/sms-consent-evidence`, `/home-value` step 2,
+   `/sms-privacy`, `/sms-terms`.
+5. Re-run Twilio's Campaign **"Check for errors"**.
+6. Follow the guidance on ticket **#29582556**.
+7. **Decide whether and when to resubmit the existing Campaign.** That
+   decision is the operator's. Nothing here schedules or requests it.
 
 ### STOP / HELP inbound activation — audited 15 September 2026, NOT ACTIVATED
 
@@ -1519,6 +1671,32 @@ implementation step 2 of the plan, not widened into.
    create-conflict path (5 requests × 8 s against 30 s). Pre-existing, recorded in
    the source, not introduced or changed by #30.
 5. **`api/lead.js` imports `MAX_BODY_BYTES` and never uses it.**
+6. **`/sms-consent-evidence` is not linked from site navigation.** It is
+   indexable and in the sitemap, so a crawler can reach it, but no page links
+   to it and neither `/sms-privacy` nor `/sms-terms` mentions it. Cross-linking
+   from those two was **deliberately not done** — they are the Campaign's
+   registered URLs and their legal content is not edited casually. The cheaper
+   route is the operator adding the evidence URL to the Campaign's opt-in /
+   message-flow description. Recorded, not actioned.
+7. **`/privacy` still reads substantially like a messaging policy.** The gated
+   `privacy-messaging.html` section names Twilio and Retell and carries message
+   frequency, rates and STOP/HELP, and the page's `<title>` is "Privacy Policy |
+   Crystal Sells Toledo" against `/sms-privacy`'s "Privacy Policy | Crystal
+   Sells Toledo SMS". A reviewer browsing the site could still land on the broad
+   page. **Pre-existing**, from the pre-`/sms-privacy` design; the 16 September
+   carve-out narrows the transaction-sharing ambiguity only. Not widened to
+   absorb it, because retitling or re-scoping a published legal page is a
+   separate decision.
+8. **The evidence screenshot can go stale silently.**
+   `assets/img/sms-consent-step2.png` is regenerated only when someone runs
+   `tools/consent-evidence-shot.mjs`. Nothing fails if the form changes and the
+   image is not re-captured. Pixel comparison was rejected as a guard because
+   font rendering is not stable across environments and the test would flake.
+   What **is** pinned is every claim the image is offered as evidence for — two
+   separate boxes, both unchecked, neither required, the canonical disclosure,
+   the "Optional" legend — each asserted against the live render in
+   `tests/a2p-consent-evidence.test.mjs`. **Regenerate the image in any change
+   that touches the valuation form or the consent block.**
 
 ## Where the detail lives
 

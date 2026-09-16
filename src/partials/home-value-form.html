@@ -64,7 +64,18 @@
     </div>
 
     <p class="form__note hv-form__micro">{{formMicrocopy}}</p>
-    <p class="form__note hv-form__privacy"><a href="/privacy">Privacy &amp; terms</a></p>
+    <!-- A2P 10DLC. Step 1 carries NO SMS consent - the checkbox is on step
+         2 - so this link must not read as the messaging campaign's policy.
+         A crawler that never advances the form sees only this line, and
+         an unqualified "Privacy & terms" here invited a reviewer to treat
+         the broad website policy as the SMS surface. The DESTINATION is
+         unchanged and deliberately still /privacy: step 1 collects an
+         address under the website policy, and pointing it at /sms-privacy
+         would claim an SMS relationship that does not exist yet. Only the
+         label is disambiguated. The step-2 SMS disclosure keeps its own
+         direct /sms-privacy and /sms-terms links, which come from
+         api/_lib/consent.mjs and are not editable here. -->
+    <p class="form__note hv-form__privacy"><a href="/privacy">Website Privacy Policy</a></p>
   </div>
 
   <!-- Step 2 — contact details -->

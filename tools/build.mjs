@@ -383,6 +383,12 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
        runtime that actually ships, and describing Twilio as a processor
        before a single message has been sent would break that. */
     consentMessagingSection: CONSENT_ON ? PARTIALS["privacy-messaging"] : "",
+    /* The SMS carve-out on the broad policy's transaction-sharing clause.
+       Gated for the same reason as the section above, plus one of its
+       own: it links to /sms-privacy, which is itself gated, so an
+       ungated paragraph would leave a dead internal link on the page a
+       compliance reviewer is most likely to open. */
+    consentSmsScopeNote: CONSENT_ON ? PARTIALS["privacy-sms-scope"] : "",
     /* Added ALONGSIDE the existing "Privacy & terms" link rather than
        replacing it. The disclosures link to /communications-terms, so the
        page has to be reachable from ordinary navigation too - but the
