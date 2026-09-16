@@ -164,10 +164,36 @@ export async function lookupDurableSuppression(phone, {
   }
 }
 
+const SENDABLE_CHANNELS = Object.freeze(["sms", "ai_voice"]);
+
 const decisionFor = (channel, state, phone, opts) =>
   channel === "sms"
     ? canSendSms(state, phone, opts)
     : canPlaceAutomatedVoiceCall(state, phone, opts);
+
+/**
+ * Is this an actual dialable target, by the project's canonical rules?
+ *
+ * GATE 8 MUST NOT INHERIT THE PURE RESOLVER'S FALLBACK. permission.mjs does
+ * `target || ch.consent_phone`, which is right for the consent MODEL - it
+ * answers "may this contact be reached on the line they consented to". It is
+ * wrong for Gate 8, whose whole question is "may this channel reach THIS
+ * number right now". Measured before this guard existed:
+ * `authorizeSms({ email })` with no phone reached the CRM pre-decision as
+ * ALLOWED, and was then refused only because toE164() happened to throw
+ * inside the suppression lookup - reported as SUPPRESSION_LOOKUP_UNAVAILABLE,
+ * which sends an operator to debug a database that is fine.
+ *
+ * So the target is validated HERE, before any provider read, and an absent
+ * or unusable one is INVALID_PHONE rather than a dependency story.
+ */
+function usableTarget(phone) {
+  try {
+    return toE164(phone);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Authorize one outbound action by reading BOTH authorities at send time.
@@ -185,6 +211,16 @@ async function authorize(channel, { email, phone } = {}, {
      the decision so there is still exactly one policy engine. */
   if (!consentFeatureEnabled(env))
     return decisionFor(channel, null, phone, { env });
+
+  /* A channel nobody implemented is not a channel that may be sent on. The
+     dispatch below is a two-way ternary, so without this an unknown channel
+     would silently be treated as voice. */
+  if (!SENDABLE_CHANNELS.includes(channel))
+    return { allowed: false, reason: REASON.UNSUPPORTED_CHANNEL };
+
+  /* The target, before anything external is contacted. See usableTarget(). */
+  if (!usableTarget(phone))
+    return { allowed: false, reason: REASON.INVALID_PHONE };
 
   /* Read mutable permission state first. If there is no usable consent there
      can be no send, so no durable lookup is necessary. More importantly, any

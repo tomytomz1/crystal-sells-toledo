@@ -1080,6 +1080,58 @@ for (const file of pages) {
       fail("api/_lib/permission.mjs", `no exported ${fn} - the resolver is the only place permission may be decided`);
 
   /* -------------------------------------------------------------------
+     GATE 8 — THE SEND-TIME AUTHORIZATION BOUNDARY
+     -------------------------------------------------------------------
+     THE BYPASS THIS GUARD EXISTS FOR. `canSendSms()` is PURE. Handed no
+     durable suppression answer it decides on CRM state alone and can
+     return ALLOWED - which is correct for the consent model and
+     catastrophic for a sender, because the phone-keyed ledger is the
+     suppression authority and would never have been consulted. A future
+     Twilio or Retell caller that imports the resolver directly therefore
+     texts people who sent STOP, and every test in the suite still passes.
+
+     Convention cannot carry that. So: inside api/, ONLY
+     api/_lib/send-permission.mjs may name the send predicates. Every other
+     module must go through Gate 8, which performs the durable lookup as
+     its final provider read. Comments are stripped first - a doc comment
+     naming the function is not a call to it.
+     ------------------------------------------------------------------- */
+  const GATE8_REL = "api/_lib/send-permission.mjs";
+  const gate8Path = join(ROOT, "..", GATE8_REL);
+  if (!existsSync(gate8Path)) {
+    fail(GATE8_REL, "missing - there is no send-time authorization boundary");
+  } else {
+    const gate8Src = readFileSync(gate8Path, "utf8");
+    const stripped = (src) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
+    /* Gate 8 must actually consult the durable ledger, through the
+       least-privilege function and never the table. */
+    if (!/get_suppression_state\(\$1\)/.test(gate8Src))
+      fail(GATE8_REL, "does not call public.get_suppression_state($1) - the durable suppression authority is not consulted");
+    if (/communication_consent_events/.test(stripped(gate8Src)))
+      fail(GATE8_REL, "names the ledger table - the sender role may only EXECUTE the lookup function");
+    if (!/CONSENT_LEDGER_SENDER_URL/.test(gate8Src))
+      fail(GATE8_REL, "does not use the least-privilege sender credential");
+    if (/CONSENT_LEDGER_URL\b/.test(stripped(gate8Src)))
+      fail(GATE8_REL, "reuses the append credential for send authorization - the sender role must be separate");
+
+    /* Nothing in api/ may decide a send for itself. */
+    const apiDir = join(ROOT, "..", "api");
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name))
+        : /\.(?:mjs|js)$/.test(e.name) ? [join(dir, e.name)] : []);
+    for (const abs of walk(apiDir)) {
+      const rel = "api" + abs.slice(apiDir.length).replace(/\\/g, "/");
+      if (rel === GATE8_REL || rel === "api/_lib/permission.mjs") continue;
+      const code = stripped(readFileSync(abs, "utf8"));
+      for (const fn of ["canSendSms", "canPlaceAutomatedVoiceCall"])
+        if (new RegExp(`\\b${fn}\\b`).test(code))
+          fail(rel, `calls ${fn}() directly - every sender must go through ${GATE8_REL}, which reads durable suppression last`);
+    }
+  }
+
+  /* -------------------------------------------------------------------
      GATE 7 — THE INBOUND SUPPRESSION ENDPOINT
      -------------------------------------------------------------------
      Four invariants, each of which a refactor could delete without

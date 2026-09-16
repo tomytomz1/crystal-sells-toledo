@@ -32,7 +32,7 @@ Gate 8 introduces the **name** `CONSENT_LEDGER_SENDER_URL` for the future server
 - `CONSENT_LEDGER_URL` — website/application role: append evidence; no read.
 - `CONSENT_LEDGER_SENDER_URL` — sender role: execute `get_suppression_state(text)` for one number; no table `SELECT`, no insert.
 
-The production sender credential already exists in Neon, but this implementation does **not** add its connection string to Vercel. Until an operator explicitly does that, any potentially sendable communication fails closed with `SUPPRESSION_LOOKUP_UNAVAILABLE`.
+The `consent_ledger_sender` **role** exists in production Neon — that is on the repository record from the migration-002/003 provisioning work, not something this change re-verified. What is **not** established is any of: the connection string being present in a Vercel environment, the role being reachable from Vercel, or Neon's live HTTP response shape under that credential. **This implementation adds no environment variable.** Until an operator explicitly adds the string, any otherwise-sendable communication fails closed with `SUPPRESSION_LOOKUP_UNAVAILABLE`.
 
 ## Durable suppression lookup
 
@@ -65,7 +65,7 @@ The durable ledger is authoritative for suppression by phone. HubSpot suppressio
 - no environment-variable change;
 - no live provider call;
 - no unsuppression endpoint or HubSpot unsuppression projection;
-- no claim that A2P is approved — the Campaign submitted 16 September 2026 is still `PENDING_REVIEW` on operator evidence.
+- no claim that A2P is approved — the Campaign submitted 16 September 2026 was **REJECTED with error 30882 (Terms & Conditions)** and, on operator evidence, **has not been resubmitted**; Twilio support ticket #29582556 is open with the 10DLC Onboarding team.
 
 The next sender must call Gate 8 immediately before its external side effect. It must not cache an earlier allow decision.
 
@@ -76,3 +76,92 @@ The implementation tests inject both provider boundaries and exercise the real p
 A separate CI test scans the generated browser-delivered output for `CONSENT_LEDGER_SENDER_URL`, so the new sender-role variable name cannot silently leak into built HTML, JS, CSS or metadata.
 
 Before outbound automation is activated, an operator must add the sender-role connection string to the appropriate production environment and a controlled real-boundary verification must confirm `get_suppression_state(text)` is reachable under that credential. A2P approval remains a separate prerequisite for production SMS traffic.
+
+---
+
+## Re-review on current main — 16 September 2026
+
+Gate 8 was branched from `5429815`, before PRs #42, #43 and #44. Current `main`
+(`9736ce2`) was merged into the branch and the boundary re-reviewed cold against
+the architecture it will actually land in. No conflict arose: the files Gate 8
+touches were not modified by that later work.
+
+**Two material defects were found in the Gate 8 code itself and fixed.**
+
+### 1. The target was not actually required
+
+`api/_lib/permission.mjs` resolves `target || ch.consent_phone`. That is correct
+for the consent **model** — it answers "may this contact be reached on the line
+they consented to". It is wrong for Gate 8, whose entire question is "may this
+channel reach **this** number right now".
+
+Measured before the fix:
+
+```
+authorizeSms({ email }) with phone undefined / null / ""
+  -> {"allowed":false,"reason":"SUPPRESSION_LOOKUP_UNAVAILABLE"}
+```
+
+It refused, but for the wrong reason and by accident. The CRM pre-decision
+returned `ALLOWED` via the fallback, and the request was stopped only because
+`toE164(undefined)` happened to throw inside the suppression lookup. An operator
+reading that reason would have gone to debug a database that was working. A
+refactor that normalised the phone earlier, or made the lookup tolerant of a
+missing argument, would have turned it into a genuine `ALLOWED`.
+
+Gate 8 now validates the target with the project's canonical `toE164` rules
+**before any provider is contacted**, and refuses with `INVALID_PHONE`. Verified:
+an absent, blank, non-numeric or short target now performs **zero** CRM reads and
+**zero** durable lookups.
+
+### 2. An unknown channel was dispatched as voice
+
+`decisionFor` is a two-way ternary, so anything that was not `"sms"` fell through
+to `canPlaceAutomatedVoiceCall`. A future `whatsapp` or `rcs` lane would have been
+authorized by the **AI-voice** consent record. There is now an explicit allow-list
+and a `REASON.UNSUPPORTED_CHANNEL`.
+
+### 3. The bypass is now enforced, not merely documented
+
+The original PR named this as its own highest residual risk: a future sender can
+import `canSendSms()` directly, get an `ALLOWED` decided on CRM state alone, and
+never consult the phone-keyed ledger — texting people who sent STOP while every
+test in the suite still passes. Convention cannot carry that.
+
+`tools/check.mjs` now fails the build if any module under `api/` other than
+`api/_lib/send-permission.mjs` names `canSendSms` or `canPlaceAutomatedVoiceCall`
+(comments stripped, so a doc comment is not a call). It also fails if Gate 8 stops
+calling `public.get_suppression_state($1)`, names the ledger table, or reuses
+`CONSENT_LEDGER_URL` instead of the sender credential.
+
+All four guards were proved non-vacuous by mutation in a throwaway tree, and those
+mutations are kept permanently in `tests/consent-build-gate.test.mjs`, asserted to
+fail with the feature flag **both** off and on.
+
+### Test and CI accuracy
+
+- `tests/send-permission.test.mjs` — 32 cases, covering both lanes independently,
+  per-lane and global suppression, CRM-only and ledger-only blocks, a historical
+  grant losing to a later STOP, clearing a suppression **not** creating consent,
+  timeout, malformed CRM shape, phone mismatch, unusable target, provider
+  ordering, and a PII-free decision object.
+- `tests/send-permission-secret.test.mjs` — widened from the sender variable alone
+  to every server-only credential name, with a non-vacuity assertion that the
+  build output actually being scanned is non-empty.
+- The consent-enabled CI gate added in #44 is preserved and extended; nothing here
+  reintroduces the flag-off-only blind spot.
+
+### Still unproven, and stated as unproven
+
+- `CONSENT_LEDGER_SENDER_URL` is configured in **no** environment.
+- Live Neon sender-role connectivity from Vercel has **never been tested**.
+- Neon's live HTTP response shape under that credential is unobserved; the tests
+  inject the executor.
+- No live HubSpot read happens in the sender path in any test.
+- No agent has loaded the production site or the Twilio console in this work.
+
+**A2P approval is not a prerequisite for merging this.** Gate 8 causes no
+messaging: it is a read-and-decide boundary that can only ever refuse more than
+the system already refuses. Campaign review is an external, separate track, and
+activation is a separate future gate requiring the operator to add the credential
+and a controlled real-boundary verification to pass.

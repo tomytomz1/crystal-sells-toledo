@@ -1539,9 +1539,15 @@ into this change:**
 - **No token, minting tool or operator UI.**
 - **Nothing writes an `unsuppressed` event.** The ledger builder can now
   format and validate one; no code path constructs or appends one.
-- **Gate 8 send-time enforcement has not begun.** Nothing calls
-  `get_suppression_state()` from application code — the sender connection
-  string is still in no environment.
+- **Gate 8 send-time enforcement EXISTS AS CODE ON A BRANCH, and is not
+  active.** `api/_lib/send-permission.mjs` calls `get_suppression_state()`,
+  so the sentence that used to sit here — *nothing calls it from application
+  code* — is no longer true of the branch. It remains true of `main` until
+  the Gate 8 pull request merges. **The sender connection string
+  `CONSENT_LEDGER_SENDER_URL` is still in NO environment**, so even after a
+  merge every otherwise-sendable communication fails closed with
+  `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is still no SMS sender and no
+  voice caller of any kind.** See the Gate 8 section below.
 - **No outbound automation is activated**, and no Twilio Consent Management
   API call is made. **One external system WAS touched:** the production Neon
   database, by the operator, to apply this migration. Twilio, HubSpot, Retell,
@@ -1648,6 +1654,97 @@ change was design-only: `buildSuppressionEvent()` validates `event_type` with
 `requireText()`, which accepts **any** non-empty string, so a typo'd event type
 could enter an unamendable table and be invisible to every fold. Recorded as
 implementation step 2 of the plan, not widened into.
+
+## Gate 8 — the send-time authorization boundary. CODE ONLY, NOT ACTIVE.
+
+**What it is.** One function every future automated SMS or AI-voice sender must
+call immediately before its external side effect. It answers exactly one
+question — *may this channel reach this phone number right now?* — from current
+consent and current durable suppression, and it **fails closed**.
+
+**What it is not.** It sends no SMS, places no call, sends no email, writes no
+HubSpot record, mutates no consent, mutates no suppression and books nothing.
+**This work creates no sender of any kind.** It is a read-and-decide boundary
+that can only ever refuse more than the system already refuses.
+
+**Where it lives.** Pull request **#41**, branch
+`chatgpt/gate8-send-time-permission`. Current `main` was merged into that branch
+on 16 September 2026 so the boundary is reviewed against the architecture it will
+land in; nothing from #42, #43 or #44 was reverted. **Not merged.**
+
+### The order is the compliance argument
+
+1. feature gate;
+2. channel and **target phone** validated locally — no provider is contacted for
+   an unusable target;
+3. current consent state read from HubSpot;
+4. a state that already denies returns early and spends no database query;
+5. **the durable phone-keyed suppression lookup runs LAST**, as the final
+   provider read on any path that can return `ALLOWED`;
+6. `api/_lib/permission.mjs` makes the only allow/deny decision.
+
+Suppression is read last because it is the fact most likely to change during the
+authorization: a consumer can send STOP while the CRM request is still in
+flight. **This is not a claim of zero-race behaviour** — a STOP can arrive after
+any finite check. It narrows the application-controlled window. Tests pin the
+provider call order.
+
+### Invariants
+
+- Two authorities, and **neither can grant alone**. The durable ledger is
+  authoritative for suppression by phone; HubSpot's suppression flags remain a
+  conservative projection. **Either may block; only consent may permit.**
+- **"Not suppressed" is not "consented".** Clearing a block never creates a
+  grant, so a carrier-level START or UNSTOP can never become first-party consent.
+- **"Consented" never outranks an active suppression**, and a historical grant
+  does not survive a later STOP.
+- Authorization binds to the **actual target number**, not a contact id, email,
+  lead id or the mere existence of a CRM record.
+- **No dependency failure is ever permission.** Missing credential, timeout,
+  exception, malformed row, malformed CRM shape and unknown suppression state all
+  deny.
+- The decision object is `{ allowed, reason }` and nothing else — no phone, name,
+  email, message, provider text or credential.
+
+### Least privilege
+
+The lookup executes only `public.get_suppression_state($1)` under the
+`consent_ledger_sender` role — `EXECUTE` only, no table `SELECT`, no `INSERT`. It
+never names the ledger table, and it never reuses `CONSENT_LEDGER_URL`, the
+append credential. `tools/check.mjs` fails the build on any of those.
+
+### The bypass, and why it is now a build failure
+
+`canSendSms()` is pure. Handed no durable answer it decides on CRM state alone
+and can return `ALLOWED` — correct for the consent model, catastrophic for a
+sender, because the suppression authority would never have been consulted. A
+future Twilio or Retell caller importing the resolver directly would text people
+who sent STOP while the whole suite stayed green.
+
+So inside `api/`, **only `api/_lib/send-permission.mjs` may name the send
+predicates.** Everything else must go through Gate 8. That guard, and the three
+least-privilege guards above, are kept honest by permanent mutation cases in
+`tests/consent-build-gate.test.mjs` which assert each one fails with the feature
+flag **both off and on**.
+
+### What is NOT established
+
+| Claim | Status |
+|---|---|
+| `CONSENT_LEDGER_SENDER_URL` is configured | **NO — it is in no environment** |
+| the sender role is reachable from Vercel | **never tested** |
+| Neon's live HTTP response shape under that credential | **unobserved** — tests inject the executor |
+| a live HubSpot read in the sender path | **never performed** |
+| any outbound SMS or call | **none exists** |
+
+The `consent_ledger_sender` role itself exists in production Neon, on the record
+from the migration-002/003 provisioning work — not re-verified here.
+
+**A2P approval is not a prerequisite for merging Gate 8.** The Campaign is a
+separate external track, currently **REJECTED with 30882 and not resubmitted**,
+ticket #29582556 open. Merging a boundary that causes no messaging does not
+depend on it. **Activation is a separate future gate** requiring an operator to
+add the credential and a controlled real-boundary verification to pass.
 
 ## Sequenced follow-ups from the transport work
 
