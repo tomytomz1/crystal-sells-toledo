@@ -193,16 +193,22 @@ rather than assumed.
       operator-verified on live `/home-value` after the contrast fix deployed.
       Separate SMS and AI-voice boxes, both unchecked, section marked
       Optional, disclosure plainly readable.
-- [ ] https://crystalsellstoledo.com/communications-terms loads —
-      **NOT independently confirmed.** It builds and is generated with the
-      flag on, and the flag is now on in Production, but no agent could reach
-      the live domain from this environment and the operator's screenshot
-      covered `/home-value` only. **Load it and confirm before submitting.**
-- [ ] Privacy policy carries the mobile-information language —
-      **present in the built source and deployed, NOT independently confirmed
-      live.** The page carries the non-sharing statement plus *message
-      frequency varies* and *message and data rates may apply* (error 30908).
-      **Load `/privacy` and confirm before submitting.**
+- [x] **https://crystalsellstoledo.com/communications-terms loads** —
+      **reachability operator-verified** by screenshot on the live domain,
+      16 September 2026. **Content verified from deployed source:** message
+      frequency varies, message and data rates may apply, *Reply STOP to opt
+      out*, *Reply HELP for help*, separate AI/automated-voice consent,
+      consent not a condition of service, and the mobile / opt-in
+      non-sharing language. *(No agent loaded the page.)*
+- [x] **Privacy policy carries the mobile-information language** —
+      **reachability operator-verified** by screenshot on the live domain,
+      16 September 2026. **Content verified from deployed source:** mobile
+      information not shared with third parties or affiliates for marketing
+      or promotional purposes, text-messaging opt-in/consent data not shared
+      for third-party marketing, *message frequency varies*, *message and
+      data rates may apply* (error 30908), STOP/HELP language, the Twilio
+      messaging disclosure and a separate AI/automated-voice disclosure.
+      *(No agent loaded the page.)*
 - [ ] HubSpot properties created (see the HubSpot setup document) —
       **not re-verified in this pass.** HubSpot is **not** a blocker for the
       inbound endpoint: with it absent the projection is skipped and logged

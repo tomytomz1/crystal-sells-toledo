@@ -269,17 +269,41 @@ Schema in the production HubSpot portal:
   APPROVED.** Enabling the opt-in surface is a prerequisite for submission,
   not a submission.
 
-  **THE LIVE OPT-IN SURFACE IS VERIFIED; THE FULL CAMPAIGN PREFLIGHT IS NOT
-  YET CLOSED.** Precisely: the live `/home-value` **opt-in** surface is
-  operator-verified and readable, and the Production consent feature is
-  enabled. The **legal pages are generated and deployed in source but have NOT
-  been observed live** — no agent could reach the domain, and the operator's
-  screenshot covered `/home-value` only. **Until `/privacy` and
-  `/communications-terms` are actually loaded and read on the live domain, the
-  website-side preflight is incomplete**, because error 30908 is assessed
-  against the policy page a reviewer opens, not against the repository.
-  Beyond that, what remains is **inbound STOP/HELP activation**, which is
-  Twilio and Vercel configuration, not website work. See the STOP/HELP activation section below.
+  **THE WEBSITE-SIDE CAMPAIGN PREFLIGHT IS CLOSED — 16 September 2026.
+  STOP/HELP ACTIVATION IS NOT.** Those are two different things and the
+  distinction is the whole point of this entry.
+
+  **Two kinds of evidence back this, and they are not interchangeable:**
+
+  | Claim | Evidence class |
+  |---|---|
+  | live `/home-value` opt-in surface renders, boxes separate and unchecked, section Optional | **operator screenshot** |
+  | consent disclosure is plainly readable after the contrast fix | **operator screenshot** |
+  | `https://crystalsellstoledo.com/privacy` **is reachable live** | **operator screenshot** |
+  | `https://crystalsellstoledo.com/communications-terms` **is reachable live** | **operator screenshot** |
+  | **what those two pages say** — the required messaging and mobile-information copy | **deployed repository source**, not a live read |
+
+  **The split matters.** The operator opened both pages and they loaded; that
+  establishes **reachability**, which is what a reviewer needs to be able to do
+  at all. What the pages *contain* is established from the source that was
+  built and deployed — `/privacy` carries *message frequency varies*, *message
+  and data rates may apply*, the mobile-information and opt-in non-sharing
+  statements, STOP/HELP, the Twilio disclosure and a separate AI-voice
+  disclosure; `/communications-terms` carries frequency, rates, *Reply STOP to
+  opt out*, *Reply HELP for help*, separate AI-voice consent, consent-not-a-
+  condition, and the non-sharing language. **No agent loaded either page**, so
+  nothing here is an agent's reading of live HTML.
+
+  **Error 30908 is therefore satisfied as far as this repository can establish
+  it:** the policy a reviewer opens is reachable, and the copy that was
+  deployed to it carries the required disclosures.
+
+  **What remains is NOT website work.** It is **inbound STOP/HELP activation** —
+  Twilio and Vercel configuration. See the STOP/HELP activation section below.
+
+  **Campaign status is unchanged: NOT CREATED, NOT SUBMITTED, NOT APPROVED.**
+  A closed website-side preflight is a prerequisite for submission, not a
+  submission, and **the overall A2P activation is not complete.**
 
   **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–5 are now DONE.**
 
