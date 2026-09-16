@@ -185,20 +185,59 @@ rather than assumed.
       **Approved**, Brand **Approved**, type **Sole proprietor**, identity
       **Verified**. *(This box covers the Customer Profile and the BRAND only.
       No Campaign item below is affected by it.)*
-- [ ] `COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production
-- [ ] Both checkboxes visible, unchecked, optional at the opt-in URL
-- [ ] https://crystalsellstoledo.com/communications-terms loads
-- [ ] Privacy policy carries the mobile-information language
-- [ ] HubSpot properties created (see the HubSpot setup document)
-- [ ] STOP/HELP inbound webhook actually implemented — **do not advertise STOP
-      handling before the webhook exists**
+- [x] **`COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production** —
+      set by the operator 15 September 2026, Production redeployed.
+      `CONSENT_LEDGER_URL` set alongside it, using the `consent_ledger_app`
+      `INSERT`-only role.
+- [x] **Both checkboxes visible, unchecked, optional at the opt-in URL** —
+      operator-verified on live `/home-value` after the contrast fix deployed.
+      Separate SMS and AI-voice boxes, both unchecked, section marked
+      Optional, disclosure plainly readable.
+- [x] **https://crystalsellstoledo.com/communications-terms loads** —
+      **reachability operator-verified** by screenshot on the live domain,
+      16 September 2026. **Content verified from deployed source:** message
+      frequency varies, message and data rates may apply, *Reply STOP to opt
+      out*, *Reply HELP for help*, separate AI/automated-voice consent,
+      consent not a condition of service, and the mobile / opt-in
+      non-sharing language. *(No agent loaded the page.)*
+- [x] **Privacy policy carries the mobile-information language** —
+      **reachability operator-verified** by screenshot on the live domain,
+      16 September 2026. **Content verified from deployed source:** mobile
+      information not shared with third parties or affiliates for marketing
+      or promotional purposes, text-messaging opt-in/consent data not shared
+      for third-party marketing, *message frequency varies*, *message and
+      data rates may apply* (error 30908), STOP/HELP language, the Twilio
+      messaging disclosure and a separate AI/automated-voice disclosure.
+      *(No agent loaded the page.)*
+- [ ] HubSpot properties created (see the HubSpot setup document) —
+      **not re-verified in this pass.** HubSpot is **not** a blocker for the
+      inbound endpoint: with it absent the projection is skipped and logged
+      and the ledger row still stands. Confirm separately.
+- [ ] **STOP/HELP inbound webhook actually implemented and LIVE** — the
+      endpoint exists and is audited, but **it is not activated**:
+      `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` (≥ 32 bytes) are in no
+      environment; **`ZOHO_SMTP_*` needs CONFIRMING in Production, not
+      adding** — see `docs/CURRENT-STATE.md` § STOP / HELP inbound activation;
+      no Messaging Service is known to exist and no webhook is configured.
+      **"In code" is not "live."**
+      Without those, every ordinary inbound message answers `503`.
+      **This remains the box that matters most**, and it is the only
+      website-side item still open. See `docs/CURRENT-STATE.md`
+      § STOP / HELP inbound activation for the audited requirement list.
 
 The last box is the one that matters most. Every sample message above promises
 "Reply STOP to opt out". Sending any of them before inbound handling is live
 would be making a promise the system cannot keep.
 
-**The blocking item as of 15 September 2026 is the second box, and it is ours,
-not Twilio's.** `COMMUNICATIONS_CONSENT_ENABLED` is set in Vercel **Preview
+**UPDATE — 15 September 2026, later the same day: the second box is now
+CLOSED.** `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are
+set in Production, Production is redeployed, and the live opt-in surface has
+been operator-verified. **The blocking item is now the LAST box — STOP/HELP
+inbound activation.** The paragraph below is kept because it records why the
+sequencing existed; it is no longer the open item.
+
+**The blocking item as of earlier on 15 September 2026 was the second box, and
+it was ours, not Twilio's.** `COMMUNICATIONS_CONSENT_ENABLED` is set in Vercel **Preview
 only** and deliberately absent from **Production**, so the production opt-in URL
 does not yet show the SMS consent checkbox and disclosure the reviewer will look
 for. Submitting the Campaign before that is visible invites a rejection for an

@@ -245,8 +245,10 @@ Schema in the production HubSpot portal:
   the worksheet calls *"the one that matters most"*, because every sample
   message promises *"Reply STOP to opt out"*.
 
-  **A MATERIAL VISUAL DEFECT WAS FOUND ON THE LIVE PAGE and is fixed in
-  the source, not yet deployed.** The consent disclosure rendered at
+  **A MATERIAL VISUAL DEFECT WAS FOUND ON THE LIVE PAGE, FIXED, DEPLOYED
+  AND OPERATOR-VERIFIED AS READABLE — 15 September 2026** (PR
+  [#37](https://github.com/tomytomz1/crystal-sells-toledo/pull/37), merged
+  as `eb3d7e3`). The consent disclosure rendered at
   **1.23:1** contrast against the dark form panel — near-black text on a
   near-black ground, effectively invisible — with the legend and helper
   note at **3.25:1**. All three are below the **4.5:1** WCAG AA floor for
@@ -267,7 +269,43 @@ Schema in the production HubSpot portal:
   APPROVED.** Enabling the opt-in surface is a prerequisite for submission,
   not a submission.
 
-  **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–4 are now DONE.**
+  **THE WEBSITE-SIDE CAMPAIGN PREFLIGHT IS CLOSED — 16 September 2026.
+  STOP/HELP ACTIVATION IS NOT.** Those are two different things and the
+  distinction is the whole point of this entry.
+
+  **Two kinds of evidence back this, and they are not interchangeable:**
+
+  | Claim | Evidence class |
+  |---|---|
+  | live `/home-value` opt-in surface renders, boxes separate and unchecked, section Optional | **operator screenshot** |
+  | consent disclosure is plainly readable after the contrast fix | **operator screenshot** |
+  | `https://crystalsellstoledo.com/privacy` **is reachable live** | **operator screenshot** |
+  | `https://crystalsellstoledo.com/communications-terms` **is reachable live** | **operator screenshot** |
+  | **what those two pages say** — the required messaging and mobile-information copy | **deployed repository source**, not a live read |
+
+  **The split matters.** The operator opened both pages and they loaded; that
+  establishes **reachability**, which is what a reviewer needs to be able to do
+  at all. What the pages *contain* is established from the source that was
+  built and deployed — `/privacy` carries *message frequency varies*, *message
+  and data rates may apply*, the mobile-information and opt-in non-sharing
+  statements, STOP/HELP, the Twilio disclosure and a separate AI-voice
+  disclosure; `/communications-terms` carries frequency, rates, *Reply STOP to
+  opt out*, *Reply HELP for help*, separate AI-voice consent, consent-not-a-
+  condition, and the non-sharing language. **No agent loaded either page**, so
+  nothing here is an agent's reading of live HTML.
+
+  **Error 30908 is therefore satisfied as far as this repository can establish
+  it:** the policy a reviewer opens is reachable, and the copy that was
+  deployed to it carries the required disclosures.
+
+  **What remains is NOT website work.** It is **inbound STOP/HELP activation** —
+  Twilio and Vercel configuration. See the STOP/HELP activation section below.
+
+  **Campaign status is unchanged: NOT CREATED, NOT SUBMITTED, NOT APPROVED.**
+  A closed website-side preflight is a prerequisite for submission, not a
+  submission, and **the overall A2P activation is not complete.**
+
+  **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–5 are now DONE.**
 
   1. ~~Add the Production consent-ledger credential.~~ **DONE** —
      `CONSENT_LEDGER_URL`, `consent_ledger_app` role.
@@ -276,9 +314,13 @@ Schema in the production HubSpot portal:
   3. ~~Redeploy.~~ **DONE.**
   4. ~~Verify the live opt-in page.~~ **DONE** — and it surfaced the contrast
      defect above.
-  5. **Deploy the contrast fix and re-check the live page.** The disclosure
-     is currently live and hard to read; a reviewer sent to that URL would be
-     reading the consent copy at 1.23:1.
+  5. ~~Deploy the contrast fix and re-check the live page.~~ **DONE** —
+     deployed and operator-verified on live `/home-value`: the disclosure is
+     plainly readable, both checkboxes present and unchecked, the section
+     marked Optional, the SMS copy carrying frequency / rates / STOP / HELP /
+     not-a-condition-of-service, both legal links present, and the voice
+     wording identifying automated technology and an artificial, prerecorded
+     or AI-generated voice.
   6. **Confirm `/privacy` and `/communications-terms` on the live domain** —
      reachable, indexable, carrying the message-frequency and
      message-and-data-rates disclosures error 30908 requires.
@@ -288,6 +330,136 @@ Schema in the production HubSpot portal:
   **Every step here is an operator action in an external system. None was
   performed or simulated by any agent session**, including the four now
   marked done — those are the operator's own report.
+
+### STOP / HELP inbound activation — audited 15 September 2026, NOT ACTIVATED
+
+Read from the current code on `eb3d7e3`, not from older prose. **No code change
+is required.** Every refusal below is deliberate; what is missing is
+configuration.
+
+**WHO SENDS THE STOP AND HELP REPLIES: TWILIO, NOT US.** Verified two ways.
+`grep` over `api/` and `tools/` finds **no outbound SMS anywhere** — no
+`messages.create`, no TwiML `<Message>`; the only `MessagingServiceSid` in the
+repository reads an *inbound* parameter for evidence. `api/twilio-inbound.js`
+answers `<Response></Response>`, an empty TwiML that tells Twilio we want no
+auto-reply of our own. Twilio's own documentation confirms Twilio applies the
+opt-out action and sends the reply itself, then still POSTs the message to our
+webhook so we can record it.
+
+> **This is a live compliance item, not a detail.** The Campaign worksheet
+> contains *prepared* HELP and STOP language. **That copy is not implemented
+> anywhere in this repository and will never be sent by us.** Unless the
+> operator enters it into Twilio's **Advanced Opt-Out** configuration,
+> consumers receive **Twilio's default text**, which is not the copy submitted
+> with the Campaign. Submitting sample messages we do not actually send is the
+> kind of mismatch a reviewer can act on.
+
+**WHAT THE ENDPOINT DOES TODAY, by branch, in order:**
+
+| Condition | Answer |
+|---|---|
+| method not `POST` | `405` |
+| `TWILIO_AUTH_TOKEN` absent | **`503`, nothing processed at all** |
+| body unreadable / stalled | `400` |
+| signature invalid | `403` |
+| no `MessageSid` or `From` | `400` |
+| **unclassified — an ordinary message** | `surfaceToOperator()` → **`503` if SMTP *or* the operator secret is missing**, else email + `200` |
+| `HELP` | `200`, empty TwiML, **nothing recorded** |
+| `CONSENT_LEDGER_URL` absent | `503` |
+| ledger append fails | **`503` — never a silent `200`** |
+| HubSpot absent or failing | **`200`** — projection skipped and logged; the ledger row stands |
+
+**PRODUCTION ENVIRONMENT REQUIRED BEFORE A REAL INBOUND SMS:**
+
+| Variable | Required? | Why, from the code |
+|---|---|---|
+| `TWILIO_AUTH_TOKEN` | **YES — hard blocker** | `twilioConfigured()`; absent ⇒ every inbound `503`, signature never verified |
+| `CONSENT_LEDGER_URL` | **YES — already set** | a STOP cannot be recorded without it; `503` |
+| `OPERATOR_ACTION_SECRET` | **YES** | `operatorActionConfigured()` requires **≥ 32 bytes** (`MIN_SECRET_BYTES`); shorter reads exactly like absent and the endpoint stays inert |
+| `ZOHO_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | **YES — but CONFIRM, do not re-add** | `isMailConfigured()` requires all four non-empty; missing ⇒ **every ordinary non-STOP message answers `503`**. See the note below on what is and is not established about their Production scope |
+| HubSpot credentials | **No** | projection is skipped and logged; the durable record is the ledger |
+
+**`ZOHO_SMTP_*` — WHAT THIS REPOSITORY ACTUALLY ESTABLISHES, and what it does
+not.** Zoho **Mail** SMTP is the **live lead-acknowledgement transport** and is
+a different thing from the dormant Zoho **CRM** rollback code. What is on the
+record here is that `ZOHO_SMTP_*` **was deliberately withheld from PREVIEW** —
+that is why a preview submission logs `lead.ack.skipped / not_configured` — and
+that the operator-surfacing email rides *"the Zoho Mail SMTP transport the lead
+acknowledgement already uses."*
+
+**Its PRODUCTION scope is not established from this repository**, which holds no
+environment state. The activation line elsewhere in this file asks for
+`ZOHO_SMTP_*` **"confirmed there"** — *confirmed*, not added — and the nearby
+sentence *"all three are absent today"* must **not** be read as establishing
+that `ZOHO_SMTP_*` is absent from Production; it cannot, because nothing in a
+git repository can observe a Vercel environment.
+
+**So the operator action is CONFIRMATION.** Open Vercel → Environment Variables
+→ Production and check the four names are present. **Do not recreate, rotate or
+re-enter them on the strength of this document** — rotating a live
+acknowledgement transport to satisfy a doc would be a self-inflicted outage.
+If they turn out to be absent, that is the moment to add them, and the lead
+acknowledgement email was not working either.
+
+**The secret must be randomly generated**, at least 32 bytes, and any character
+set is fine — it is stretched through HKDF-SHA256, so only length is
+constrained. **Its value appears nowhere in this repository and must not.**
+
+**TWILIO CONFIGURATION, from current Twilio documentation:**
+
+- **A Messaging Service is required**, and the Campaign attaches to one. A
+  **Sole Proprietor campaign may carry exactly one 10DLC number**, which must
+  be the one in that Service. **Twilio supports both orderings** — selecting an
+  **existing** Messaging Service during Campaign registration, or **creating
+  one as part of that flow** — so nothing here mandates a single sequence. The
+  manual steps below create it first only because that makes the webhook and
+  opt-out settings testable *before* a Campaign is submitted against them.
+- **The webhook belongs on the MESSAGING SERVICE, not the number.** Twilio
+  delivers `OptOutType` (`STOP` / `START` / `HELP`) to *the webhook configured
+  for the Messaging Service*. Our `classify()` **prefers** `OptOutType` and
+  falls back to the local deterministic classifier when it is absent — so
+  putting the webhook on the number alone silently downgrades us to the
+  fallback path. `POST` to `https://crystalsellstoledo.com/api/twilio-inbound`;
+  the endpoint answers `405` to anything else.
+- **Advanced Opt-Out should be enabled**, for two reasons: it is what supplies
+  `OptOutType`, and it is the only place the worksheet's HELP/STOP copy can
+  actually live. It is *not* required for basic compliance — Twilio's default
+  STOP filtering already blocks the standard keywords and replies — but
+  without it the wording is Twilio's, not ours.
+- **Our empty TwiML is correct** under that configuration, and is what keeps us
+  from double-replying on top of Twilio's own confirmation.
+
+**WEBHOOK RETRY — and this is the sharpest remaining risk.** Stated precisely,
+because the categorical version of this sentence is wrong:
+
+- **Twilio's DEFAULT retry policy is `ct`** — connect / TLS-handshake failure
+  only. **A `5xx` response is NOT retried under that default.**
+- **Twilio CAN retry a 5xx**, but only when a **connection override** says so.
+- Overrides are a **`#`-prefixed URL fragment** — `#key=value&key=value` —
+  appended to the webhook URL. `rc` is the retry count (**0–5, default 1**);
+  `rp` is the retry policy, whose accepted values include **`4xx`, `5xx`,
+  `ct`, `rt`, `all`** (**default `ct`**), and may be given as a list.
+- **Error 11200 is a separate thing.** It means Twilio did not obtain a
+  successful response from the webhook. It is a *report* of that outcome;
+  whether a retry happened is decided by the retry policy above, not by 11200.
+
+**Why that matters here:** this endpoint deliberately answers `503` on
+recoverable conditions — a Neon outage, an SMTP outage. Under the **default
+`ct`** policy those responses are **not** retried, so **a real STOP arriving
+during a ledger outage is lost permanently.** The consumer is still protected,
+because Twilio's own STOP filtering blocks the number regardless; what is lost
+is *our evidence of why*. **A policy whose `rp` includes `5xx` (or `all`) is
+therefore the setting that matches this endpoint's design** — for example
+`https://crystalsellstoledo.com/api/twilio-inbound#rc=3&rp=5xx,ct,rt`, which is
+syntactically consistent with the documented fragment mechanism.
+
+**NOT CONFIGURED. NOT APPLIED.** No override exists on any webhook, because no
+webhook and no Messaging Service exist yet.
+
+**Stated as unproven:** the connection-override page could not be fetched
+directly from this environment (`twilio.com` is egress-blocked here), so the
+parameter list above comes from Twilio documentation via search. **The operator
+should confirm the exact fragment syntax on the page before applying it.**
 
   **PROVENANCE. All of the Twilio state above is OPERATOR-SUPPLIED EVIDENCE** —
   one console screenshot and one Twilio email. No agent session logged into
