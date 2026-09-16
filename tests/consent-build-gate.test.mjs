@@ -151,10 +151,17 @@ describe("the consent-enabled build is verified by the gate", () => {
       expect: /must not be a real control|record consent/,
     },
     {
-      name: "a privacy page that lost the SMS scope carve-out",
+      name: "a privacy page that lost the SMS opt-in carve-out",
       apply: (dir) => edit(dir, "src/partials/privacy-sms-scope.html", (s) =>
-        s.replace("does not include mobile information, SMS opt-in", "covers everything")),
-      expect: /scope transaction-related sharing away from mobile and SMS opt-in/,
+        s.replace("SMS opt-in and your SMS consent are never transferred", "details are shared as needed")),
+      expect: /not transferred by transaction-related sharing/,
+    },
+    {
+      name: "a privacy page that overclaims mobile information is never shared in a transaction",
+      apply: (dir) => edit(dir, "src/partials/privacy-sms-scope.html", (s) =>
+        s.replace("<p><strong>Your SMS opt-in and your SMS consent are never transferred as part of that",
+                  "<p><strong>This transaction-related sharing does not include mobile information, and your SMS consent is never transferred as part of that")),
+      expect: /claims transaction sharing excludes mobile information outright/,
     },
     {
       name: "a step-1 link relabelled back to something a reviewer reads as the SMS policy",

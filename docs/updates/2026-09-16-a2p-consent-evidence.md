@@ -70,8 +70,21 @@ is injected from the same build variables the live checkbox label uses, fed by
 `api/_lib/consent.mjs` — the module the server records the agreed wording from.
 A test opens both the evidence page and step 2 of the real form in a browser and
 asserts they display **the same string**, and that the string equals
-`SMS_CONSENT.text`. A separate test asserts the page source contains the
-template token and does **not** contain the literal disclosure sentence.
+`SMS_CONSENT.text`. Source-level tests assert the page takes both canonical build
+variables and that **neither disclosure is retyped anywhere in the source** —
+with whitespace normalised first, and with every `alt` and `title` attribute
+scanned separately.
+
+**That whitespace normalisation exists because the first version did not have
+it, and a real copy slipped through.** The screenshot's `alt` attribute quoted
+the entire SMS disclosure, wrapped across indented lines, so the original
+contiguous-substring needle never matched it and the guard passed on a page that
+carried a second, hand-maintained copy of the exact wording it claims never to
+retype — in text that crawlers and screen readers read. Found on independent
+review of the first head. The alt text now **describes** the control and points
+at the canonical copy rendered above the image instead of quoting it, and the
+strengthened guard was verified by re-introducing the original defect in a
+throwaway tree, where it fails.
 
 **The checkboxes are drawn unchecked**, with the word "unchecked" beside them
 for anyone not looking at the picture, because the real boxes ship unchecked.
@@ -104,15 +117,32 @@ was kept.** It is ordinary real-estate practice and deleting it to please a
 carrier reviewer would make the page false.
 
 A new gated paragraph (`src/partials/privacy-sms-scope.html`) immediately after
-it states that this sharing **does not include mobile information, SMS opt-in
-data, or SMS consent**, links `/sms-privacy`, and adds that the named service
-providers process information on Crystal's behalf — which is not permission for
-them, an affiliate or a lead buyer to market to anyone.
+it states that **the SMS opt-in and SMS consent are never transferred** as part
+of that sharing, that **mobile information is not sold, and is not shared with
+third parties or affiliates for their own marketing or promotional purposes**,
+and that the named service providers process information on Crystal's behalf —
+which is not permission for them, an affiliate or a lead buyer to market to
+anyone. It links `/sms-privacy`.
 
-**It deliberately does not claim that no system processes SMS information.**
-Twilio, HubSpot, Neon and Vercel each do, as processors, and `/sms-privacy`
-names all four. A test asserts the processor sentence survives and that the page
-carries no "no one ever processes your SMS data" style overclaim.
+**Two overclaims are available here and the wording avoids both.**
+
+The first shipped and was caught on independent review. The original draft said
+the sharing *"does not include mobile information, SMS opt-in data, or SMS
+consent."* **That is false.** A title company, lender or inspector completing a
+transaction the consumer asked for may perfectly legitimately receive that
+consumer's phone number, and promising otherwise would have been a false promise
+that happened to read well to a carrier reviewer. The corrected text says the
+number may be needed and that what does **not** travel with it is the permission
+to text: *"nobody who receives your number that way has your permission to text
+you."* `tools/check.mjs` now fails the build if the old phrasing returns, and the
+gate carries a mutation case for it.
+
+The second was avoided from the start: **it does not claim that no system
+processes SMS information.** Twilio, HubSpot, Neon and Vercel each do, as
+processors, and `/sms-privacy` names all four. Tests assert the processor
+sentence survives, that the page carries no "no one ever processes your SMS
+data" overclaim, and that it does not swing back to the absolute
+mobile-information claim either.
 
 It is gated for a second, concrete reason: it links `/sms-privacy`, which is
 itself gated. Ungated, it left a dead internal link in the consent-disabled
@@ -190,8 +220,11 @@ and build-time validation only.
   nothing.
 - The evidence page's disclosure is the canonical disclosure, enforced at build
   time and in a browser.
-- `/privacy` keeps its transaction-sharing disclosure and now scopes it away
-  from mobile and SMS opt-in data, without overclaiming about processors.
+- `/privacy` keeps its transaction-sharing disclosure. It now states that the
+  SMS opt-in and consent are not transferred by it, and that mobile information
+  is not sold or shared for third-party marketing — without claiming that a
+  transaction party never receives the number, and without overclaiming about
+  processors.
 - Step 1's privacy link reads "Website Privacy Policy" and still points at
   `/privacy`.
 - `check.mjs`'s consent-enabled branch is exercised by CI and proved
@@ -208,9 +241,13 @@ ledger; suppression; the Twilio inbound webhook; Gate 8; `/sms-privacy` and
 
 ## Test results
 
-- `tests/consent-build-gate.test.mjs` — 8/8 pass, including all six
+- `tests/consent-build-gate.test.mjs` — 9/9 pass, including all seven
   mutation cases.
 - `tests/a2p-consent-evidence.test.mjs` — 25/25 pass, including 6 browser tests.
+  One always-true assertion (`assert.ok(x === false || true)`) was removed and
+  replaced with the invariant that actually holds: the consent **version
+  identifier is server-side bookkeeping and is never rendered to the client**,
+  asserted on every opt-in surface.
 - `tools/check.mjs` — clean in both flag states (10 pages off, 14 on).
 - Full suite: see the pull request for the CI run and its conclusion.
 

@@ -399,10 +399,22 @@ a stable URL. It is a **verification surface, not an opt-in surface**:
 **Two smaller disambiguations shipped with it.** `/privacy`'s legitimate
 transaction-sharing sentence — title company, lender, inspector — is
 **kept**, and a gated paragraph immediately after it now states that the
-sharing **excludes mobile information, SMS opt-in data and SMS consent**
-and points at `/sms-privacy`. It deliberately does **not** claim that no
-system processes SMS information: Twilio, HubSpot, Neon and Vercel each
-do, as Crystal's processors, and `/sms-privacy` names all four. And the
+**SMS opt-in and SMS consent are never transferred** by that sharing, and
+that **mobile information is not sold, nor shared with third parties or
+affiliates for their own marketing or promotional purposes**. It points
+at `/sms-privacy`.
+
+**It is deliberately narrower than it first shipped.** The first draft
+said the sharing *"does not include mobile information, SMS opt-in data,
+or SMS consent"* — which is **false**, because a title company, lender or
+inspector completing a transaction the consumer asked for may legitimately
+receive that consumer's phone number. Corrected on independent review: the
+page now says the number may be needed, and that what does **not** travel
+with it is the permission to text. It also still does **not** claim that no
+system processes SMS information — Twilio, HubSpot, Neon and Vercel each
+do, as Crystal's processors, and `/sms-privacy` names all four. Both
+overclaims are pinned against by `tools/check.mjs` and by the gate's
+mutation cases. And the
 **step-1 link label** changed from *"Privacy & terms"* to **"Website
 Privacy Policy"**; the destination is still `/privacy`, because step 1
 collects an address under the website policy and carries no SMS consent.
@@ -431,11 +443,13 @@ ON.**
 
 `tests/consent-build-gate.test.mjs` closes it. It builds and checks a
 throwaway copy of the repository in **both** flag states, and then proves
-the enabled-path guards are not vacuous: six mutations — a pre-ticked box,
-a required box, an evidence page whose disclosure stops coming from the
-canonical source, an evidence page that grows a real consent control, a
-privacy page that loses the SMS carve-out, and a step-1 label relabelled
-back — each **pass with the flag OFF and fail with the flag ON**. That
+the enabled-path guards are not vacuous: seven mutations — a pre-ticked
+box, a required box, an evidence page whose disclosure stops coming from
+the canonical source, an evidence page that grows a real consent control,
+a privacy page that loses the SMS opt-in carve-out, a privacy page that
+overclaims mobile information is never shared in a transaction, and a
+step-1 label relabelled back — each **pass with the flag OFF and fail with
+the flag ON**. That
 asymmetry is the gap, demonstrated on every run. The throwaway tree is a
 complete copy of every tracked and untracked-but-not-ignored file; the
 working tree is never mutated.

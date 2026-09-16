@@ -128,13 +128,33 @@ describe("the evidence page is evidence", () => {
       assert.ok(live.includes(flat(d.html)), `the live form lost the canonical ${d.channel} disclosure`);
       assert.ok(evidence.includes(flat(d.html)), `the evidence page lost the canonical ${d.channel} disclosure`);
     }
-    /* Source-level: the page must not retype the words at all. */
+    /* Source-level: the page must not retype the words at all.
+       WHITESPACE IS NORMALISED FIRST, and that is the whole point. The
+       first version of this check looked for a contiguous needle in the
+       raw source, and the screenshot's alt attribute - which wrapped the
+       full disclosure across indented lines - slid straight past it. The
+       page then carried a second, hand-maintained copy of the exact
+       wording it claims never to retype, in text crawlers and screen
+       readers read. Any copy is a copy, however it is wrapped. */
     const src = readFileSync(join(REPO, "src/pages/sms-consent-evidence.html"), "utf8");
     const srcBody = stripComments(src);
-    assert.ok(srcBody.includes("{{consentSmsHtml}}"),
-      "the evidence page hard-codes the disclosure instead of taking the canonical build variable");
-    assert.ok(!srcBody.includes("I agree to receive text messages"),
-      "the evidence page retypes the disclosure - it must come from api/_lib/consent.mjs only");
+    const srcNorm = flat(srcBody);
+    assert.ok(srcBody.includes("{{consentSmsHtml}}") && srcBody.includes("{{consentVoiceHtml}}"),
+      "the evidence page hard-codes a disclosure instead of taking the canonical build variables");
+    for (const d of [SMS_CONSENT, AI_VOICE_CONSENT]) {
+      assert.ok(!srcNorm.includes(flat(d.text)),
+        `the evidence page source retypes the canonical ${d.channel} disclosure`);
+      /* The opening clause alone is enough to be a copy worth catching -
+         a truncated quote drifts exactly as silently as a whole one. */
+      assert.ok(!srcNorm.includes(flat(d.text).slice(0, 60)),
+        `the evidence page source quotes the ${d.channel} disclosure - it must come from api/_lib/consent.mjs only`);
+    }
+    /* Alt text and title attributes are read by crawlers and screen
+       readers, so a copy hiding in one is a published copy. */
+    for (const attr of srcBody.match(/\balt="[\s\S]*?"|\btitle="[\s\S]*?"/g) ?? [])
+      for (const d of [SMS_CONSENT, AI_VOICE_CONSENT])
+        assert.ok(!flat(attr).includes(flat(d.text).slice(0, 60)),
+          `an attribute reproduces the ${d.channel} disclosure: ${flat(attr).slice(0, 90)}…`);
   });
 
   test("it states what the real control does, and links the real surfaces", () => {
@@ -228,7 +248,15 @@ describe("the real opt-in surface is unchanged", () => {
         assert.equal((html.match(new RegExp('name="' + name + '"', "g")) || []).length, 1,
           `${f} renders more than one ${name}`);
       }
-      assert.ok(html.includes(SMS_CONSENT.version) === false || true);
+      /* The version identifier is SERVER-SIDE bookkeeping. api/_lib/
+         consent.mjs stamps it from its own constant when it builds the
+         evidence; it is never read back from the browser. Rendering it
+         would publish a value the server must not trust and does not
+         need. (This replaces an assertion that read
+         `x === false || true` and could not fail.) */
+      for (const d of [SMS_CONSENT, AI_VOICE_CONSENT])
+        assert.ok(!html.includes(d.version),
+          `${f} renders ${d.version} - the consent version is recorded server-side, not published`);
     }
   });
 
@@ -286,8 +314,10 @@ describe("the broad privacy policy scopes itself away from SMS data", () => {
     const body = text(mainOf(page(ON_DIR, "privacy.html")));
     assert.ok(body.includes("a title company, lender or inspector you have chosen to work with"),
       "the transaction-sharing disclosure was removed - it is legitimate and must stay");
-    assert.ok(body.includes(
-      "This transaction-related sharing does not include mobile information, SMS opt-in data, or SMS consent"));
+    assert.ok(body.includes("Your SMS opt-in and your SMS consent are never transferred as part of that transaction-related sharing"),
+      "the carve-out no longer says the SMS opt-in and consent are withheld from transaction sharing");
+    assert.ok(body.includes("Mobile information is not sold, and is not shared with third parties or affiliates for their own marketing or promotional purposes"),
+      "the carve-out lost the mobile-information no-sale / no-marketing-sharing statement");
     assert.match(page(ON_DIR, "privacy.html"), /href="\/sms-privacy"/);
   });
 
@@ -304,6 +334,15 @@ describe("the broad privacy policy scopes itself away from SMS data", () => {
       /no (?:third party|one|service|provider) (?:ever )?(?:receives|processes|sees) your (?:SMS|mobile)/i,
       /SMS (?:data|information) is never processed/i,
     ]) assert.doesNotMatch(body, overclaim, "the privacy page overclaims about SMS processing");
+
+    /* And it must not swing the other way either. A title company
+       completing a transaction the consumer asked for may legitimately
+       receive their phone number; only the OPT-IN and the CONSENT are
+       withheld. The page says so in as many words. */
+    assert.doesNotMatch(body, /does not include mobile information/i,
+      "the carve-out claims transaction sharing excludes mobile information outright, which is not true");
+    assert.ok(body.includes("may legitimately need your contact details, including your phone number"),
+      "the carve-out no longer acknowledges that a transaction party may need the number");
   });
 
   test("the carve-out follows the feature gate, leaving no dead link when it is off", () => {

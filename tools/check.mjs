@@ -817,12 +817,21 @@ for (const file of pages) {
        has already shipped four content checks that matched their own
        commentary. */
     const privacyBody = privacy.replace(/<!--[\s\S]*?-->/g, "");
-    if (!privacyBody.includes("does not include mobile information, SMS opt-in"))
-      fail("privacy.html", "does not scope transaction-related sharing away from mobile and SMS opt-in data");
+    const privacyText = privacyBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    if (!privacyText.includes("SMS opt-in and your SMS consent are never transferred"))
+      fail("privacy.html", "does not say the SMS opt-in and consent are not transferred by transaction-related sharing");
+    if (!privacyText.includes("not sold, and is not shared with third parties or affiliates for their own marketing"))
+      fail("privacy.html", "does not carry the mobile-information no-sale / no-marketing-sharing statement");
     if (!privacyBody.includes('href="/sms-privacy"'))
       fail("privacy.html", "does not point at the SMS Privacy Policy that actually governs SMS data");
-    if (!privacyBody.includes("title company, lender or inspector"))
+    if (!privacyText.includes("title company, lender or inspector"))
       fail("privacy.html", "lost the transaction-sharing disclosure - the SMS clarification narrows it, it does not replace it");
+    /* The overclaim this wording was corrected AWAY from. A title company
+       completing a transaction the consumer asked for may legitimately
+       receive their phone number; promising otherwise is a false promise
+       that happens to read well to a carrier reviewer. */
+    if (/does not include mobile information/.test(privacyText))
+      fail("privacy.html", "claims transaction sharing excludes mobile information outright - it does not, and only the SMS opt-in and consent are withheld");
 
     /* Step 1 of the two-step valuation form carries no SMS consent - the
        checkbox is on step 2 - so its privacy link must not read as the
