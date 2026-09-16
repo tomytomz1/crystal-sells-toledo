@@ -7,23 +7,28 @@
    read, one place to audit, one place to get right.
 
    The resolver is PURE. It performs no I/O, reads no environment beyond
-   what it is handed, and sends nothing. It is given a contact's permission
-   state - the thing a future integration will have read from HubSpot - and
-   returns a decision.
+   what it is handed, and sends nothing. Gate 8 performs the required I/O
+   first and hands the resolver two additional facts: whether the durable
+   suppression lookup succeeded, and whether the current consent state was
+   actually read. Provider failure is therefore data for THIS resolver,
+   never a second permission decision beside it.
 
    PRECEDENCE, in this order, and the order is the compliance argument:
 
-     1. FEATURE_DISABLED   nothing may go out while the feature is off
-     2. GLOBAL_DNC         "do not contact me" outranks everything
-     3. channel suppression a STOP or a DNC outranks any consent record
-     4. consent status     granted, or it is a no
-     5. phone validity     a number we cannot dial is not a permission
-     6. phone match        consent binds to the number it was given for
+     1. FEATURE_DISABLED        nothing may go out while the feature is off
+     2. durable lookup failure  no answer from the system of record = no send
+     3. durable active block    ledger suppression/revocation outranks consent
+     4. consent-read failure    no current permission state = no send
+     5. GLOBAL_DNC              CRM projection still fails closed
+     6. channel suppression     CRM projection still fails closed
+     7. consent status          granted, or it is a no
+     8. phone validity          a number we cannot dial is not a permission
+     9. phone match             consent binds to the number it was given for
 
-   Suppression is checked BEFORE consent deliberately. A contact whose
-   status still reads `granted` because a form was submitted after a STOP
-   must still be refused; putting consent first would make the resolver
-   agree with the most recent form rather than with the consumer.
+   The durable ledger is authoritative for suppression by phone. HubSpot's
+   suppression properties remain a conservative operator-facing projection:
+   if either source blocks, sending is refused. This union deliberately
+   prefers a false negative (do not send) to communicating after an opt-out.
    ===================================================================== */
 
 import { PERMISSION_STATE, consentFeatureEnabled } from "./consent.mjs";
@@ -35,6 +40,11 @@ const { GRANTED, REVOKED, SUPPRESSED, NEVER_GRANTED } = PERMISSION_STATE;
 export const REASON = Object.freeze({
   ALLOWED: "ALLOWED",
   FEATURE_DISABLED: "FEATURE_DISABLED",
+  SUPPRESSION_LOOKUP_UNAVAILABLE: "SUPPRESSION_LOOKUP_UNAVAILABLE",
+  CONSENT_STATE_UNAVAILABLE: "CONSENT_STATE_UNAVAILABLE",
+  DURABLE_SMS_BLOCK: "DURABLE_SMS_BLOCK",
+  DURABLE_VOICE_BLOCK: "DURABLE_VOICE_BLOCK",
+  DURABLE_GLOBAL_BLOCK: "DURABLE_GLOBAL_BLOCK",
   NO_CONSENT: "NO_CONSENT",
   CONSENT_REVOKED: "CONSENT_REVOKED",
   SMS_SUPPRESSED_STOP: "SMS_SUPPRESSED_STOP",
@@ -62,33 +72,71 @@ const samePhone = (a, b) => {
 };
 
 /**
+ * Interpret Gate 8's durable suppression result without trusting its shape.
+ *
+ * Absence means a pure caller is exercising the consent model without the
+ * send-time I/O layer; existing transition tests intentionally do this. Once
+ * Gate 8 supplies the field, however, malformed or unavailable state fails
+ * closed. A successful lookup may contain only the three lanes db/003 can
+ * return. Unknown data is not silently treated as "no blocks".
+ */
+function durableDecision(channel, durableSuppression) {
+  if (durableSuppression == null) return null;
+  if (durableSuppression.status !== "ok")
+    return deny(REASON.SUPPRESSION_LOOKUP_UNAVAILABLE);
+  if (!Array.isArray(durableSuppression.channels))
+    return deny(REASON.SUPPRESSION_LOOKUP_UNAVAILABLE);
+
+  const allowed = new Set(["sms", "ai_voice", "all"]);
+  if (durableSuppression.channels.some((v) => !allowed.has(v)))
+    return deny(REASON.SUPPRESSION_LOOKUP_UNAVAILABLE);
+
+  const channels = new Set(durableSuppression.channels);
+  if (channels.has("all")) return deny(REASON.DURABLE_GLOBAL_BLOCK);
+  if (channel === "sms" && channels.has("sms"))
+    return deny(REASON.DURABLE_SMS_BLOCK);
+  if (channel === "ai_voice" && channels.has("ai_voice"))
+    return deny(REASON.DURABLE_VOICE_BLOCK);
+  return null;
+}
+
+/**
  * Resolve one channel.
  *
  * @param state    the contact's permission state
  * @param channel  "sms" | "ai_voice"
  * @param target   the number we would actually dial or text
- * @param opts     { env } - environment for the feature gate
+ * @param opts     { env, durableSuppression, consentStateAvailable }
  */
-function resolve(state, channel, target, { env = process.env } = {}) {
+function resolve(state, channel, target, {
+  env = process.env,
+  durableSuppression = null,
+  consentStateAvailable = true,
+} = {}) {
   if (!consentFeatureEnabled(env)) return deny(REASON.FEATURE_DISABLED);
+
+  /* The durable phone-keyed ledger is the suppression authority. An outage
+     cannot be interpreted as "not suppressed". If it did answer, an active
+     block wins before any mutable CRM state is considered. */
+  const durable = durableDecision(channel, durableSuppression);
+  if (durable) return durable;
+
+  /* Gate 8 distinguishes "HubSpot says no grant" from "we could not read
+     HubSpot". Both refuse a send; only the latter says the dependency failed. */
+  if (consentStateAvailable !== true)
+    return deny(REASON.CONSENT_STATE_UNAVAILABLE);
 
   const s = state || {};
   const suppression = s.suppression || {};
 
-  /* 2. Global first. "Do not contact me again" is not a channel
-        preference, and no per-channel consent survives it. */
+  /* HubSpot suppression is a projection, never the source of truth, but it
+     remains conservative: a stale true can only block, never authorize. */
   if (suppression.global) return deny(REASON.GLOBAL_DNC);
-
-  /* 3. Channel suppression. Separate records, separate effects: an SMS
-        STOP does not imply a voice DNC, and a voice DNC does not imply an
-        SMS STOP. Only an explicit global record stops both. */
   if (channel === "sms" && suppression.sms) return deny(REASON.SMS_SUPPRESSED_STOP);
   if (channel === "ai_voice" && suppression.voice) return deny(REASON.VOICE_DNC);
 
-  /* 4. Consent status. Note the two different denials: never asked and
-        declined are NO_CONSENT; withdrawn in words is CONSENT_REVOKED.
-        They read the same to a sender and completely differently to
-        whoever has to explain the record later. */
+  /* Consent status. Note the two different denials: never asked and declined
+     are NO_CONSENT; withdrawn in words is CONSENT_REVOKED. */
   const ch = s[channel] || { status: NEVER_GRANTED };
   if (ch.status === REVOKED) return deny(REASON.CONSENT_REVOKED);
   if (ch.status === SUPPRESSED) {
@@ -96,11 +144,8 @@ function resolve(state, channel, target, { env = process.env } = {}) {
   }
   if (ch.status !== GRANTED) return deny(REASON.NO_CONSENT);
 
-  /* 5/6. The number. Consent was given for a specific line, with that
-          number on the screen beside the disclosure. If the contact's
-          number has since changed, the old permission does not travel to
-          the new one - that would be contacting someone who never agreed,
-          possibly a stranger who inherited the number. */
+  /* The number. Consent was given for a specific line, with that number on
+     the screen beside the disclosure. Permission never travels to a new line. */
   const dial = target != null && target !== "" ? target : ch.consent_phone;
   if (!dialable(dial)) return deny(REASON.INVALID_PHONE);
   if (!samePhone(dial, ch.consent_phone)) return deny(REASON.CONSENT_PHONE_MISMATCH);
@@ -121,16 +166,14 @@ export function canPlaceAutomatedVoiceCall(state, target, opts) {
 /* ---------------------------------------------------------------------
    SUPPRESSION
    ---------------------------------------------------------------------
-   Recorded by a future inbound webhook (a STOP reply, a spoken "do not
-   call me again", a manual entry). Pure and additive: it writes the
+   Recorded by an inbound webhook (a STOP reply, a spoken "do not call me
+   again", or a manual operator entry). Pure and additive: it writes the
    suppression record and marks the channel status, and it never removes
    anything.
 
-   Clearing a suppression is deliberately NOT implemented here. A
-   re-opt-in is a separate, explicit, auditable transition - and where
-   Twilio holds its own carrier-level opt-out for a number, clearing our
-   record alone would not make the message deliverable anyway. See
-   docs/updates/2026-09-09-communications-consent-foundation.md.
+   Clearing a suppression is a separate, explicit, auditable transition.
+   Where Twilio holds its own carrier-level opt-out, clearing our record alone
+   would not make the message deliverable. See the unsuppression decision doc.
    --------------------------------------------------------------------- */
 export const SUPPRESSION_SCOPE = Object.freeze({
   SMS: "sms",
