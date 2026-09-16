@@ -9,14 +9,21 @@ This slice puts the compliance decision immediately in front of every future aut
 A send is allowed only when all of these are true at the moment of the attempted communication:
 
 1. communications consent is enabled;
-2. the durable phone-keyed suppression lookup succeeded;
-3. the durable ledger reports no active block for the requested channel (and no `all` block);
-4. current consent state was successfully read from HubSpot;
-5. HubSpot's conservative suppression projection does not independently block the channel;
-6. the channel's current permission is `granted`;
-7. the actual target number is dialable and matches the number the consent was granted for.
+2. current consent state was successfully read from HubSpot;
+3. HubSpot's conservative suppression projection does not independently block the channel;
+4. the channel's current permission is `granted` for the actual target number;
+5. **after those checks**, the durable phone-keyed suppression lookup succeeds;
+6. the durable ledger reports no active block for the requested channel and no `all` block.
 
 Any dependency failure refuses the send. `api/_lib/permission.mjs` remains the only policy engine that returns the final `{ allowed, reason }` decision.
+
+### Why the durable lookup is last
+
+The first implementation draft did the durable suppression read before HubSpot. That was a material time-of-check/time-of-use defect: HubSpot may take seconds to answer, and a consumer can send STOP during that interval. A suppression check that was true at the beginning of the authorization is stale by the time the sender acts.
+
+The corrected sequence reads mutable consent first and the authoritative phone-keyed suppression state **last**, immediately before the future sender's external side effect. An already-denied consent state returns early because it can never authorize anything. A potential `ALLOWED` result must always cross the final durable lookup. The future sender must not cache an earlier permission result.
+
+This does not claim an impossible zero-race system — a STOP can arrive after any finite check. It narrows the application-controlled window by placing the most safety-critical read at the final provider boundary before send.
 
 ## Two credentials stay separate
 
@@ -25,7 +32,7 @@ Gate 8 introduces the **name** `CONSENT_LEDGER_SENDER_URL` for the future server
 - `CONSENT_LEDGER_URL` — website/application role: append evidence; no read.
 - `CONSENT_LEDGER_SENDER_URL` — sender role: execute `get_suppression_state(text)` for one number; no table `SELECT`, no insert.
 
-The production sender credential already exists in Neon, but this implementation does **not** add its connection string to Vercel. Until an operator explicitly does that, Gate 8 fails closed with `SUPPRESSION_LOOKUP_UNAVAILABLE` and no future sender can be authorized through this path.
+The production sender credential already exists in Neon, but this implementation does **not** add its connection string to Vercel. Until an operator explicitly does that, any potentially sendable communication fails closed with `SUPPRESSION_LOOKUP_UNAVAILABLE`.
 
 ## Durable suppression lookup
 
@@ -42,9 +49,11 @@ Returned rows are treated as untrusted provider data. Only `sms`, `ai_voice`, an
 
 ## CRM current state
 
-When the durable lookup does not already block the requested channel, Gate 8 reads the contact through the existing HubSpot email search and uses its already-established consent-state parser. A missing contact means `NO_CONSENT`; a failed or malformed CRM read means `CONSENT_STATE_UNAVAILABLE`.
+Gate 8 first reads the contact through the existing HubSpot email search and uses its already-established consent-state parser. A missing contact means `NO_CONSENT`; a failed or malformed CRM read means `CONSENT_STATE_UNAVAILABLE`.
 
-The durable ledger is authoritative for suppression by phone. HubSpot suppression flags remain a conservative projection: Gate 8 takes the union, so a stale true may block but can never authorize.
+If that current state already denies the requested channel, Gate 8 returns the denial without spending the durable lookup. Only a state that could otherwise allow proceeds to the final phone-keyed suppression read.
+
+The durable ledger is authoritative for suppression by phone. HubSpot suppression flags remain a conservative projection: either source may block, and neither source can create a grant.
 
 ## What is deliberately not in this slice
 
@@ -62,6 +71,8 @@ The next sender must call Gate 8 immediately before its external side effect. It
 
 ## Evidence and remaining boundary
 
-The implementation tests inject both provider boundaries and exercise the real permission resolver. They prove fail-closed composition, lane separation, phone binding, E.164 lookup input, and PII-free error shaping. They do **not** prove Neon HTTP's production response shape or a live HubSpot read in the sender path.
+The implementation tests inject both provider boundaries and exercise the real permission resolver. They prove fail-closed composition, lane separation, phone binding, E.164 lookup input, provider ordering on an allow path, and PII-free error shaping. They do **not** prove Neon HTTP's production response shape or a live HubSpot read in the sender path.
+
+A separate CI test scans the generated browser-delivered output for `CONSENT_LEDGER_SENDER_URL`, so the new sender-role variable name cannot silently leak into built HTML, JS, CSS or metadata.
 
 Before outbound automation is activated, an operator must add the sender-role connection string to the appropriate production environment and a controlled real-boundary verification must confirm `get_suppression_state(text)` is reachable under that credential. A2P approval remains a separate prerequisite for production SMS traffic.
