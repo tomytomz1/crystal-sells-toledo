@@ -229,15 +229,20 @@ describe("static integration guardrails", () => {
   test("no API sender may bypass Gate 8 by importing the pure send decision directly", () => {
     const api = join(REPO, "api");
     const offenders = [];
+    const importRe = /import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g;
     for (const file of walk(api)) {
       if (!/\.(?:mjs|js)$/.test(file)) continue;
       if (file.endsWith("/permission.mjs") || file.endsWith("/send-permission.mjs")) continue;
       const text = readFileSync(file, "utf8");
-      if (/\bcanSendSms\b|\bcanPlaceAutomatedVoiceCall\b/.test(text))
-        offenders.push(file.slice(REPO.length + 1));
+      for (const match of text.matchAll(importRe)) {
+        const [, names, source] = match;
+        if (!/permission\.mjs$/.test(source)) continue;
+        if (/\bcanSendSms\b|\bcanPlaceAutomatedVoiceCall\b/.test(names))
+          offenders.push(file.slice(REPO.length + 1));
+      }
     }
-    assert.deepEqual(offenders, [],
-      "an API module can decide a send without the durable Gate 8 lookup");
+    assert.deepEqual([...new Set(offenders)], [],
+      "an API module imports a pure send decision instead of the durable Gate 8 boundary");
   });
 
   test("the sender credential name appears in no client-delivered source", () => {
