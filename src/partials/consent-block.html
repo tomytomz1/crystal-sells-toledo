@@ -26,8 +26,8 @@
          disclosure says so in as many words
        * two separate boxes - SMS and automated voice are separate
          permissions and one may never imply the other
-       * both links present and opening in a new tab, so a visitor can read
-         the policy without losing a part-filled form
+       * legal links open in a new tab, so a visitor can read the policy
+         without losing a part-filled form
      ===================================================================== -->
 <fieldset class="consent">
   <legend class="consent__legend">How may Crystal follow up? <span class="consent__optional">Optional</span></legend>
@@ -35,6 +35,9 @@
   <div class="consent__item">
     <input class="consent__box" id="consent-sms" name="sms_consent" type="checkbox" value="true">
     <label class="consent__label" for="consent-sms">{{consentSmsHtml}}</label>
+    <p class="consent__note">SMS program: see the
+      <a href="/sms-privacy" target="_blank" rel="noopener">Privacy Policy</a> and
+      <a href="/sms-terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>
   </div>
 
   <div class="consent__item">
