@@ -209,9 +209,11 @@ rather than assumed.
       and the ledger row still stands. Confirm separately.
 - [ ] **STOP/HELP inbound webhook actually implemented and LIVE** — the
       endpoint exists and is audited, but **it is not activated**:
-      `TWILIO_AUTH_TOKEN`, `OPERATOR_ACTION_SECRET` (≥ 32 bytes) and the four
-      `ZOHO_SMTP_*` variables are in no environment, no Messaging Service
-      exists, and no webhook is configured. **"In code" is not "live."**
+      `TWILIO_AUTH_TOKEN` and `OPERATOR_ACTION_SECRET` (≥ 32 bytes) are in no
+      environment; **`ZOHO_SMTP_*` needs CONFIRMING in Production, not
+      adding** — see `docs/CURRENT-STATE.md` § STOP / HELP inbound activation;
+      no Messaging Service is known to exist and no webhook is configured.
+      **"In code" is not "live."**
       Without those, every ordinary inbound message answers `503`.
       **This remains the box that matters most**, and it is the only
       website-side item still open. See `docs/CURRENT-STATE.md`

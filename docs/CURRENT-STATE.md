@@ -269,10 +269,17 @@ Schema in the production HubSpot portal:
   APPROVED.** Enabling the opt-in surface is a prerequisite for submission,
   not a submission.
 
-  **THE LIVE OPT-IN AND LEGAL SURFACE IS CAMPAIGN-READY, on operator
-  evidence.** What remains before a Campaign may be submitted is **inbound
-  STOP/HELP activation**, which is Twilio and Vercel configuration, not
-  website work. See the STOP/HELP activation section below.
+  **THE LIVE OPT-IN SURFACE IS VERIFIED; THE FULL CAMPAIGN PREFLIGHT IS NOT
+  YET CLOSED.** Precisely: the live `/home-value` **opt-in** surface is
+  operator-verified and readable, and the Production consent feature is
+  enabled. The **legal pages are generated and deployed in source but have NOT
+  been observed live** — no agent could reach the domain, and the operator's
+  screenshot covered `/home-value` only. **Until `/privacy` and
+  `/communications-terms` are actually loaded and read on the live domain, the
+  website-side preflight is incomplete**, because error 30908 is assessed
+  against the policy page a reviewer opens, not against the repository.
+  Beyond that, what remains is **inbound STOP/HELP activation**, which is
+  Twilio and Vercel configuration, not website work. See the STOP/HELP activation section below.
 
   **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–5 are now DONE.**
 
@@ -345,8 +352,30 @@ webhook so we can record it.
 | `TWILIO_AUTH_TOKEN` | **YES — hard blocker** | `twilioConfigured()`; absent ⇒ every inbound `503`, signature never verified |
 | `CONSENT_LEDGER_URL` | **YES — already set** | a STOP cannot be recorded without it; `503` |
 | `OPERATOR_ACTION_SECRET` | **YES** | `operatorActionConfigured()` requires **≥ 32 bytes** (`MIN_SECRET_BYTES`); shorter reads exactly like absent and the endpoint stays inert |
-| `ZOHO_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | **YES** | `isMailConfigured()` requires all four; missing ⇒ **every ordinary non-STOP message answers `503`** |
+| `ZOHO_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | **YES — but CONFIRM, do not re-add** | `isMailConfigured()` requires all four non-empty; missing ⇒ **every ordinary non-STOP message answers `503`**. See the note below on what is and is not established about their Production scope |
 | HubSpot credentials | **No** | projection is skipped and logged; the durable record is the ledger |
+
+**`ZOHO_SMTP_*` — WHAT THIS REPOSITORY ACTUALLY ESTABLISHES, and what it does
+not.** Zoho **Mail** SMTP is the **live lead-acknowledgement transport** and is
+a different thing from the dormant Zoho **CRM** rollback code. What is on the
+record here is that `ZOHO_SMTP_*` **was deliberately withheld from PREVIEW** —
+that is why a preview submission logs `lead.ack.skipped / not_configured` — and
+that the operator-surfacing email rides *"the Zoho Mail SMTP transport the lead
+acknowledgement already uses."*
+
+**Its PRODUCTION scope is not established from this repository**, which holds no
+environment state. The activation line elsewhere in this file asks for
+`ZOHO_SMTP_*` **"confirmed there"** — *confirmed*, not added — and the nearby
+sentence *"all three are absent today"* must **not** be read as establishing
+that `ZOHO_SMTP_*` is absent from Production; it cannot, because nothing in a
+git repository can observe a Vercel environment.
+
+**So the operator action is CONFIRMATION.** Open Vercel → Environment Variables
+→ Production and check the four names are present. **Do not recreate, rotate or
+re-enter them on the strength of this document** — rotating a live
+acknowledgement transport to satisfy a doc would be a self-inflicted outage.
+If they turn out to be absent, that is the moment to add them, and the lead
+acknowledgement email was not working either.
 
 **The secret must be randomly generated**, at least 32 bytes, and any character
 set is fine — it is stretched through HKDF-SHA256, so only length is
@@ -354,9 +383,13 @@ constrained. **Its value appears nowhere in this repository and must not.**
 
 **TWILIO CONFIGURATION, from current Twilio documentation:**
 
-- **A Messaging Service is required.** The Campaign attaches to a Messaging
-  Service, and a Sole Proprietor campaign may carry **exactly one** 10DLC
-  number, which must be the one in that Service.
+- **A Messaging Service is required**, and the Campaign attaches to one. A
+  **Sole Proprietor campaign may carry exactly one 10DLC number**, which must
+  be the one in that Service. **Twilio supports both orderings** — selecting an
+  **existing** Messaging Service during Campaign registration, or **creating
+  one as part of that flow** — so nothing here mandates a single sequence. The
+  manual steps below create it first only because that makes the webhook and
+  opt-out settings testable *before* a Campaign is submitted against them.
 - **The webhook belongs on the MESSAGING SERVICE, not the number.** Twilio
   delivers `OptOutType` (`STOP` / `START` / `HELP`) to *the webhook configured
   for the Messaging Service*. Our `classify()` **prefers** `OptOutType` and
@@ -372,19 +405,32 @@ constrained. **Its value appears nowhere in this repository and must not.**
 - **Our empty TwiML is correct** under that configuration, and is what keeps us
   from double-replying on top of Twilio's own confirmation.
 
-**WEBHOOK RETRY — and this is the sharpest remaining risk.** Twilio does **not**
-retry a webhook that returns a non-2xx status; it raises error **11200** and
-moves on. Retries are configured with **connection overrides**: a `#`-prefixed
-fragment appended to the webhook URL, where `rc` is the retry count (0–5,
-default 1) and `rp` is the retry policy, whose values include `4xx`, `5xx`,
-`ct`, `rt` and `all`.
+**WEBHOOK RETRY — and this is the sharpest remaining risk.** Stated precisely,
+because the categorical version of this sentence is wrong:
+
+- **Twilio's DEFAULT retry policy is `ct`** — connect / TLS-handshake failure
+  only. **A `5xx` response is NOT retried under that default.**
+- **Twilio CAN retry a 5xx**, but only when a **connection override** says so.
+- Overrides are a **`#`-prefixed URL fragment** — `#key=value&key=value` —
+  appended to the webhook URL. `rc` is the retry count (**0–5, default 1**);
+  `rp` is the retry policy, whose accepted values include **`4xx`, `5xx`,
+  `ct`, `rt`, `all`** (**default `ct`**), and may be given as a list.
+- **Error 11200 is a separate thing.** It means Twilio did not obtain a
+  successful response from the webhook. It is a *report* of that outcome;
+  whether a retry happened is decided by the retry policy above, not by 11200.
 
 **Why that matters here:** this endpoint deliberately answers `503` on
-recoverable conditions — a Neon outage, an SMTP outage. With no retry, **a real
-STOP arriving during a ledger outage is lost permanently.** The consumer is
-still protected, because Twilio's own STOP filtering blocks the number
-regardless; what is lost is *our evidence of why*. A policy including `5xx` is
-therefore the setting that matches this endpoint's design.
+recoverable conditions — a Neon outage, an SMTP outage. Under the **default
+`ct`** policy those responses are **not** retried, so **a real STOP arriving
+during a ledger outage is lost permanently.** The consumer is still protected,
+because Twilio's own STOP filtering blocks the number regardless; what is lost
+is *our evidence of why*. **A policy whose `rp` includes `5xx` (or `all`) is
+therefore the setting that matches this endpoint's design** — for example
+`https://crystalsellstoledo.com/api/twilio-inbound#rc=3&rp=5xx,ct,rt`, which is
+syntactically consistent with the documented fragment mechanism.
+
+**NOT CONFIGURED. NOT APPLIED.** No override exists on any webhook, because no
+webhook and no Messaging Service exist yet.
 
 **Stated as unproven:** the connection-override page could not be fetched
 directly from this environment (`twilio.com` is egress-blocked here), so the
