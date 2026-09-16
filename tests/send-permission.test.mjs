@@ -71,7 +71,7 @@ describe("Gate 8 send-time enforcement", () => {
     assert.equal(crmCalls, 0);
   });
 
-  test("missing sender credential fails closed before the CRM read", async () => {
+  test("a missing sender credential fails closed after a potentially valid grant is read", async () => {
     let crmCalls = 0;
     _setContactLookup(async () => { crmCalls++; return contact(granted({ sms: true })); });
 
@@ -79,60 +79,72 @@ describe("Gate 8 send-time enforcement", () => {
       await authorizeSms({ email: EMAIL, phone: PHONE }, { env: { [FEATURE_FLAG]: "true" } }),
       { allowed: false, reason: REASON.SUPPRESSION_LOOKUP_UNAVAILABLE },
     );
-    assert.equal(crmCalls, 0);
+    assert.equal(crmCalls, 1);
   });
 
   test("no durable block plus a current matching SMS grant allows", async () => {
-    _setSuppressionExecutor(async () => []);
-    _setContactLookup(async () => contact(granted({ sms: true })));
+    const order = [];
+    _setContactLookup(async () => {
+      order.push("hubspot");
+      return contact(granted({ sms: true }));
+    });
+    _setSuppressionExecutor(async () => {
+      order.push("suppression");
+      return [];
+    });
 
     assert.deepEqual(await authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: true, reason: REASON.ALLOWED });
+    assert.deepEqual(order, ["hubspot", "suppression"],
+      "durable suppression must be the final provider read on an allow path");
   });
 
-  test("a durable SMS block refuses before HubSpot is queried", async () => {
-    let crmCalls = 0;
-    _setSuppressionExecutor(async () => [
-      { channel: "sms", suppressed_at: "2026-09-16T00:00:00.000Z" },
-    ]);
-    _setContactLookup(async () => { crmCalls++; return contact(granted({ sms: true })); });
+  test("a durable SMS block overrides an earlier current grant", async () => {
+    const order = [];
+    _setContactLookup(async () => {
+      order.push("hubspot");
+      return contact(granted({ sms: true }));
+    });
+    _setSuppressionExecutor(async () => {
+      order.push("suppression");
+      return [{ channel: "sms", suppressed_at: "2026-09-16T00:00:00.000Z" }];
+    });
 
     assert.deepEqual(await authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: false, reason: REASON.DURABLE_SMS_BLOCK });
-    assert.equal(crmCalls, 0, "a known durable refusal should not need a CRM read");
+    assert.deepEqual(order, ["hubspot", "suppression"]);
   });
 
   test("an SMS-only durable block does not suppress an independently granted voice lane", async () => {
+    _setContactLookup(async () => contact(granted({ voice: true })));
     _setSuppressionExecutor(async () => [
       { channel: "sms", suppressed_at: "2026-09-16T00:00:00.000Z" },
     ]);
-    _setContactLookup(async () => contact(granted({ voice: true })));
 
     assert.deepEqual(await authorizeAutomatedVoice({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: true, reason: REASON.ALLOWED });
   });
 
-  test("a durable all-channel block refuses automated voice before HubSpot is queried", async () => {
-    let crmCalls = 0;
+  test("a durable all-channel block overrides an earlier current voice grant", async () => {
+    _setContactLookup(async () => contact(granted({ voice: true })));
     _setSuppressionExecutor(async () => [
       { channel: "all", suppressed_at: "2026-09-16T00:00:00.000Z" },
     ]);
-    _setContactLookup(async () => { crmCalls++; return contact(granted({ voice: true })); });
 
     assert.deepEqual(await authorizeAutomatedVoice({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: false, reason: REASON.DURABLE_GLOBAL_BLOCK });
-    assert.equal(crmCalls, 0);
   });
 
   test("database failure is not interpreted as no suppression", async () => {
-    _setSuppressionExecutor(async () => { throw new Error("contains +14195551234 and a host"); });
     _setContactLookup(async () => contact(granted({ sms: true })));
+    _setSuppressionExecutor(async () => { throw new Error("contains +14195551234 and a host"); });
 
     assert.deepEqual(await authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: false, reason: REASON.SUPPRESSION_LOOKUP_UNAVAILABLE });
   });
 
   test("malformed or unknown suppression rows fail closed", async () => {
+    _setContactLookup(async () => contact(granted({ sms: true })));
     for (const rows of [
       [{ channel: "sms", suppressed_at: "not-a-date" }],
       [{ channel: "other", suppressed_at: "2026-09-16T00:00:00.000Z" }],
@@ -145,28 +157,44 @@ describe("Gate 8 send-time enforcement", () => {
     }
   });
 
-  test("a HubSpot read failure is distinguishable from no consent and still refuses", async () => {
-    _setSuppressionExecutor(async () => []);
+  test("a HubSpot read failure refuses without doing the later suppression lookup", async () => {
+    let dbCalls = 0;
     _setContactLookup(async () => { throw new Error("CRM unavailable"); });
+    _setSuppressionExecutor(async () => { dbCalls++; return []; });
 
     assert.deepEqual(await authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: false, reason: REASON.CONSENT_STATE_UNAVAILABLE });
+    assert.equal(dbCalls, 0);
   });
 
-  test("a genuinely absent contact is simply no consent", async () => {
-    _setSuppressionExecutor(async () => []);
+  test("a genuinely absent contact is no consent and needs no suppression lookup", async () => {
+    let dbCalls = 0;
     _setContactLookup(async () => null);
+    _setSuppressionExecutor(async () => { dbCalls++; return []; });
 
     assert.deepEqual(await authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
       { allowed: false, reason: REASON.NO_CONSENT });
+    assert.equal(dbCalls, 0);
+  });
+
+  test("an already-denied current state never spends a durable lookup", async () => {
+    let dbCalls = 0;
+    _setContactLookup(async () => contact(granted({})));
+    _setSuppressionExecutor(async () => { dbCalls++; return []; });
+
+    assert.deepEqual(await authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
+      { allowed: false, reason: REASON.NO_CONSENT });
+    assert.equal(dbCalls, 0);
   });
 
   test("the old grant cannot travel to a different target number", async () => {
-    _setSuppressionExecutor(async () => []);
+    let dbCalls = 0;
     _setContactLookup(async () => contact(granted({ sms: true, phone: PHONE })));
+    _setSuppressionExecutor(async () => { dbCalls++; return []; });
 
     assert.deepEqual(await authorizeSms({ email: EMAIL, phone: OTHER_PHONE }, { env: ON }),
       { allowed: false, reason: REASON.CONSENT_PHONE_MISMATCH });
+    assert.equal(dbCalls, 0, "phone mismatch is already a definitive denial");
   });
 
   test("the sender asks only the narrow db/003 function for the E.164 target", async () => {
