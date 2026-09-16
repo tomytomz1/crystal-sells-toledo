@@ -74,9 +74,13 @@ export function consentFeatureEnabled(env = process.env) {
    rel="noopener" because a new tab with a window.opener handle is a
    needless hazard. Neither attribute survives stripTags(), so the drift
    assertion still compares like with like. */
-const PRIVACY_LINK =
+const SMS_PRIVACY_LINK =
+  '<a href="/sms-privacy" target="_blank" rel="noopener">Privacy Policy</a>';
+const SMS_TERMS_LINK =
+  '<a href="/sms-terms" target="_blank" rel="noopener">Communications Terms</a>';
+const VOICE_PRIVACY_LINK =
   '<a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>';
-const TERMS_LINK =
+const VOICE_TERMS_LINK =
   '<a href="/communications-terms" target="_blank" rel="noopener">Communications Terms</a>';
 
 export const SMS_CONSENT = Object.freeze({
@@ -92,8 +96,8 @@ export const SMS_CONSENT = Object.freeze({
     "I agree to receive text messages from Crystal Sells Toledo about my real estate " +
     "inquiry, appointments, requested information, and related services. Message " +
     "frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP " +
-    "for help. Consent is not a condition of service. See the " + PRIVACY_LINK +
-    " and " + TERMS_LINK + ".",
+    "for help. Consent is not a condition of service. See the " + SMS_PRIVACY_LINK +
+    " and " + SMS_TERMS_LINK + ".",
 });
 
 export const AI_VOICE_CONSENT = Object.freeze({
@@ -109,8 +113,8 @@ export const AI_VOICE_CONSENT = Object.freeze({
     "I agree to receive calls from Crystal Sells Toledo at the number I provided, " +
     "including calls using automated technology and an artificial, prerecorded, or " +
     "AI-generated voice, about my real estate inquiry, appointments, and requested " +
-    "services. Consent is not a condition of service. See the " + PRIVACY_LINK +
-    " and " + TERMS_LINK + ".",
+    "services. Consent is not a condition of service. See the " + VOICE_PRIVACY_LINK +
+    " and " + VOICE_TERMS_LINK + ".",
 });
 
 export const DISCLOSURES = Object.freeze([SMS_CONSENT, AI_VOICE_CONSENT]);
@@ -133,9 +137,18 @@ export function assertConsentCopyIntact() {
       throw new Error(
         `consent copy drift in ${d.version}: the HTML shown to the visitor does not ` +
         "reduce to the canonical text recorded as their consent");
-    for (const required of ["/privacy", "/communications-terms"])
+    const requiredLinks = d.channel === "sms"
+      ? ["/sms-privacy", "/sms-terms"]
+      : ["/privacy", "/communications-terms"];
+    const forbiddenLinks = d.channel === "sms"
+      ? ["/privacy", "/communications-terms"]
+      : ["/sms-privacy", "/sms-terms"];
+    for (const required of requiredLinks)
       if (!d.html.includes(`href="${required}"`))
         throw new Error(`${d.version} disclosure is missing its ${required} link`);
+    for (const forbidden of forbiddenLinks)
+      if (d.html.includes(`href="${forbidden}"`))
+        throw new Error(`${d.version} disclosure carries the wrong-channel ${forbidden} link`);
     if (!/Consent is not a condition of service\./.test(d.text))
       throw new Error(`${d.version} no longer says consent is not a condition of service`);
   }
