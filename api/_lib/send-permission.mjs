@@ -4,11 +4,19 @@
    voice caller. It does NOT send anything. Its only job is to assemble the
    facts the pure permission resolver needs at the moment a send would occur.
 
-   The order is intentional:
+   The order is load-bearing:
      1. feature gate
-     2. durable phone-keyed suppression lookup (Neon sender role)
-     3. current consent state (HubSpot)
+     2. current consent state (HubSpot)
+     3. durable phone-keyed suppression lookup (Neon sender role)
      4. api/_lib/permission.mjs makes the ONLY allow/deny decision
+
+   The durable lookup is LAST because it is the fact most likely to change
+   after an earlier read: the consumer can send STOP while a CRM request is
+   still in flight. Reading suppression first and then spending up to several
+   seconds in HubSpot creates a time-of-check/time-of-use window in which a new
+   STOP could arrive after the lookup and before the send. A caller must invoke
+   this function immediately before its external side effect and must not cache
+   an earlier ALLOWED result.
 
    Missing configuration, database failure, malformed lookup results, or a
    CRM read failure all become DENY decisions. No dependency outage can be
@@ -178,29 +186,14 @@ async function authorize(channel, { email, phone } = {}, {
   if (!consentFeatureEnabled(env))
     return decisionFor(channel, null, phone, { env });
 
-  let durableSuppression;
-  try {
-    durableSuppression = await lookupDurableSuppression(phone, { env, timeoutMs });
-  } catch {
-    return decisionFor(channel, null, phone, {
-      env,
-      durableSuppression: { status: "unavailable", channels: [] },
-      consentStateAvailable: false,
-    });
-  }
-
-  /* If the durable system of record already blocks this channel, the pure
-     resolver can answer without a CRM call. Less I/O, same policy. */
-  const durableDecision = decisionFor(channel, null, phone, {
-    env, durableSuppression, consentStateAvailable: true,
-  });
-  if ([REASON.DURABLE_GLOBAL_BLOCK, REASON.DURABLE_SMS_BLOCK, REASON.DURABLE_VOICE_BLOCK]
-      .includes(durableDecision.reason)) return durableDecision;
-
+  /* Read mutable permission state first. If there is no usable consent there
+     can be no send, so no durable lookup is necessary. More importantly, any
+     path that COULD become allowed performs the suppression read afterwards,
+     as the final provider boundary before the caller's side effect. */
   const mail = String(email == null ? "" : email).trim();
   if (!mail)
     return decisionFor(channel, null, phone, {
-      env, durableSuppression, consentStateAvailable: true,
+      env, consentStateAvailable: true,
     });
 
   let found;
@@ -208,19 +201,38 @@ async function authorize(channel, { email, phone } = {}, {
     found = await contactLookup(mail);
   } catch {
     return decisionFor(channel, null, phone, {
-      env, durableSuppression, consentStateAvailable: false,
+      env, consentStateAvailable: false,
     });
   }
 
   if (!found)
     return decisionFor(channel, null, phone, {
-      env, durableSuppression, consentStateAvailable: true,
+      env, consentStateAvailable: true,
     });
 
   if (!found.consent || typeof found.consent !== "object" || Array.isArray(found.consent))
     return decisionFor(channel, null, phone, {
-      env, durableSuppression, consentStateAvailable: false,
+      env, consentStateAvailable: false,
     });
+
+  /* A local pre-decision may prove the send impossible without a database
+     query. It is not an authorization: only a denial is returned early. A
+     potential ALLOW must continue to the durable suppression lookup below. */
+  const beforeDurable = decisionFor(channel, found.consent, phone, {
+    env, consentStateAvailable: true,
+  });
+  if (!beforeDurable.allowed) return beforeDurable;
+
+  let durableSuppression;
+  try {
+    durableSuppression = await lookupDurableSuppression(phone, { env, timeoutMs });
+  } catch {
+    return decisionFor(channel, found.consent, phone, {
+      env,
+      durableSuppression: { status: "unavailable", channels: [] },
+      consentStateAvailable: true,
+    });
+  }
 
   return decisionFor(channel, found.consent, phone, {
     env, durableSuppression, consentStateAvailable: true,
