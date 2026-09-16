@@ -28,6 +28,11 @@
          permissions and one may never imply the other
        * legal links open in a new tab, so a visitor can read the policy
          without losing a part-filled form
+
+     Layout note: each .consent__item is a two-column grid (checkbox + label).
+     Keep the direct SMS legal links inside consentSmsHtml rather than adding
+     a third sibling inside this grid. A third auto-placed child can widen the
+     checkbox column and squeeze the disclosure into a narrow column.
      ===================================================================== -->
 <fieldset class="consent">
   <legend class="consent__legend">How may Crystal follow up? <span class="consent__optional">Optional</span></legend>
@@ -35,9 +40,6 @@
   <div class="consent__item">
     <input class="consent__box" id="consent-sms" name="sms_consent" type="checkbox" value="true">
     <label class="consent__label" for="consent-sms">{{consentSmsHtml}}</label>
-    <p class="consent__note">SMS program: see the
-      <a href="/sms-privacy" target="_blank" rel="noopener">Privacy Policy</a> and
-      <a href="/sms-terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>
   </div>
 
   <div class="consent__item">
