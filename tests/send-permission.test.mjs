@@ -8,12 +8,13 @@
  * Database fold semantics and the sender role's real privileges are already
  * exercised against PostgreSQL by tests/unsuppression-fold.test.mjs. This file
  * proves the application-side query, union and failure semantics. It does NOT
- * claim a live Neon request has been made.
+ * claim a live Neon request has been made or that a provider send is already
+ * coupled to this decision.
  */
 
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +22,7 @@ import { FEATURE_FLAG, PERMISSION_STATE } from "../api/_lib/consent.mjs";
 import { REASON } from "../api/_lib/permission.mjs";
 import {
   SENDER_LEDGER_URL_VAR, SUPPRESSION_QUERY, SEND_TIME_REASON,
-  canSendSmsNow, canPlaceAutomatedVoiceCallNow, withDurableSuppression,
+  canSendSmsNow, canPlaceAutomatedVoiceCallNow,
   _setSuppressionLookupExecutor, _resetSuppressionLookupExecutor,
 } from "../api/_lib/send-permission.mjs";
 
@@ -95,7 +96,7 @@ describe("local/current-state denials short-circuit before the durable read", ()
   });
 });
 
-describe("the durable fold is queried by E.164 destination immediately before allow", () => {
+describe("the durable fold is queried by E.164 destination before an allow", () => {
   test("no durable block preserves an otherwise-valid SMS grant", async () => {
     const calls = capture([]);
     const got = await canSendSmsNow(state({ sms: true }), PHONE, { env: ENV });
@@ -107,10 +108,13 @@ describe("the durable fold is queried by E.164 destination immediately before al
     assert.equal(calls[0].opts.signal instanceof AbortSignal, true);
   });
 
-  test("an SMS lane from the durable ledger blocks SMS", async () => {
+  test("an SMS lane from the durable ledger blocks SMS without mutating caller state", async () => {
+    const before = state({ sms: true, suppression: { voice: { reason: "existing" } } });
+    const snapshot = structuredClone(before);
     capture([block("sms")]);
-    const got = await canSendSmsNow(state({ sms: true }), PHONE, { env: ENV });
+    const got = await canSendSmsNow(before, PHONE, { env: ENV });
     assert.deepEqual(got, { allowed: false, reason: REASON.SMS_SUPPRESSED_STOP });
+    assert.deepEqual(before, snapshot, "the Gate 8 read mutated caller-owned current state");
   });
 
   test("an AI-voice lane from the durable ledger blocks voice", async () => {
@@ -149,12 +153,12 @@ describe("the durable fold is queried by E.164 destination immediately before al
     assert.deepEqual(calls[0].params, [E164]);
   });
 
-  test("there is no cache: two otherwise-sendable attempts cause two reads", async () => {
+  test("there is no cache inside Gate 8: two attempts cause two reads", async () => {
     const calls = capture([]);
     const s = state({ sms: true });
     assert.equal((await canSendSmsNow(s, PHONE, { env: ENV })).allowed, true);
     assert.equal((await canSendSmsNow(s, PHONE, { env: ENV })).allowed, true);
-    assert.equal(calls.length, 2, "a prior clean read was reused at send time");
+    assert.equal(calls.length, 2, "a prior clean durable read was reused");
   });
 });
 
@@ -200,33 +204,13 @@ describe("authoritative-read failures fail closed", () => {
   }
 });
 
-describe("union semantics do not mutate or clear caller-owned state", () => {
-  test("withDurableSuppression returns a new state and a new suppression object", () => {
-    const before = state({ sms: true, suppression: { voice: { reason: "existing" } } });
-    const snapshot = structuredClone(before);
-    const after = withDurableSuppression(before, [block("sms")]);
-
-    assert.notEqual(after, before);
-    assert.notEqual(after.suppression, before.suppression);
-    assert.deepEqual(before, snapshot, "the caller's current state was mutated");
-    assert.equal(after.suppression.voice.reason, "existing");
-    assert.equal(after.suppression.sms.reason, "durable_ledger");
-  });
-
-  test("a durable clean result never clears an existing HubSpot block", () => {
-    const before = state({ sms: true, suppression: { sms: { reason: "existing" } } });
-    const after = withDurableSuppression(before, []);
-    assert.deepEqual(after.suppression, before.suppression);
-  });
-});
-
 describe("static integration guardrails", () => {
   const walk = (dir) => readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     return statSync(path).isDirectory() ? walk(path) : [path];
   });
 
-  test("no API sender may bypass Gate 8 by importing the pure send decision directly", () => {
+  test("no API sender directly imports the pure send decision instead of Gate 8", () => {
     const api = join(REPO, "api");
     const offenders = [];
     const importRe = /import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g;
@@ -245,9 +229,12 @@ describe("static integration guardrails", () => {
       "an API module imports a pure send decision instead of the durable Gate 8 boundary");
   });
 
-  test("the sender credential name appears in no client-delivered source", () => {
+  test("the sender credential name appears in no client-delivered source or built output", () => {
     const offenders = [];
-    for (const root of [join(REPO, "src"), join(REPO, "assets")]) {
+    const roots = [join(REPO, "src"), join(REPO, "assets")];
+    if (existsSync(join(REPO, "public"))) roots.push(join(REPO, "public"));
+
+    for (const root of roots) {
       for (const file of walk(root)) {
         if (!statSync(file).isFile()) continue;
         let text;
@@ -255,6 +242,6 @@ describe("static integration guardrails", () => {
         if (text.includes(SENDER_LEDGER_URL_VAR)) offenders.push(file.slice(REPO.length + 1));
       }
     }
-    assert.deepEqual(offenders, [], "the Gate 8 database credential reached client source");
+    assert.deepEqual(offenders, [], "the Gate 8 database credential name reached client output");
   });
 });
