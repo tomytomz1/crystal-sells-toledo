@@ -1,0 +1,47 @@
+<!-- =====================================================================
+     Privacy: the SMS scope carve-out on the transaction-sharing clause.
+     =====================================================================
+     Rendered into src/pages/privacy.html ONLY when
+     COMMUNICATIONS_CONSENT_ENABLED is "true" at build time - the same
+     gate as privacy-messaging.html, and for two reasons, both load-
+     bearing:
+
+       1. It links to /sms-privacy, which is itself feature-gated. With
+          the flag off that page is not built, and an ungated paragraph
+          would leave a dead internal link on the one page a compliance
+          reviewer is most likely to open. tools/check.mjs catches it.
+       2. With no messaging programme running there is no SMS opt-in data
+          to carve out, and the privacy page's standing rule is that it
+          describes the runtime that actually ships.
+
+     WHY IT EXISTS AT ALL. The paragraph immediately above it in
+     src/pages/privacy.html is ordinary, correct real-estate practice:
+     closing a transaction requires a title company, a lender and an
+     inspector to receive the client's details. It is NOT marketing
+     sharing and it must never be deleted to make a carrier reviewer more
+     comfortable.
+
+     But Twilio rejected this campaign once with error 30882, whose
+     documented causes include policy language that appears to share
+     consumer or mobile opt-in data with third parties. A reviewer
+     arriving at the broad website policy reads "your information is
+     shared" a few lines before finding any SMS-specific answer. So the
+     scope is stated where the ambiguity is, rather than trusting a
+     reader to navigate to /sms-privacy for it.
+
+     WHAT IT MAY NOT SAY. It states only that THIS sharing excludes
+     mobile and SMS consent data. It deliberately does NOT claim that no
+     system processes SMS information: Twilio, HubSpot, Neon and Vercel
+     each do, as Crystal's processors, and src/pages/sms-privacy.html
+     names all four. Processing on Crystal's behalf and disclosure to a
+     third party for that party's own marketing are different things, and
+     this paragraph separates them instead of blurring them in the
+     flattering direction. If it ever starts claiming the former, it has
+     become false and is worse than nothing.
+     ===================================================================== -->
+      <p>This transaction-related sharing <strong>does not include mobile information, SMS opt-in
+        data, or SMS consent</strong>. Those are governed by the Crystal Sells Toledo
+        <a href="/sms-privacy">SMS Privacy Policy</a> and are not shared with third parties or
+        affiliates for marketing or promotional purposes. The service providers named above process
+        information on Crystal&rsquo;s behalf to operate this website and her messaging and contact
+        systems; that is not permission for them, an affiliate or a lead buyer to market to you.</p>

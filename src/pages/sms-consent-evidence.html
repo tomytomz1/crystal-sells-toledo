@@ -1,0 +1,208 @@
+<!-- meta {
+  "title": "SMS Consent Evidence | Crystal Sells Toledo",
+  "description": "A static record of the Crystal Sells Toledo SMS opt-in experience, published so the consent flow can be verified without filling in the form.",
+  "slug": "sms-consent-evidence",
+  "updated": "2026-09-16",
+  "priority": 0.3,
+  "changefreq": "yearly",
+  "featureGate": "communications_consent"
+} -->
+
+<!-- =====================================================================
+     A2P 10DLC CONSENT EVIDENCE. This page is documentation, not a form.
+     =====================================================================
+     WHY IT EXISTS. The real opt-in lives on STEP 2 of the two-step
+     /home-value form. Steps toggle with the `hidden` attribute in
+     assets/js/main.js, so a crawler that does not run the script - or
+     runs it but never clicks "next" - reads step 1 and stops. An external
+     browser-based extraction of production /home-value on 16 September
+     2026 found the page and both SMS legal links but did NOT surface the
+     step-2 SMS disclosure in its extracted text. /sms-privacy and
+     /sms-terms were directly crawlable; the disclosure itself was not.
+
+     This page therefore republishes the SAME canonical disclosure as
+     static, no-JavaScript text at a stable URL. It changes no consent
+     semantics. It is a verification surface, not an opt-in surface.
+
+     THREE RULES THIS FILE MUST KEEP, enforced by tools/check.mjs and
+     tests/a2p-consent-evidence.test.mjs:
+
+       1. NO <form>, NO <input>, NO submit control, NO /api/lead. A page
+          that can be submitted is not evidence of someone else's consent,
+          it is a second opt-in surface with no server contract behind it.
+       2. The disclosure text is NEVER retyped here. It is injected from
+          the same build variables the live consent block uses, which are
+          fed by api/_lib/consent.mjs - the module the server records the
+          agreed wording from. If a future version constant is minted,
+          this page follows it for free and cannot silently go on showing
+          last year's promise.
+       3. The static box renders UNCHECKED and says so in text, because
+          the real box ships unchecked and a picture that disagrees with
+          the product is worse than no picture.
+
+     NB: never write either consent template token inside this comment.
+     tools/build.mjs substitutes inside comments too - the output keeps
+     them - so a token named here would paste the whole disclosure into a
+     comment and let a content guard pass on text no visitor can read.
+     ===================================================================== -->
+
+<section class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">SMS Program</p>
+    <h1>SMS Consent Evidence</h1>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap wrap--prose">
+    <div class="prose">
+      <p class="prose__lede">This page documents how a consumer opts in to text messages from
+        Crystal Sells Toledo, published as plain static text so that it can be read and verified
+        without filling in a form or running JavaScript. It exists for compliance review of the
+        Crystal Sells Toledo A2P 10DLC messaging campaign.</p>
+
+      <p class="prose__note"><strong>This page does not collect consent.</strong> It contains no
+        form, no checkbox you can tick, no submit button and no way to send anything to Crystal.
+        Nothing on it enrolls anyone, changes anyone&rsquo;s messaging preferences, or sends a
+        message. The real opt-in happens only on the consumer form at
+        <a href="/home-value">crystalsellstoledo.com/home-value</a>.</p>
+
+      <p class="prose__note">Effective and last updated
+        <strong>September&nbsp;16,&nbsp;2026</strong>.</p>
+
+      <h2>Program and sender</h2>
+      <dl class="factlist">
+        <dt>Business and message sender</dt>
+        <dd>Crystal Sells Toledo</dd>
+
+        <dt>Legal operator</dt>
+        <dd>Crystal Saylor, a licensed Ohio real estate salesperson (License #&nbsp;2025003655),
+          affiliated with Key Realty LTD, trading online as Crystal Sells Toledo.</dd>
+
+        <dt>Main business website</dt>
+        <dd><a href="https://crystalsellstoledo.com">https://crystalsellstoledo.com</a></dd>
+
+        <dt>SMS opt-in page</dt>
+        <dd><a href="https://crystalsellstoledo.com/home-value">https://crystalsellstoledo.com/home-value</a></dd>
+
+        <dt>Program type</dt>
+        <dd>First-party, inquiry-related customer-care SMS. Messages are sent only in reply to, or
+          as follow-up on, a real estate inquiry the consumer submitted themselves.</dd>
+
+        <dt>Opt-in method</dt>
+        <dd>Web form only. A separate, optional, unchecked consent checkbox on the
+          Crystal Sells Toledo inquiry form.</dd>
+
+        <dt>Customer care</dt>
+        <dd><a href="tel:+14192454655">(419)&nbsp;245-4655</a> &middot;
+          <a href="mailto:crystal@crystalsellstoledo.com">crystal@crystalsellstoledo.com</a></dd>
+
+        <dt>SMS Privacy Policy</dt>
+        <dd><a href="/sms-privacy">https://crystalsellstoledo.com/sms-privacy</a></dd>
+
+        <dt>SMS Terms &amp; Conditions</dt>
+        <dd><a href="/sms-terms">https://crystalsellstoledo.com/sms-terms</a></dd>
+      </dl>
+
+      <h2>Actual SMS opt-in flow</h2>
+      <p>The consumer form at <a href="/home-value">crystalsellstoledo.com/home-value</a> is a
+        two-step form. The SMS consent checkbox is on step 2.</p>
+      <ol class="flowlist">
+        <li>The consumer visits
+          <a href="https://crystalsellstoledo.com/home-value">https://crystalsellstoledo.com/home-value</a>.</li>
+        <li><strong>Step 1</strong> asks for the property address the consumer wants valued.</li>
+        <li><strong>Step 2</strong> asks for contact information &mdash; name, email, phone,
+          selling timeline and property condition &mdash; and then displays a section headed
+          <strong>&ldquo;How may Crystal follow up? Optional.&rdquo;</strong></li>
+        <li>SMS consent is represented by its own separate checkbox inside that section.</li>
+        <li>That SMS checkbox <strong>starts unchecked</strong>, is <strong>optional</strong>, is
+          <strong>not required</strong> to submit the real estate inquiry, is
+          <strong>separate</strong> from the automated / AI voice permission, and must be
+          <strong>affirmatively selected</strong> by the consumer before any text message is
+          permitted.</li>
+        <li>The consumer can submit the underlying real estate inquiry with
+          <strong>both</strong> communication-permission checkboxes left unchecked, and Crystal
+          still replies by email or phone about what was asked for.</li>
+      </ol>
+
+      <h2>The consent control, exactly as it appears</h2>
+      <p>What follows is a <strong>static reproduction</strong> of the section a consumer sees on
+        step 2. The disclosure wording below is generated from the same source the website renders
+        the live checkbox label from and the same source the server records as the wording a
+        consumer agreed to, so it cannot drift from the real form. The boxes drawn here are
+        pictures: they are not controls, and there is nothing on this page to submit.</p>
+
+      <div class="consent consent--static">
+        <p class="consent__legend">How may Crystal follow up?
+          <span class="consent__optional">Optional</span></p>
+
+        <div class="consent__item">
+          <span class="consent__box consent__box--static" aria-hidden="true"></span>
+          <p class="consent__label"><span class="sr-only">Unchecked checkbox. </span>{{consentSmsHtml}}</p>
+        </div>
+
+        <div class="consent__item">
+          <span class="consent__box consent__box--static" aria-hidden="true"></span>
+          <p class="consent__label"><span class="sr-only">Unchecked checkbox. </span>{{consentVoiceHtml}}</p>
+        </div>
+
+        <p class="consent__note">Leaving these unticked will not affect your request &mdash; Crystal
+          will still reply by email or phone about what you asked for.</p>
+      </div>
+
+      <p class="prose__note"><strong>Both boxes are shown unchecked because both ship
+        unchecked.</strong> Neither is pre-selected, neither is required, and the two are separate
+        permissions: agreeing to text messages does not grant permission for automated or AI voice
+        calls, and agreeing to calls does not grant permission for text messages. Each is recorded
+        and revoked on its own.</p>
+
+      <h2>Screenshot of the opt-in step</h2>
+      <!-- The image is regenerated by running tools/consent-evidence-shot.mjs
+           and nothing fails if that is forgotten, so it can drift from the
+           form. What cannot drift is every CLAIM it is offered as evidence
+           for: two separate boxes, both unchecked, neither required, the
+           canonical disclosure and the "Optional" legend are each asserted
+           against the live render in tests/a2p-consent-evidence.test.mjs.
+           Re-capture it in any change that touches the valuation form or the
+           consent block. A pixel comparison was considered and rejected:
+           font rendering is not stable across environments and the guard
+           would flake instead of biting. -->
+      <p>The image below is a screenshot of step 2 of the real form, captured automatically from a
+        build of this website by <code>tools/consent-evidence-shot.mjs</code>. The contact fields
+        are empty and no consumer information appears in it. The text of the disclosure reproduced
+        above this image is the authoritative copy; the screenshot shows where a consumer
+        encounters it.</p>
+      <figure class="evidence-shot">
+        <img src="/assets/img/sms-consent-step2.png" width="1620" height="2582"
+             alt="Step 2 of 2 of the Crystal Sells Toledo home valuation form. The first name, last
+                  name, email, phone, timeline, condition and notes fields are all empty. Below
+                  them, a bordered section headed &quot;How may Crystal follow up? Optional&quot;
+                  contains two separate unchecked checkboxes. The first reads &quot;I agree to
+                  receive text messages from Crystal Sells Toledo about my real estate inquiry,
+                  appointments, requested information, and related services. Message frequency
+                  varies. Message and data rates may apply. Reply STOP to opt out or HELP for help.
+                  Consent is not a condition of service. See the Privacy Policy and Communications
+                  Terms.&quot; The second is the separate permission for calls using automated
+                  technology and an artificial, prerecorded, or AI-generated voice. Underneath,
+                  a note reads &quot;Leaving these unticked will not affect your request&quot;.">
+        <figcaption>Step 2 of the <a href="/home-value">/home-value</a> form, showing the two
+          separate unchecked permission checkboxes below the empty contact fields.</figcaption>
+      </figure>
+
+      <h2>Where the SMS policies are</h2>
+      <p>The messaging program has its own dedicated policies, scoped to SMS only:</p>
+      <ul class="linklist">
+        <li><a href="/sms-privacy">SMS Privacy Policy</a> &mdash;
+          <code>https://crystalsellstoledo.com/sms-privacy</code></li>
+        <li><a href="/sms-terms">SMS Terms &amp; Conditions</a> &mdash;
+          <code>https://crystalsellstoledo.com/sms-terms</code></li>
+      </ul>
+      <p>The <a href="/sms-privacy">SMS Privacy Policy</a> states that mobile information and SMS
+        opt-in consent are not shared with third parties or affiliates for marketing or promotional
+        purposes, and that text messaging originator opt-in data and consent are not shared with
+        any third parties for their marketing or promotional purposes.</p>
+      <p>The separate <a href="/privacy">Website Privacy Policy</a> covers the rest of the website
+        and is not the policy for this messaging campaign.</p>
+    </div>
+  </div>
+</section>
