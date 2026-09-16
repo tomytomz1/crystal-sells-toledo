@@ -27,6 +27,11 @@ function h1Of(html) {
     .trim();
 }
 
+function labelFor(html, controlId) {
+  return new RegExp(`<label[^>]*for="${controlId}"[^>]*>([\\s\\S]*?)<\\/label>`)
+    .exec(html)?.[1] ?? "";
+}
+
 describe("A2P SMS legal surfaces", () => {
   let dir, OFF_DIR, ON_DIR;
 
@@ -67,7 +72,35 @@ describe("A2P SMS legal surfaces", () => {
     assert.ok(sitemap.includes("https://crystalsellstoledo.com/sms-terms"));
   });
 
-  test("every live opt-in surface links directly to the SMS-specific policies", () => {
+  test("each channel's consent label links only to its own legal scope", () => {
+    for (const f of FORM_PAGES) {
+      const html = page(ON_DIR, f);
+      const smsLabel = labelFor(html, "consent-sms");
+      const voiceLabel = labelFor(html, "consent-voice");
+
+      assert.ok(smsLabel, `${f} has no SMS consent label`);
+      assert.match(smsLabel, /href="\/sms-privacy" target="_blank" rel="noopener"/,
+        `${f} SMS disclosure does not link directly to the SMS Privacy Policy`);
+      assert.match(smsLabel, /href="\/sms-terms" target="_blank" rel="noopener"/,
+        `${f} SMS disclosure does not link directly to the SMS Terms`);
+      assert.doesNotMatch(smsLabel, /href="\/privacy"/,
+        `${f} SMS disclosure still links to the broad Privacy Policy`);
+      assert.doesNotMatch(smsLabel, /href="\/communications-terms"/,
+        `${f} SMS disclosure still links to the broad communications terms`);
+
+      assert.ok(voiceLabel, `${f} has no AI voice consent label`);
+      assert.match(voiceLabel, /href="\/privacy" target="_blank" rel="noopener"/,
+        `${f} voice disclosure lost the broad Privacy Policy link`);
+      assert.match(voiceLabel, /href="\/communications-terms" target="_blank" rel="noopener"/,
+        `${f} voice disclosure lost the broad communications terms link`);
+      assert.doesNotMatch(voiceLabel, /href="\/sms-privacy"/,
+        `${f} voice disclosure was narrowed to the SMS Privacy Policy`);
+      assert.doesNotMatch(voiceLabel, /href="\/sms-terms"/,
+        `${f} voice disclosure was narrowed to the SMS Terms`);
+    }
+  });
+
+  test("every live opt-in surface also carries the adjacent SMS-program legal links", () => {
     for (const f of FORM_PAGES) {
       const html = page(ON_DIR, f);
       assert.match(html, /href="\/sms-privacy" target="_blank" rel="noopener"/,
