@@ -2,10 +2,10 @@
    =====================================================================
    api/_lib/permission.mjs remains the PURE policy resolver: given current
    permission state and suppression evidence, it answers whether a channel is
-   allowed. This module owns the I/O boundary immediately before a future
-   sender: obtain the durable suppression fold for the destination number,
-   union it with the caller-supplied current HubSpot state, then ask the pure
-   resolver again.
+   allowed. This module owns the I/O boundary a future sender must cross:
+   obtain the durable suppression fold for the destination number, union it
+   with the caller-supplied current HubSpot state, then ask the pure resolver
+   again.
 
    IMPORTANT DISTINCTION
    ---------------------
@@ -14,9 +14,12 @@
    durable lookup. Missing configuration, timeout, driver failure or malformed
    rows all fail CLOSED.
 
-   This module sends no SMS and places no call. Future Twilio/Retell senders
-   call canSendSmsNow()/canPlaceAutomatedVoiceCallNow() immediately before the
-   provider side effect and obey the returned { allowed, reason }.
+   This module sends no SMS and places no call. Therefore this PR cannot prove
+   temporal adjacency to a provider side effect. A future Twilio/Retell sender
+   must call canSendSmsNow()/canPlaceAutomatedVoiceCallNow() immediately before
+   its provider call and obey the returned { allowed, reason }; that coupling is
+   part of the sender integration, not something a pure decision module can
+   manufacture today.
 
    Design contracts:
    - docs/updates/2026-09-10-stop-dnc-suppression-decision.md §2.1
@@ -141,11 +144,12 @@ async function runLookup(phoneE164, { env, timeoutMs }) {
 }
 
 /**
- * Union durable blocking lanes into current state WITHOUT mutating the
- * caller-owned object. HubSpot and the ledger are independent blockers:
- * either one saying blocked is enough; neither one may clear the other.
+ * Union already-validated durable blocking lanes into current state WITHOUT
+ * mutating the caller-owned object. Kept private deliberately: every durable
+ * row must pass parseRows() first, so no other module can accidentally turn an
+ * unvalidated provider/database shape into permission state.
  */
-export function withDurableSuppression(currentState, rows) {
+function withDurableSuppression(currentState, rows) {
   const state = currentState || {};
   const suppression = { ...(state.suppression || {}) };
 
@@ -192,8 +196,8 @@ async function resolveNow(state, channel, target, {
       : SEND_TIME_REASON.LOOKUP_FAILED);
   }
 
-  /* Second pass is the actual send-time policy decision over the UNION of
-     current HubSpot state and durable ledger state. */
+  /* Second pass is the actual policy decision over the UNION of current
+     HubSpot state and durable ledger state. */
   return pure(withDurableSuppression(state, rows), target, { env });
 }
 
