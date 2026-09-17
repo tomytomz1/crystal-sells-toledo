@@ -1,0 +1,145 @@
+name: SEO snapshot
+
+# Weekly, Monday 11:00 UTC — roughly 07:00 in Toledo, so a snapshot is
+# waiting before STRATEGY.md's Monday market-review block rather than
+# landing in the middle of it.
+#
+# The window the script asks for always ends three days back, because
+# Search Console does not finalise a day's figures for two to three days.
+# A Monday run therefore covers through the previous Friday.
+on:
+  schedule:
+    - cron: "0 11 * * 1"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Days to cover (default 28)"
+        required: false
+        default: "28"
+
+# Two runs committing to main would race. Snapshots are cheap and the
+# schedule is weekly, so let an in-flight run finish rather than
+# cancelling it mid-commit.
+concurrency:
+  group: seo-report
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+
+    # Only to commit the snapshot file. Nothing here reads or writes any
+    # other part of the repository.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Until the one-time Google setup in docs/seo/README.md is done there
+      # are no credentials to run with. This stops cleanly and says so in
+      # the run summary rather than failing every Monday and training
+      # everyone to ignore a red badge.
+      #
+      # It is a SKIP, not a pass: while this branch is taken NO SNAPSHOTS
+      # ARE BEING COLLECTED, and nothing in this repository may describe
+      # snapshot collection as active. docs/CURRENT-STATE.md records the
+      # workflow as inert for exactly this reason.
+      - name: Are credentials configured?
+        id: creds
+        env:
+          KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### SEO snapshot skipped"
+              echo
+              echo "\`GOOGLE_SERVICE_ACCOUNT_KEY\` is not set on this repository."
+              echo "**No snapshots are being collected.**"
+              echo
+              echo "See \`docs/seo/README.md\` for the one-time setup."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch the snapshot
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          GSC_SITE_URL: ${{ secrets.GSC_SITE_URL }}
+          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+          SEO_WINDOW_DAYS: ${{ inputs.window_days || '28' }}
+        run: |
+          npm run seo:report | tee /tmp/seo-summary.txt
+          {
+            echo '### Search performance'
+            echo
+            echo '```'
+            cat /tmp/seo-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit it
+        if: steps.creds.outputs.configured == 'true'
+        run: |
+          if [ -z "$(git status --porcelain docs/seo)" ]; then
+            echo "No change under docs/seo — nothing to commit."
+            exit 0
+          fi
+
+          # Name the window from the file that was actually written, not
+          # from a second copy of the script's lag arithmetic. A duplicated
+          # `date -u -d '3 days ago'` here would silently start lying the
+          # day LAG_DAYS changes.
+          THROUGH="$(git status --porcelain docs/seo \
+            | sed -n 's|.*docs/seo/\([0-9-]\{10\}\)\.json$|\1|p' \
+            | sort | tail -1)"
+
+          # docs/seo changed but no dated snapshot did. Nothing here knows
+          # what that is, and a commit message with a hole in it is worse
+          # than a failed run.
+          if [ -z "$THROUGH" ]; then
+            echo "::error::docs/seo changed but no YYYY-MM-DD.json was written"
+            git status --porcelain docs/seo
+            exit 1
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/seo
+
+          # [skip ci] because this commit changes nothing the site serves.
+          # docs/ is not an input to tools/build.mjs, so a deploy would
+          # rebuild byte-identical output. GitHub already suppresses
+          # workflow runs for GITHUB_TOKEN pushes; this is for the Vercel
+          # integration, which is a separate webhook and does not know that.
+          git commit -m "Search performance snapshot through ${THROUGH} [skip ci]" -m \
+          "Written by .github/workflows/seo-report.yml. Search Console discards
+          performance data after 16 months; these snapshots outlive it."
+
+          # The branch may have moved while the APIs were being queried. A
+          # snapshot is an independent new file, so replaying it onto the
+          # new tip is always correct — but never force: a failure here
+          # must lose the snapshot, not someone's commit.
+          #
+          # Resolved from HEAD rather than hardcoded to main, so a
+          # workflow_dispatch run from a branch pushes to that branch
+          # instead of quietly writing to main.
+          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${BRANCH}"; then exit 0; fi
+            echo "push rejected (attempt ${attempt}) — rebasing onto the current ${BRANCH}"
+            git pull --rebase origin "$BRANCH" || exit 1
+          done
+          echo "::error::could not push the snapshot after 3 attempts"
+          exit 1

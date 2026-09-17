@@ -1746,6 +1746,128 @@ ticket #29582556 open. Merging a boundary that causes no messaging does not
 depend on it. **Activation is a separate future gate** requiring an operator to
 add the credential and a controlled real-boundary verification to pass.
 
+## Search performance snapshots — LIVE, and PROVEN AGAINST GOOGLE
+
+`tools/seo-report.mjs` (`npm run seo:report`) queries the Search Console API and
+the GA4 Data API with a service-account assertion it signs itself, and writes a
+dated JSON snapshot to `docs/seo/`. `.github/workflows/seo-report.yml` runs it
+every Monday at 11:00 UTC and commits the result.
+
+**This is configured and working.** All four variables are set as GitHub Actions
+secrets, both grants are in place, and the first real run succeeded.
+
+| Variable | Scope |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | GitHub Actions secret; local `.env` |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | GitHub Actions secret; local `.env` |
+| `GSC_SITE_URL` | GitHub Actions secret; local `.env` |
+| `GA4_PROPERTY_ID` | GitHub Actions secret; local `.env` |
+
+Server-side only — rule 10 applies, none may be prefixed `NEXT_PUBLIC_`. The
+one-time Google console setup is `docs/seo/README.md`.
+
+**Not part of `npm test`**, for the same reason as `verify:live`: the release
+gate must not depend on a live third party. `tests/seo-report.test.mjs` is in the
+suite and runs entirely against loopback servers — it makes no request to Google.
+
+### The first live run — 17 September 2026
+
+Run [#1](https://github.com/tomytomz1/crystal-sells-toledo/actions/runs/35177225965),
+`workflow_dispatch` against `cc02cb2`, completed `success` in 21 seconds. It
+committed `docs/seo/2026-09-14.json` to `main` as `38cd80b`.
+
+**A green tick was not sufficient evidence here and must not be treated as such
+in future.** The unconfigured path also exits 0, so success and skip are
+indistinguishable from `conclusion` alone. What established the run was real:
+the snapshot file exists on `main`, and its `sources` block reads `"queried"` for
+both, not `"skipped"`. Check the artefact, not the tick.
+
+**What is now proven that was not before:** Google accepts this assertion; both
+grants work; the real APIs return the response shapes this code parses; and the
+weekly job can push to `main`, so **branch protection is not blocking the Actions
+token**. Those were the four open unknowns and all four are closed.
+
+**Still unproven:** that an unattended *scheduled* run behaves like the manual
+one. Only `workflow_dispatch` has ever fired. The first Monday run is the
+evidence and it has not happened.
+
+### Landing pages are folded by path
+
+GA4 reports the landing page with its query string, so the first live snapshot
+carried `/`, `/?gtm_latency=1` and a `/?fbclid=…` as three rows for one page.
+`foldLandingPages()` folds them.
+
+**Sessions and key events are summed; users are not, and are deliberately absent
+from `landingPages` rows.** Users are distinct people and do not add across rows
+— one person landing on `/` in one session and `/?fbclid=…` in another is one
+user counted twice by naive addition, and GA4's per-row distinct count is not
+something this code can re-derive. `users` stays correct in `totals` and
+`channels`, which Google aggregates itself.
+
+GA4's `landingPage` dimension would have Google do this server side and would
+restore a correct per-page user count. It is **not** used: no live call has
+confirmed this property accepts that dimension, and an unrecognised dimension
+fails the whole report with a 400. Worth revisiting when someone can test it.
+`(not set)` is GA4's unattributed placeholder, is not a path, and is not folded.
+
+### Entity identity — `sameAs` is on the PERSON, not the business
+
+The homepage graph has two nodes: a `RealEstateAgent` `#agent` named
+**Crystal Sells Toledo**, and a `Person` `#crystal` named **Crystal Saylor**
+nested as its `employee`.
+
+`sameAs` means "URLs that unambiguously identify *this* entity". LinkedIn,
+Facebook and Instagram identify **the person**. They were on `#agent`, which
+asserted that a personal LinkedIn profile identifies the business — wrong, and
+wrong in exactly the direction that hurts, since `crystal saylor` is the query
+the site ranks 8th for. They now sit on `#crystal`.
+
+The three URLs are the ones the **Google Business Profile itself declares**,
+which is the authority for what her profiles are. They have **not** been
+independently fetched; LinkedIn, Facebook and Instagram all refuse automated
+requests, so a fetch would prove nothing either way.
+
+**The Business Profile URL is not in `sameAs` yet.** The profile exists, is
+correctly named `Crystal Saylor – Key Realty LTD`, category *Real estate agent*,
+at the same address this graph publishes — but **verification has failed and it
+is not live.** An unverified profile does not rank, and there is no stable URL
+to point at. Add it once verification clears.
+
+**Not done, deliberately:** making the `Person` the primary entity rather than
+nested staff. Plausible, unproven, and a larger change than the defect above
+warranted. Not widened into.
+
+### What the data shows
+
+From `docs/seo/2026-09-14.json`, the first live snapshot — 18 August to 14
+September 2026. Google held no search data for this domain before 31 August:
+
+- **76 impressions, 2 clicks**, average position 16.3, across four pages.
+- **Five queries visible, 15 impressions between them.** `anonymisedImpressions`
+  is **61** — queries Search Console withholds at low volume. That gap is
+  permanent and no tool, paid or otherwise, recovers it.
+- **Google's own figures do not reconcile**, and the snapshot preserves both
+  rather than choosing: the totals row reports 76 impressions while the
+  per-page rows sum to **80** (`/` 57, `/sell` 16, `/privacy` 4, `/home-value`
+  3). The manual 16 September export also read 80. Treat `totals.impressions`
+  and `anonymisedImpressions` as accurate to within a few impressions at this
+  volume, not as exact. Cause not established; do not invent one.
+- `crystal saylor` sits at **position 8**. The site does not rank first for the
+  licensed name. `sameAs` on the homepage carries LinkedIn only — no Google
+  Business Profile, Zillow or Realtor.com.
+- Three seller-hiring queries (`sellers agents toledo oh`, `home sellers agents
+  toledo oh`, `toledo home sellers`) sit at **positions 46–62**, against
+  portal SERPs. `/sell` is written as a process explainer, not as an answer to
+  "who lists homes in Toledo".
+- **GA4: 66 sessions, 45 users, 1 key event.** Direct 57, Organic Social 5,
+  Organic Search 3, Referral 1. Direct is 86% of sessions — that is not organic
+  discovery. **What the single key event actually counts has not been verified**
+  and should not be assumed to be the lead form.
+
+No site change has been made in response to any of this. `STRATEGY.md` §6 is the
+standing plan and it already anticipates the conclusion: brand and hyperlocal
+long-tail, not head terms.
+
 ## Sequenced follow-ups from the transport work
 
 0. ~~Both gate 7 endpoints answer without deciding the connection.~~ **Done** —
@@ -1805,6 +1927,7 @@ Open one of these only when the task actually needs it.
 | **The gate 7 connection lifecycle** — the shared predicate, both response boundaries, the static guard rewrite, the raw-socket matrix | `docs/updates/2026-09-11-gate-7-connection-lifecycle.md` |
 | **Unsuppression / re-opt-in** — the two-key rule, lane folding, the future `db/003` contract, the operator security model, Twilio reconciliation | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |
 | **Why this project's engineering rules exist** — the defects that earned them | **`docs/ENGINEERING-LESSONS.md`** — read the relevant entry, not the archive |
+| Search performance snapshots — the Google console setup a human must do, and what a snapshot cannot contain | `docs/seo/README.md` |
 | Rule rationale, Phase 1 contract | `docs/PHASE-1-HANDOFF.md` §6 — do not read wholesale |
 | HubSpot consent schema, §6/§6a verification, rollback | `docs/updates/2026-09-09-hubspot-consent-setup.md` |
 | Consent model, disclosures, evidence, feature gate | `docs/updates/2026-09-09-communications-consent-foundation.md` |
