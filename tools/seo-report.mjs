@@ -372,6 +372,45 @@ async function analytics(token) {
       keyEvents: Number(row.metricValues[2].value),
     }));
 
+  /* --- landing pages, folded by path --------------------------------
+     GA4 reports the landing page WITH its query string, so a single page
+     arrives split across rows: the first snapshot taken through this tool
+     carried `/`, `/?gtm_latency=1` and a `/?fbclid=…` as three entries.
+     They are one page, and reading the list as four pages understates the
+     homepage and invents traffic to URLs nobody linked.
+
+     Folded here rather than by asking GA4 for its `landingPage` dimension,
+     which would have Google do the same work server side. That dimension
+     is not used because no live call has confirmed this property accepts
+     it, and an unrecognised dimension fails the whole report with a 400 —
+     `landingPagePlusQueryString` is the one shape a real response has been
+     observed for. Worth revisiting once someone can test it.
+
+     SESSIONS AND KEY EVENTS ARE SUMMED. USERS ARE NOT, AND ARE NOT
+     REPORTED PER PAGE. Users are distinct people, so they do not add
+     across rows: one person landing on `/` in one session and on
+     `/?fbclid=…` in another is one user in two rows, and summing would
+     count them twice. GA4 computes distinct users per row, not a total
+     this code is able to re-derive. Emitting a silently inflated `users`
+     would be worse than omitting it, so the field is absent here. It
+     remains correct in `totals` and in `channels`, which Google aggregates
+     itself. */
+  const foldLandingPages = (r) => {
+    const byPath = new Map();
+    for (const row of r.rows || []) {
+      const raw = row.dimensionValues[0].value;
+      /* `(not set)` is GA4's placeholder for a session whose landing page
+         it could not attribute. It is not a path and is deliberately left
+         intact rather than folded into one. */
+      const path = raw === "(not set)" ? raw : raw.split(/[?#]/)[0] || raw;
+      const found = byPath.get(path) || { page: path, sessions: 0, keyEvents: 0 };
+      found.sessions += Number(row.metricValues[0].value);
+      found.keyEvents += Number(row.metricValues[2].value);
+      byPath.set(path, found);
+    }
+    return [...byPath.values()].sort((a, b) => b.sessions - a.sessions);
+  };
+
   const METRICS = ["sessions", "totalUsers", "keyEvents"];
   const [totals, channels, landing] = await Promise.all([
     report([], METRICS),
@@ -388,7 +427,7 @@ async function analytics(token) {
       keyEvents: Number(t?.[2].value || 0),
     },
     channels: rows(channels, "channel"),
-    landingPages: rows(landing, "page"),
+    landingPages: foldLandingPages(landing),
   };
 }
 
