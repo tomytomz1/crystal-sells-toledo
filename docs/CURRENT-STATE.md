@@ -1662,6 +1662,12 @@ call immediately before its external side effect. It answers exactly one
 question — *may this channel reach this phone number right now?* — from current
 consent and current durable suppression, and it **fails closed**.
 
+**"Must" there is a requirement, not an enforced property.** No sender exists,
+and nothing in the repository can check that a future one calls Gate 8 at all,
+calls it adjacent to the side effect, or refrains from caching an earlier
+`ALLOWED`. See *What the build guard actually proves* below before repeating
+this sentence as a guarantee.
+
 **What it is not.** It sends no SMS, places no call, sends no email, writes no
 HubSpot record, mutates no consent, mutates no suppression and books nothing.
 **This work creates no sender of any kind.** It is a read-and-decide boundary
@@ -1727,10 +1733,45 @@ least-privilege guards above, are kept honest by permanent mutation cases in
 `tests/consent-build-gate.test.mjs` which assert each one fails with the feature
 flag **both off and on**.
 
+### What the build guard actually proves
+
+An earlier version of this section and of PR #41 said in substance that a sender
+calling Gate 8 immediately before its side effect, and not caching an earlier
+allow, was *"a build-enforced requirement, not a convention."* **That was an
+overclaim, caught in independent review and withdrawn.** The accurate division:
+
+**Proved on every build:**
+
+- no module under `api/` other than `api/_lib/send-permission.mjs` names
+  `canSendSms` or `canPlaceAutomatedVoiceCall`;
+- Gate 8 calls `public.get_suppression_state($1)`, never names the ledger table,
+  uses `CONSENT_LEDGER_SENDER_URL`, and does not reuse `CONSENT_LEDGER_URL`.
+
+**Not proved, by this guard or anything else here:**
+
+- that a future provider sender calls Gate 8 **at all** — a new module that
+  reaches Twilio or Retell without importing from `api/_lib/` trips nothing;
+- that the call is **immediately adjacent** to the side effect, with no
+  intervening await, queue hop, retry or scheduling boundary;
+- that a future sender does not **cache an earlier `ALLOWED`** and act on it
+  later.
+
+The reason is structural: **there is no outbound sender in this repository.** A
+static guard can constrain what existing modules reference; it cannot constrain
+the call ordering of code that does not exist. Those three become enforceable
+only when the first sender is built, and enforcing them belongs to that work.
+
+Until then they are **requirements on a future sender, written down and
+unenforced** — rule 19's distinction exactly, and not to be restated as
+implemented enforcement.
+
 ### What is NOT established
 
 | Claim | Status |
 |---|---|
+| a future sender will call Gate 8 at all | **unenforceable today — no sender exists** |
+| a future sender will call it adjacent to the side effect | **unenforceable today — no sender exists** |
+| a future sender will not cache an earlier `ALLOWED` | **unenforceable today — no sender exists** |
 | `CONSENT_LEDGER_SENDER_URL` is configured | **NO — it is in no environment** |
 | the sender role is reachable from Vercel | **never tested** |
 | Neon's live HTTP response shape under that credential | **unobserved** — tests inject the executor |

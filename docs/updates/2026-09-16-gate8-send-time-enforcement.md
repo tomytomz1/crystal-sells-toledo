@@ -21,7 +21,9 @@ Any dependency failure refuses the send. `api/_lib/permission.mjs` remains the o
 
 The first implementation draft did the durable suppression read before HubSpot. That was a material time-of-check/time-of-use defect: HubSpot may take seconds to answer, and a consumer can send STOP during that interval. A suppression check that was true at the beginning of the authorization is stale by the time the sender acts.
 
-The corrected sequence reads mutable consent first and the authoritative phone-keyed suppression state **last**, immediately before the future sender's external side effect. An already-denied consent state returns early because it can never authorize anything. A potential `ALLOWED` result must always cross the final durable lookup. The future sender must not cache an earlier permission result.
+The corrected sequence reads mutable consent first and the authoritative phone-keyed suppression state **last**, as the final provider read inside Gate 8 on any path that can return `ALLOWED`. An already-denied consent state returns early because it can never authorize anything. A potential `ALLOWED` result must always cross the final durable lookup.
+
+**The ordering above is a property of Gate 8's own body, and that is all it is.** Two further requirements fall on the future sender and are **stated, not enforced**: that it calls Gate 8 immediately before its external side effect with nothing in between, and that it does not cache an earlier `ALLOWED` decision. No sender exists in this repository, so nothing can check either one today. See *What the build guard proves — and what it cannot* below.
 
 This does not claim an impossible zero-race system — a STOP can arrive after any finite check. It narrows the application-controlled window by placing the most safety-critical read at the final provider boundary before send.
 
@@ -67,7 +69,7 @@ The durable ledger is authoritative for suppression by phone. HubSpot suppressio
 - no unsuppression endpoint or HubSpot unsuppression projection;
 - no claim that A2P is approved — the Campaign submitted 16 September 2026 was **REJECTED with error 30882 (Terms & Conditions)** and, on operator evidence, **has not been resubmitted**; Twilio support ticket #29582556 is open with the 10DLC Onboarding team.
 
-The next sender must call Gate 8 immediately before its external side effect. It must not cache an earlier allow decision.
+The next sender must call Gate 8 immediately before its external side effect, and must not cache an earlier allow decision. **Both are requirements on code that does not exist yet, and neither is enforced by anything in this repository today** — see *What the build guard proves — and what it cannot*. Enforcing them is part of building the first sender.
 
 ## Evidence and remaining boundary
 
@@ -121,7 +123,7 @@ to `canPlaceAutomatedVoiceCall`. A future `whatsapp` or `rcs` lane would have be
 authorized by the **AI-voice** consent record. There is now an explicit allow-list
 and a `REASON.UNSUPPORTED_CHANNEL`.
 
-### 3. The bypass is now enforced, not merely documented
+### 3. The DIRECT-IMPORT bypass is now a build failure
 
 The original PR named this as its own highest residual risk: a future sender can
 import `canSendSms()` directly, get an `ALLOWED` decided on CRM state alone, and
@@ -137,6 +139,41 @@ calling `public.get_suppression_state($1)`, names the ledger table, or reuses
 All four guards were proved non-vacuous by mutation in a throwaway tree, and those
 mutations are kept permanently in `tests/consent-build-gate.test.mjs`, asserted to
 fail with the feature flag **both** off and on.
+
+#### What the build guard proves — and what it cannot
+
+An earlier version of this document, and of the pull request, said in substance
+that a sender calling Gate 8 immediately before its side effect and not caching
+an earlier allow was *"a build-enforced requirement, not a convention."*
+**That was an overclaim, and it is withdrawn here.** Independent review caught
+it. What follows is the accurate division.
+
+**The guard proves, on every build:**
+
+- no module under `api/` other than `api/_lib/send-permission.mjs` names
+  `canSendSms` or `canPlaceAutomatedVoiceCall` — so the pure predicates cannot
+  be reached directly from anywhere else in `api/`;
+- Gate 8 calls `public.get_suppression_state($1)`, never names the ledger table,
+  uses `CONSENT_LEDGER_SENDER_URL`, and does not reuse `CONSENT_LEDGER_URL`.
+
+**The guard cannot prove, and nothing in this repository currently can:**
+
+- that a future provider sender calls Gate 8 **at all**. A new module that talks
+  to Twilio or Retell without importing anything from `api/_lib/` trips no guard;
+- that the Gate 8 call is **immediately adjacent** to the external side effect,
+  with no intervening await, queue hop, retry or scheduling boundary;
+- that a future sender does not **cache an earlier `ALLOWED` decision** and act
+  on it later.
+
+The reason is structural, not an oversight: **there is no outbound sender in this
+repository.** A static guard can constrain what existing modules may reference;
+it cannot constrain the internal call ordering of code that does not exist. Those
+three properties become enforceable only when the first sender is implemented,
+and enforcing them is part of that work — not of this one.
+
+Until then they are **requirements on the future sender, written down and
+unenforced.** Treated as anything stronger, they are exactly the kind of
+inherited sentence rule 18 exists to catch.
 
 ### Test and CI accuracy
 

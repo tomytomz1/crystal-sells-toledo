@@ -18,6 +18,17 @@
    this function immediately before its external side effect and must not cache
    an earlier ALLOWED result.
 
+   THAT LAST SENTENCE IS A REQUIREMENT ON THE CALLER, NOT AN ENFORCED
+   PROPERTY. The build guard in tools/check.mjs stops any other module under
+   api/ from naming the pure send predicates, so the resolver cannot be reached
+   behind Gate 8's back from inside api/. It does NOT and cannot establish that
+   a future sender calls this function at all, that the call sits adjacent to
+   the Twilio or Retell side effect, or that no earlier ALLOWED was cached and
+   replayed. No sender exists yet; a static check cannot constrain the call
+   ordering of code that has not been written. Enforcing those three is part of
+   building the first sender. Do not restate them as guarantees - see
+   docs/CURRENT-STATE.md, "What the build guard actually proves".
+
    Missing configuration, database failure, malformed lookup results, or a
    CRM read failure all become DENY decisions. No dependency outage can be
    mistaken for "not suppressed" or "consent granted".
