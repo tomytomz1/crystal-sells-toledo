@@ -17,6 +17,13 @@ it merely because a commit SHA changes.** It deliberately carries no SHA — res
     is set in no environment and no Twilio number points at it.
   - **`api/operator-action.js`** — the operator's suppression entry, gate 7.
     **Inert**: `OPERATOR_ACTION_SECRET` is set in no environment.
+- **`api/_lib/sms-sender.mjs`** — the outbound SMS transport, behind gate 8, and
+  the only place in the repository that can cause a messaging side effect.
+  **DARK**: no endpoint and no orchestrator imports it, `OUTBOUND_SMS_ENABLED`
+  is set in no environment, and the outbound Twilio credentials are set in no
+  environment. `tools/check.mjs` fails the build if anything under `api/`
+  imports it, or uses the Twilio SDK or its REST host to send from anywhere
+  else.
 - **HubSpot is the live CRM** — Contacts API for the contact, authenticated Forms
   Submission API for the timeline activity carrying the enquiry block.
 - **Zoho code is dormant rollback code, imported by nothing.** It is not the live
@@ -72,8 +79,12 @@ Schema in the production HubSpot portal:
   AI-generated voice. `/sms-privacy`, `/sms-terms` and `/sms-consent-evidence`
   build and ship with the flag on (14 pages enabled, 10 disabled).
 - **No consumer SMS or AI voice traffic is active.** No Twilio SMS is sent and no
-  Retell call is placed. **Collecting consent is not sending on it** — there is
-  no outbound sender of any kind in this repository.
+  Retell call is placed. **Collecting consent is not sending on it.** An SMS
+  sender module now exists — `api/_lib/sms-sender.mjs` — and it is **DARK**:
+  nothing imports it, `OUTBOUND_SMS_ENABLED` is set in no environment, the
+  outbound Twilio credentials are in no environment, and `tools/check.mjs` fails
+  the build if any module under `api/` imports it, or uses the Twilio SDK or its
+  REST host to send from anywhere else. There is still no Retell caller of any kind.
 - **The ledger database exists and is verified, and `CONSENT_LEDGER_URL` IS SET
   in Production** (operator-reported, step 1 below), on the `consent_ledger_app`
   role. Provisioned and grant-verified on 9 September 2026 — see "The ledger"
@@ -116,7 +127,7 @@ Schema in the production HubSpot portal:
   | **5** — HubSpot timeline display check | **CLOSED**, 10 September 2026 | same document |
   | **6** — A2P Campaign approved | **OPEN** — Campaign submitted, **rejected 30882**, remediated, not resubmitted | *A2P Campaign* section below |
   | **7** — inbound STOP / HELP suppression | **CODE MERGED, NOT ACTIVATED** — `TWILIO_AUTH_TOKEN` is in no environment, so every inbound request answers `503` | *STOP / HELP inbound activation* below |
-  | **8** — send-time authorization | **CODE MERGED, NOT ACTIVATED** — nothing imports it; `CONSENT_LEDGER_SENDER_URL` is in no environment | *Gate 8* below |
+  | **8** — send-time authorization | **CODE MERGED, NOT ACTIVATED** — nothing on a live path reaches it; `CONSENT_LEDGER_SENDER_URL` is in no environment. Its one importer, the dark SMS sender, is itself imported by nothing | *Gate 8* below |
   | **9** — controlled consent → send → STOP/DNC test | **OPEN**, with a named dependency | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |
 
   **Gates 6, 7, 8 and 9 are what remain**, and none of them can close without an
@@ -415,9 +426,12 @@ is required.** Every refusal below is deliberate; what is missing is
 configuration.
 
 **WHO SENDS THE STOP AND HELP REPLIES: TWILIO, NOT US.** Verified two ways.
-`grep` over `api/` and `tools/` finds **no outbound SMS anywhere** — no
-`messages.create`, no TwiML `<Message>`; the only `MessagingServiceSid` in the
-repository reads an *inbound* parameter for evidence. `api/twilio-inbound.js`
+`grep` over `api/` and `tools/` finds **no STOP or HELP reply text anywhere** and
+no TwiML `<Message>`. There is now exactly one `messages.create` call site in the
+repository — `api/_lib/sms-sender.mjs`, which is dark and which composes no copy
+of its own — and `tools/check.mjs` fails the build if a second one appears
+anywhere under `api/`. The only `MessagingServiceSid` outside that module reads
+an *inbound* parameter for evidence. `api/twilio-inbound.js`
 answers `<Response></Response>`, an empty TwiML that tells Twilio we want no
 auto-reply of our own. Twilio's own documentation confirms Twilio applies the
 opt-out action and sends the reply itself, then still POSTs the message to our
@@ -793,8 +807,9 @@ permanent rows asserting an opt-out that never happened — does not apply.
 above.
 
 **Nothing calls any of this on a real send.** Send-time enforcement is gate 8,
-which is **now merged** — but no sender imports it, so the path is never
-entered. The sender connection string `CONSENT_LEDGER_SENDER_URL` is in **no**
+which is **now merged**, and the one sender that exists
+(`api/_lib/sms-sender.mjs`) does route through it — but that sender is dark and
+nothing imports it, so the path is never entered. The sender connection string `CONSENT_LEDGER_SENDER_URL` is in **no**
 environment — not Production, not Preview, and it is not `CONSENT_LEDGER_URL`,
 which is the `INSERT`-only website credential. Applying `002` therefore changed
 no behaviour of the site or the endpoint.
@@ -853,15 +868,16 @@ and `api/_lib/optout.mjs`:
   **`get_suppression_state()` IS now called from `api/` — gate 8 is merged.**
   `api/_lib/send-permission.mjs` calls it as the final provider read before any
   authorization. What keeps an incomplete CRM projection from being a live
-  exposure today is **one** condition, not two: **no automated outbound sender
-  exists, so nothing ever enters gate 8 and no send-time lookup is ever
-  performed.** The consent feature **is ON in Production** — the earlier form of
-  this paragraph said it was off, and said nothing in `api/` called the lookup;
-  both are now false.
+  exposure today is **one** condition, not two: **the only outbound sender that
+  exists is dark** — `api/_lib/sms-sender.mjs` is imported by nothing, and its
+  feature flag and Twilio credentials are in no environment — so nothing ever
+  enters gate 8 and no send-time lookup is ever performed. The consent feature
+  **is ON in Production** — the earlier form of this paragraph said it was off,
+  and said nothing in `api/` called the lookup; both are now false.
 
-  That single remaining condition is **not a property of this code**, which is
-  why **gate 8 must stand in front of any automated outbound SMS or AI voice**
-  the moment one is written. The
+  That single remaining condition is **configuration, not a property of this
+  code**, which is why **gate 8 must stand in front of any automated outbound
+  SMS or AI voice** the moment one is activated. The
   remaining budget is passed **into** each HubSpot request and the socket is
   aborted when it runs out, covering the response **body** and not only its
   headers. The deadline is measured from handler entry rather than from the
@@ -1006,10 +1022,11 @@ action, 10 September 2026** (`api/operator-action.js`,
 
 **Not built — genuinely later phases:**
 
-- **A sender to enforce against.** Gate 8 itself is **merged**:
-  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. What does not
-  exist is anything that calls *Gate 8* — no Twilio sender, no Retell caller.
-  The boundary is built; the thing it stands in front of is not.
+- **An activated sender to enforce against.** Gate 8 itself is **merged**:
+  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. The first
+  thing that calls *Gate 8* now exists — `api/_lib/sms-sender.mjs` — and it is
+  dark: nothing imports it and it is configured nowhere. There is still no
+  Retell caller, and no orchestrator to decide what any message should say.
 - **Re-opt-in / unsuppression — NOW DESIGNED, STILL NOT BUILT.** The
   `unsuppressed` event type exists and **nothing writes it.** A
   `reoptin_requested` event is recorded, deliberately without clearing anything
@@ -1038,8 +1055,9 @@ static guards are tested — and **no message path is live**: no Twilio number
 points at `POST /api/twilio-inbound`, and `TWILIO_AUTH_TOKEN` is set in no
 environment (with it absent the endpoint answers 503 and reads no request
 body). **The database half is now applied and verified** — see "The suppression
-lookup" above. Gate 8 (merged) is the only code that calls it, and **nothing
-calls Gate 8**, so its existence still changes no behaviour.
+lookup" above. Gate 8 (merged) is the only code that calls it, and **nothing on
+a live path calls Gate 8** — its one caller, the dark SMS sender, is imported by
+nothing — so its existence still changes no behaviour.
 
 **Gate 7 is still open, and what keeps it open changed on 10 September 2026.**
 Two of the four items — surfacing an unclassified message, and letting the
@@ -1104,7 +1122,8 @@ function and the sender role; `db/001` is unchanged.
 
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
 is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
-caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
+caller inside `api/`, and **nothing on a live path calls Gate 8** — its one
+caller is the dark SMS sender, which nothing imports — so the resolver still
 decides nothing in production.
 
 ## The lead path's body read — bounded in size AND in time
@@ -1500,12 +1519,13 @@ into this change:**
 - **Nothing writes an `unsuppressed` event.** The ledger builder can now
   format and validate one; no code path constructs or appends one.
 - **Gate 8 send-time enforcement IS MERGED TO `main`, and is not active.**
-  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. **Nothing
-  imports that module**, so no application code path reaches it. **The sender
-  connection string `CONSENT_LEDGER_SENDER_URL` is in NO environment**, so were
-  something to call it today, every otherwise-sendable communication would fail
-  closed with `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is still no SMS sender
-  and no voice caller of any kind.** See the Gate 8 section below.
+  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. Its only
+  importer is the dark SMS sender, which nothing imports in turn, so **no
+  application code path reaches it.** **The sender connection string
+  `CONSENT_LEDGER_SENDER_URL` is in NO environment**, so were something to call
+  it today, every otherwise-sendable communication would fail closed with
+  `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is no voice caller of any kind**, and
+  the SMS sender is unimported and unconfigured. See the Gate 8 section below.
 - **No outbound automation is activated**, and no Twilio Consent Management
   API call is made. **One external system WAS touched:** the production Neon
   database, by the operator, to apply this migration. Twilio, HubSpot, Retell,
@@ -1539,8 +1559,9 @@ or `TRUNCATE`, could not enumerate (both functions take one number and neither
 has an argument-free form), and could not cause a message to be sent — there was
 no send path at all. **Stated for the exposure window, which is what this entry
 is about:** at that time gate 8 was not built. It is now merged and
-`api/_lib/send-permission.mjs` does call `get_suppression_state()`, but **no
-outbound sender imports it**, so no message can be sent today either. **No evidence of misuse was
+`api/_lib/send-permission.mjs` does call `get_suppression_state()`; the one
+outbound sender that imports it is dark and is imported by nothing, so **no
+message can be sent today either**. **No evidence of misuse was
 sought or is claimed either way** — the ledger was not audited for unexpected
 rows, and the least-privilege bound is the reason that is an acceptable
 position, not a substitute for having looked.
@@ -1623,32 +1644,33 @@ to prevent:**
 | | |
 |---|---|
 | **Gate 8 code** | **MERGED to `main`** — PR [#41](https://github.com/tomytomz1/crystal-sells-toledo/pull/41), 17 September 2026 |
-| **Gate 8 live sender path** | **NOT ACTIVATED, NOT PROVEN** — nothing imports the module, the credential is in no environment, and no live call has ever been made |
+| **Gate 8 live sender path** | **NOT ACTIVATED, NOT PROVEN** — its only importer is the dark SMS sender, which nothing imports; the credential is in no environment; no live call has ever been made |
 
 **What it is.** One function every future automated SMS or AI-voice sender must
 call immediately before its external side effect. It answers exactly one
 question — *may this channel reach this phone number right now?* — from current
 consent and current durable suppression, and it **fails closed**.
 
-**"Must" there is a requirement, not an enforced property.** No sender exists,
-and nothing in the repository can check that a future one calls Gate 8 at all,
-calls it adjacent to the side effect, or refrains from caching an earlier
-`ALLOWED`. See *What the build guard actually proves* below before repeating
-this sentence as a guarantee.
+**"Must" is now partly enforced and partly still a requirement.** One sender
+exists, and the build checks that *it* routes through Gate 8, that it opens no
+suspension point between the decision and the provider call, and that nothing
+else under `api/` can send at all. None of that constrains a sender written
+tomorrow in a shape the guards do not anticipate, and none of it is evidence
+about the live provider. See *What the build guard actually proves* below
+before repeating any of this as a guarantee.
 
 **What it is not.** It sends no SMS, places no call, sends no email, writes no
 HubSpot record, mutates no consent, mutates no suppression and books nothing.
-**This work creates no sender of any kind.** It is a read-and-decide boundary
-that can only ever refuse more than the system already refuses.
+**Gate 8 itself is still not a sender.** It is a read-and-decide boundary that
+can only ever refuse more than the system already refuses.
 
-### Outbound automation — NONE OF IT IS BUILT
+### Outbound automation — ONE DARK SENDER, NOTHING ELSE BUILT
 
-Gate 8 is an authorization boundary. It is **not** any of the following, none of
-which exists in this repository in any form:
+Gate 8 is an authorization boundary. It is **not** any of the following:
 
 | | |
 |---|---|
-| outbound Twilio SMS sender | **NOT BUILT** |
+| outbound Twilio SMS sender | **BUILT, NOT WIRED, NOT ACTIVATED** — `api/_lib/sms-sender.mjs`. Nothing imports it. `OUTBOUND_SMS_ENABLED`, `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` and `TWILIO_MESSAGING_SERVICE_SID` are in **no** environment. No live Twilio call has ever been made from it. |
 | Retell outbound AI caller | **NOT BUILT** |
 | lead-response orchestrator | **NOT BUILT** |
 | autonomous calendar booking | **NOT BUILT** |
@@ -1657,14 +1679,38 @@ which exists in this repository in any form:
 | cold PropStream outreach | **NOT BUILT** |
 | AIREOS multi-tenant platform | **NOT BUILT** |
 
-Verified by `grep` over `api/` and `tools/`: no `messages.create`, no
-`calls.create`, no TwiML `<Message>`, no Retell client. Every occurrence of
-"twilio" or "retell" in `api/` is a comment, a constant, or the **inbound**
-webhook.
+Verified by `grep` over `api/` and `tools/`: exactly **one** `messages.create`
+call site, inside `api/_lib/sms-sender.mjs`; no `calls.create`, no TwiML
+`<Message>`, no Retell client. Every other occurrence of "twilio" or "retell" in
+`api/` is a comment, a constant, or the **inbound** webhook.
 
-**Merging Gate 8 did not move any of these closer to existing.** A boundary with
-nothing behind it refuses everything, which is the only behaviour it can have
-until a sender is written.
+**A sender that nothing imports sends nothing.** Merging it does not make
+production capable of sending: the flag is unset, the credentials are absent,
+and `tools/check.mjs` fails the build if any module under `api/` imports it, or
+uses the Twilio SDK or its REST host to send from anywhere else. Wiring it up is
+a deliberate future act that has to delete that guard.
+
+#### The first sender — what it is, and what it deliberately is not
+
+`api/_lib/sms-sender.mjs` is a **transport**. It is handed a message that was
+decided elsewhere and it either sends that exact text to that exact number or
+refuses. It composes nothing, templates nothing and decides no content. Its
+order is: feature flag → configuration → target and body validation → construct
+the Twilio client (local, synchronous) → **Gate 8** → refuse on anything that is
+not exactly `allowed === true` → `messages.create()`, immediately.
+
+The allowance **never leaves the stack frame**: it is not returned, stored,
+cached or persisted, and every call authorizes afresh.
+
+It provides **no idempotency, no deduplication, no outbox, no durable retry and
+no exactly-once delivery.** One invocation makes at most one `messages.create()`
+attempt and never retries it — a refusal, not an omission, because once the
+attempt has been made a timeout is ambiguous: Twilio may have accepted and
+queued the message while our answer was lost. The result therefore distinguishes
+three states and never collapses them — `not_sent`, `accepted`, `unknown`. It
+**never rejects**: a throwing Twilio constructor is `not_sent`, and a throwing
+Gate 8 is `not_sent` / `NOT_AUTHORIZED`, because a defect in the boundary is not
+permission. Durable orchestration belongs to a layer that does not exist yet.
 
 **Where it lives.** `api/_lib/send-permission.mjs` on `main`, merged by pull
 request [#41](https://github.com/tomytomz1/crystal-sells-toledo/pull/41).
@@ -1673,9 +1719,11 @@ at `9736ce2`, once on 17 September at `8ea48a1` — so the boundary was reviewed
 against the architecture it actually landed in. Nothing from #42–#47 was
 reverted.
 
-**Nothing imports it.** `grep` over `api/` and `tools/` finds no importer other
-than the module's own tests and the static guard in `tools/check.mjs`. Being
-merged and being reachable are different facts, and only the first is true.
+**Nothing reachable imports it.** `grep` over `api/` and `tools/` finds one
+importer inside `api/` — the dark SMS sender — plus the modules' own tests and
+the static guards in `tools/check.mjs`. Nothing imports the sender, so no
+request path reaches Gate 8. Being merged and being reachable are different
+facts, and only the first is true.
 
 ### The order is the compliance argument
 
@@ -1744,38 +1792,70 @@ overclaim, caught in independent review and withdrawn.** The accurate division:
 - no module under `api/` other than `api/_lib/send-permission.mjs` names
   `canSendSms` or `canPlaceAutomatedVoiceCall`;
 - Gate 8 calls `public.get_suppression_state($1)`, never names the ledger table,
-  uses `CONSENT_LEDGER_SENDER_URL`, and does not reuse `CONSENT_LEDGER_URL`.
+  uses `CONSENT_LEDGER_SENDER_URL`, and does not reuse `CONSENT_LEDGER_URL`;
+- **exactly one** Twilio message-create call site exists under `api/`, and it is
+  in `api/_lib/sms-sender.mjs`. No other module there constructs a Twilio
+  client, names an outbound Messaging Service parameter, or reads an outbound
+  Twilio credential;
+- **no module under `api/` — the sender included — writes `api.twilio.com` or
+  the `Messages.json` REST resource as a literal**, which closes the
+  hand-rolled REST call as it would actually be written. It does **not** close a
+  host assembled from fragments at runtime, and is not claimed to;
+- the sender imports `authorizeSms` from Gate 8, defaults its authorizer seam to
+  it, and restores it on reset;
+- the sender checks its feature flag **before** it reaches Gate 8, and compares
+  that flag strictly to `"true"`;
+- the sender's Gate 8 call site textually **precedes** its provider call site,
+  and between them it refuses on `allowed !== true` and returns;
+- **between those two call sites, in the sender's own source, there is no
+  suspension point** — no `await`, `.then()`, `yield`, `new Promise`, timer,
+  `queueMicrotask` or `process.nextTick` — **and none inside the send's own
+  argument list either**, where an `await` would resolve before the request is
+  made;
+- **nothing under `api/` imports the sender**, which is what keeps it dark.
+
+Every one of those is kept honest by a permanent mutation case in
+`tests/sms-sender.test.mjs`, which runs the real `tools/check.mjs` against a
+throwaway copy of the tree with that single invariant broken. A guard nobody has
+seen fail is a guard nobody knows works.
 
 **Not proved, by this guard or anything else here:**
 
-- that a future provider sender calls Gate 8 **at all** — a new module that
-  reaches Twilio or Retell without importing from `api/_lib/` trips nothing;
-- that the call is **immediately adjacent** to the side effect, with no
-  intervening await, queue hop, retry or scheduling boundary;
-- that a future sender does not **cache an earlier `ALLOWED`** and act on it
-  later.
+- **adjacency in general.** The region guard reads the sender's own source
+  between two call sites. Move the authorization into a helper two frames away,
+  store the decision on an object, or wrap the provider call, and no regex would
+  notice. What covers the *current* implementation is the executable ordering
+  test, which observes the real call order through an injected provider double —
+  evidence about this code, not a property of whatever replaces it;
+- that a **future** sender calls Gate 8 at all. A module that reaches a provider
+  without the Twilio SDK, without naming `api.twilio.com`, and without importing
+  from `api/_lib/` still trips nothing;
+- that a sender does not **cache an earlier `ALLOWED`**. The current one
+  provably does not — the decision never leaves its stack frame, and two sends
+  make two authorizations — but that is a test about this module, not a static
+  property of the repository;
+- **anything about the live boundary.** No Twilio call has ever been made from
+  this module. Its behaviour against the real provider — error shapes, timeouts,
+  what a partial failure leaves behind — is entirely unobserved, and the tests
+  inject the client.
 
-The reason is structural: **there is no outbound sender in this repository.** A
-static guard can constrain what existing modules reference; it cannot constrain
-the call ordering of code that does not exist. Those three become enforceable
-only when the first sender is built, and enforcing them belongs to that work.
-
-Until then they are **requirements on a future sender, written down and
-unenforced** — rule 19's distinction exactly, and not to be restated as
-implemented enforcement.
+Those remain **requirements, written down and unenforced** — rule 19's
+distinction exactly, and not to be restated as implemented enforcement.
 
 ### What is NOT established
 
 | Claim | Status |
 |---|---|
-| a future sender will call Gate 8 at all | **unenforceable today — no sender exists** |
-| a future sender will call it adjacent to the side effect | **unenforceable today — no sender exists** |
-| a future sender will not cache an earlier `ALLOWED` | **unenforceable today — no sender exists** |
+| a future sender will call Gate 8 at all | **still unenforceable** — the guards constrain only the shapes they know |
+| the *current* sender calls Gate 8 adjacent to the side effect | **enforced textually** between its two call sites; **not** proved in general |
+| the *current* sender does not cache an earlier `ALLOWED` | **tested, not statically enforced** |
 | `CONSENT_LEDGER_SENDER_URL` is configured | **NO — it is in no environment** |
+| `OUTBOUND_SMS_ENABLED` or any outbound Twilio credential is configured | **NO — all four are in no environment** |
 | the sender role is reachable from Vercel | **never tested** |
 | Neon's live HTTP response shape under that credential | **unobserved** — tests inject the executor |
 | a live HubSpot read in the sender path | **never performed** |
-| any outbound SMS or call | **none exists** |
+| any live Twilio call from `api/_lib/sms-sender.mjs` | **never made** — the client is injected in every test |
+| any outbound SMS or call | **none sent** |
 
 The `consent_ledger_sender` role itself exists in production Neon, on the record
 from the migration-002/003 provisioning work — not re-verified here.

@@ -187,6 +187,10 @@ const SECRET_NAMES = [
      opt-outs — and forged opt-in requests — indistinguishable from real
      ones. */
   "TWILIO_AUTH_TOKEN",
+  /* The OUTBOUND credential pair. Separate from the auth token on
+     purpose - see api/_lib/sms-sender.mjs - and the secret half is a
+     standing authority to send messages on this account's behalf. */
+  "TWILIO_API_KEY_SECRET", "TWILIO_API_KEY_SID",
   /* The operator action's sealing key. Whoever holds it can mint a link
      that records a permanent, un-undoable opt-out against any number they
      can name — so it must never appear in anything a browser receives. */
@@ -1128,6 +1132,182 @@ for (const file of pages) {
       for (const fn of ["canSendSms", "canPlaceAutomatedVoiceCall"])
         if (new RegExp(`\\b${fn}\\b`).test(code))
           fail(rel, `calls ${fn}() directly - every sender must go through ${GATE8_REL}, which reads durable suppression last`);
+    }
+  }
+
+  /* -------------------------------------------------------------------
+     GATE 8 — THE OUTBOUND SENDER
+     -------------------------------------------------------------------
+     api/_lib/sms-sender.mjs is the first component in this repository
+     that can cause an external messaging side effect. These guards are
+     about CONTAINMENT: exactly one place in the tree may text a
+     consumer, that place must ask gate 8 first, and neither fact may be
+     undone by a refactor that breaks no visible behaviour.
+
+     WHAT IS AND IS NOT PROVED HERE. A static reader cannot prove
+     adjacency in general — the authorization could be moved into a
+     helper, the decision stored on an object, the provider call wrapped
+     two frames down, and no regex would notice. What the region guard
+     below genuinely proves is narrower and stated as such: BETWEEN THE
+     AUTHORIZATION CALL SITE AND THE PROVIDER CALL SITE, IN THE SENDER'S
+     OWN SOURCE, THERE IS NO SUSPENSION POINT. Insert `await log(...)`,
+     a `.then()`, a timer or a `new Promise` there and this fails. Move
+     the authorization out of the function entirely and it does not —
+     that case is carried by the executable ordering test in
+     tests/sms-sender.test.mjs, which observes the real call order
+     through an injected provider double.
+
+     tests/sms-sender.test.mjs runs this script against a throwaway copy
+     of the tree with each of these broken, so none of them is a guard
+     nobody has seen fail.
+     ------------------------------------------------------------------- */
+  {
+    const SENDER_REL = "api/_lib/sms-sender.mjs";
+    const senderPath = join(ROOT, "..", SENDER_REL);
+    const apiDir = join(ROOT, "..", "api");
+    const strip = (src) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+    const walkApi = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walkApi(join(dir, e.name))
+        : /\.(?:mjs|js)$/.test(e.name) ? [join(dir, e.name)] : []);
+
+    if (!existsSync(senderPath)) {
+      fail(SENDER_REL, "missing - the designated outbound sender is gone");
+    } else {
+      const senderSrc = strip(readFileSync(senderPath, "utf8"));
+
+      /* 1. ONE SIDE-EFFECT SITE, AND IT IS HERE.
+            Every outbound shape is refused outside the sender. Comments
+            are stripped first: a doc comment naming messages.create() is
+            documentation, not a send. */
+      const SENDER_ONLY = [
+        [/\bmessages\s*\.\s*create\s*\(/, "creates a Twilio message"],
+        [/\btwilio\s*\(/, "constructs a Twilio API client"],
+        /* The SDK's outbound parameter spelling, and the outbound
+           credentials. Deliberately CASE-SENSITIVE and deliberately not
+           `MessagingServiceSid`: api/twilio-inbound.js legitimately
+           records the inbound webhook's own `params.MessagingServiceSid`
+           as opt-out evidence, and a containment rule that fires on the
+           module it is supposed to protect just gets deleted. The raw
+           REST route is covered by REST_BYPASS below instead. That is a
+           narrower claim than it looks: it catches the host written as a
+           literal, which is how such a call actually gets written, and
+           not a host assembled from fragments at runtime. */
+        [/\bmessagingServiceSid\b/, "names a Twilio Messaging Service as an outbound parameter"],
+        [/TWILIO_MESSAGING_SERVICE_SID|TWILIO_API_KEY_SID|TWILIO_API_KEY_SECRET/, "reads an outbound Twilio credential"],
+      ];
+      /* Forbidden EVERYWHERE, the sender included. The SDK is the only
+         sanctioned path to Twilio; a hand-rolled REST call would carry
+         its own credentials, its own account scoping and none of the
+         one-attempt discipline this module documents. */
+      const REST_BYPASS = [
+        [/api\.twilio\.com/i, "addresses the Twilio REST API directly"],
+        [/\/Messages\.json/i, "addresses the Twilio Messages REST resource directly"],
+      ];
+
+      for (const abs of walkApi(apiDir)) {
+        const rel = "api" + abs.slice(apiDir.length).replace(/\\/g, "/");
+        const code = strip(readFileSync(abs, "utf8"));
+        for (const [re, what] of REST_BYPASS)
+          if (re.test(code))
+            fail(rel, `${what} - outbound Twilio traffic goes through the SDK inside ${SENDER_REL}`);
+        if (rel === SENDER_REL) continue;
+        for (const [re, what] of SENDER_ONLY)
+          if (re.test(code))
+            fail(rel, `${what} - only ${SENDER_REL} may cause an outbound Twilio side effect`);
+        /* 2. AND IT STAYS DARK. Nothing reaches the sender, so merging
+              it cannot make production capable of sending. Wiring it up
+              is a deliberate act that has to delete this line. */
+        if (/\bsms-sender\b/.test(code))
+          fail(rel, `imports ${SENDER_REL} - the sender is deliberately unreachable while outbound messaging is dark`);
+      }
+
+      /* Exactly one, not merely at least one. Two call sites is two
+         places to forget the gate. */
+      const sites = senderSrc.match(/\bmessages\s*\.\s*create\s*\(/g) || [];
+      if (sites.length !== 1)
+        fail(SENDER_REL, `has ${sites.length} Twilio message-create call sites - there must be exactly one`);
+
+      /* 3. THE SENDER ROUTES THROUGH GATE 8, and its test seam restores
+            the real gate rather than some other default. */
+      if (!/import\s*\{[^}]*\bauthorizeSms\b[^}]*\}\s*from\s*"\.\/send-permission\.mjs"/.test(senderSrc))
+        fail(SENDER_REL, "does not import authorizeSms from ./send-permission.mjs - the sender must go through gate 8");
+      if (!/\blet\s+authorize\s*=\s*authorizeSms\s*;/.test(senderSrc))
+        fail(SENDER_REL, "the authorizer does not default to authorizeSms - a seam whose default is not gate 8 is not a seam");
+      if (!/_resetAuthorizer\s*\([^)]*\)\s*\{\s*authorize\s*=\s*authorizeSms\s*;?\s*\}/.test(senderSrc))
+        fail(SENDER_REL, "_resetAuthorizer() does not restore authorizeSms - a test could leave the gate replaced");
+
+      /* 4. THE FLAG IS STRICT, AND FIRST. Off by default, on only for
+            the exact string, and checked before the gate 8 call so a
+            dark system spends no provider round trip. */
+      if (!/env\[OUTBOUND_SMS_FLAG\]\s*===\s*"true"/.test(senderSrc))
+        fail(SENDER_REL, "the outbound flag is not compared strictly to \"true\" - outbound messaging must not switch on through a typo");
+
+      const flagAt = senderSrc.search(/outboundSmsEnabled\s*\(\s*env\s*\)/);
+      const authAt = senderSrc.search(/\bawait\s+authorize\s*\(/);
+      const sendAt = senderSrc.search(/\bmessages\s*\.\s*create\s*\(/);
+
+      if (authAt === -1)
+        fail(SENDER_REL, "has no `await authorize(` call site - nothing asks gate 8 before sending");
+      else if (sendAt === -1)
+        fail(SENDER_REL, "has no Twilio message-create call site");
+      else if (authAt > sendAt)
+        fail(SENDER_REL, "sends before it authorizes - gate 8 is consulted after the message has left");
+      else {
+        if (flagAt === -1 || flagAt > authAt)
+          fail(SENDER_REL, "reaches gate 8 before checking the outbound feature flag - a dark system would still read HubSpot and Neon");
+
+        /* 5. NO SUSPENSION POINT BETWEEN THE DECISION AND THE SEND.
+              Bounded exactly as the header of this section says: the
+              region is the sender's own source between the end of the
+              authorization statement and the provider call. The final
+              `await <client>.` belongs to the send itself and is
+              removed before the scan - and if the send is NOT awaited
+              directly off a local identifier, that is itself refused,
+              because then the region boundary would be a guess. */
+        const semi = senderSrc.indexOf(";", authAt);
+        if (semi === -1 || semi > sendAt)
+          fail(SENDER_REL, "the gate 8 call site is not a single statement - the adjacency region cannot be bounded");
+        else {
+          const region = senderSrc.slice(semi + 1, sendAt);
+          const SEND_PREFIX = /\bawait\s+[A-Za-z_$][\w$]*\s*\.\s*$/;
+          if (!SEND_PREFIX.test(region)) {
+            fail(SENDER_REL, "the Twilio message-create call is not awaited directly off a local client - the send must be the statement that follows the authorization");
+          } else {
+            const between = region.replace(SEND_PREFIX, " ");
+            /* The fail-closed shape, not `allowed === false`: anything
+               that is not exactly an allowance is a refusal. */
+            if (!/allowed\s*!==\s*true/.test(between))
+              fail(SENDER_REL, "does not refuse on `allowed !== true` between gate 8 and the send - a malformed or missing decision must not send");
+            if (!/\breturn\b/.test(between))
+              fail(SENDER_REL, "does not return between gate 8 and the send - a denial has no way to stop the message");
+            const SUSPENSIONS = [
+              [/\bawait\b/, "an await"],
+              [/\.\s*then\s*\(/, "a .then()"],
+              [/\byield\b/, "a yield"],
+              [/\bnew\s+Promise\b/, "a new Promise"],
+              [/\bset(?:Timeout|Interval|Immediate)\s*\(/, "a timer"],
+              [/\bqueueMicrotask\s*\(/, "a queueMicrotask()"],
+              [/\bprocess\s*\.\s*nextTick\s*\(/, "a process.nextTick()"],
+            ];
+            for (const [re, what] of SUSPENSIONS)
+              if (re.test(between))
+                fail(SENDER_REL, `has ${what} between the gate 8 decision and the Twilio send - every suspension point there is a window in which a STOP can arrive and be ignored`);
+
+            /* AND THE SEND'S OWN ARGUMENTS. An `await` in the argument
+               list resolves BEFORE the request is made, so it sits
+               between the decision and the side effect just as surely as
+               one on the line above - and it falls outside the region
+               scanned above, which ends where the call begins. Bounded
+               by the statement's terminating semicolon. */
+            const argEnd = senderSrc.indexOf(";", sendAt);
+            const args = argEnd === -1 ? senderSrc.slice(sendAt) : senderSrc.slice(sendAt, argEnd);
+            for (const [re, what] of SUSPENSIONS)
+              if (re.test(args))
+                fail(SENDER_REL, `has ${what} inside the Twilio send's own arguments - it resolves before the request is made, which is the same window`);
+          }
+        }
+      }
     }
   }
 
