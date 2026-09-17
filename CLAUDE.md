@@ -277,6 +277,7 @@ those findable, not to make them authoritative.
 npm run build            # src/ + assets/ -> public/
 npm run check            # static validation
 npm run verify:live      # post-deploy: does the live site match what was built?
+npm run seo:report       # Search Console + GA4 snapshot -> docs/seo/; needs credentials
 npm run test:unit        # api/ endpoint and validation
 npm run test:browser     # browser behaviour
 npm run test:hubspot     # HubSpot delivery

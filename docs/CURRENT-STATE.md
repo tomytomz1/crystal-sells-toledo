@@ -1649,6 +1649,64 @@ change was design-only: `buildSuppressionEvent()` validates `event_type` with
 could enter an unamendable table and be invisible to every fold. Recorded as
 implementation step 2 of the plan, not widened into.
 
+## Search performance snapshots — BUILT, and INERT
+
+`tools/seo-report.mjs` (`npm run seo:report`) queries the Search Console API and
+the GA4 Data API with a service-account assertion it signs itself, and writes a
+dated JSON snapshot to `docs/seo/`. `.github/workflows/seo-report.yml` runs it
+every Monday at 11:00 UTC and commits the result.
+
+**No credentials are configured in any environment, so NO SNAPSHOTS ARE BEING
+COLLECTED.** The scheduled workflow detects the missing secret, writes a run
+summary saying so, and exits without failing. That is a deliberate skip, not a
+pass, and nothing may describe snapshot collection as active until the four
+variables below exist:
+
+| Variable | Scope |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | GitHub Actions secret; local `.env` |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | GitHub Actions secret; local `.env` |
+| `GSC_SITE_URL` | GitHub Actions secret; local `.env` |
+| `GA4_PROPERTY_ID` | GitHub Actions secret; local `.env` |
+
+Server-side only — rule 10 applies, none may be prefixed `NEXT_PUBLIC_`. The
+one-time Google console setup a human must perform is `docs/seo/README.md`.
+
+**Not part of `npm test`**, for the same reason as `verify:live`: the release
+gate must not depend on a live third party. `tests/seo-report.test.mjs` is in the
+suite, and runs entirely against loopback servers — it makes no request to
+Google.
+
+**NO LIVE CALL HAS EVER BEEN MADE.** The tests prove the assertion is signed and
+verifiable, that neither the key nor the assertion reaches a log, that bad
+configuration fails loudly, and that the snapshot states its own window, sources
+and anonymised-impression gap. They do **not** prove Google accepts the
+assertion, that a service account has been granted anything, or that the real
+APIs return the response shapes assumed — those shapes come from Google's
+published documentation, not from observed traffic. The first real run is the
+first evidence, and it has not happened.
+
+### What the data already showed
+
+From the 16 September manual exports, covering 31 August to 14 September 2026 —
+the first fortnight in which Google held any search data for this domain:
+
+- **80 impressions, 2 clicks** across four pages.
+- **Five queries visible, 15 impressions between them.** The remaining 65
+  impressions are queries Search Console withholds at low volume. That gap is
+  permanent and no tool recovers it.
+- `crystal saylor` sits at **position 8**. The site does not rank first for the
+  licensed name. `sameAs` on the homepage carries LinkedIn only — no Google
+  Business Profile, Zillow or Realtor.com.
+- Three seller-hiring queries (`sellers agents toledo oh`, `home sellers agents
+  toledo oh`, `toledo home sellers`) sit at **positions 46–62**, against
+  portal SERPs. `/sell` is written as a process explainer, not as an answer to
+  "who lists homes in Toledo".
+
+No site change has been made in response to any of this. `STRATEGY.md` §6 is the
+standing plan and it already anticipates the conclusion: brand and hyperlocal
+long-tail, not head terms.
+
 ## Sequenced follow-ups from the transport work
 
 0. ~~Both gate 7 endpoints answer without deciding the connection.~~ **Done** —
@@ -1708,6 +1766,7 @@ Open one of these only when the task actually needs it.
 | **The gate 7 connection lifecycle** — the shared predicate, both response boundaries, the static guard rewrite, the raw-socket matrix | `docs/updates/2026-09-11-gate-7-connection-lifecycle.md` |
 | **Unsuppression / re-opt-in** — the two-key rule, lane folding, the future `db/003` contract, the operator security model, Twilio reconciliation | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |
 | **Why this project's engineering rules exist** — the defects that earned them | **`docs/ENGINEERING-LESSONS.md`** — read the relevant entry, not the archive |
+| Search performance snapshots — the Google console setup a human must do, and what a snapshot cannot contain | `docs/seo/README.md` |
 | Rule rationale, Phase 1 contract | `docs/PHASE-1-HANDOFF.md` §6 — do not read wholesale |
 | HubSpot consent schema, §6/§6a verification, rollback | `docs/updates/2026-09-09-hubspot-consent-setup.md` |
 | Consent model, disclosures, evidence, feature gate | `docs/updates/2026-09-09-communications-consent-foundation.md` |
