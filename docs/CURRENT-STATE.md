@@ -1694,6 +1694,38 @@ token**. Those were the four open unknowns and all four are closed.
 one. Only `workflow_dispatch` has ever fired. The first Monday run is the
 evidence and it has not happened.
 
+### The snapshots are read automatically — `seo-diff`
+
+`tools/seo-diff.mjs` (`npm run seo:diff`) reports what moved between the two
+newest snapshots. `.github/workflows/seo-diff.yml` chains to the snapshot job
+via `workflow_run`, writes the report to the run summary, and opens an issue
+**only** when something crosses a threshold. No credentials — it reads
+committed files.
+
+**Nothing has run yet.** Only one snapshot exists, and a diff needs two, so the
+first useful report is the run after the second Monday snapshot. Until then the
+tool says so and exits 0.
+
+Two properties it is built to preserve, both easy to lose:
+
+- **Consecutive windows overlap by 21 of 28 days**, so a delta is *not*
+  week-over-week. The report states this every time — and states the opposite
+  when a missed run leaves the windows genuinely disjoint.
+- **A query vanishing from the table is not necessarily lost traffic**, because
+  Search Console withholds low-volume queries.
+
+**It reports arithmetic and gives no advice, deliberately.** Whether a movement
+should change the site is constrained by rules 2, 3, 5 and 6 and by OAC
+1301:5-1-02. `tools/check.mjs` enforces the structural ones; **nothing can
+machine-check fair-housing risk in newly generated prose.** No automation here
+proposes or applies copy changes, and none should be added without that problem
+being solved first.
+
+`workflow_run` only fires for workflows on the **default branch**, so this is
+inert on a topic branch. It also checks out `main` rather than the event's
+`head_sha`, which is the commit the snapshot job ran *on* — the one before the
+snapshot it created.
+
 ### Landing pages are folded by path
 
 GA4 reports the landing page with its query string, so the first live snapshot
