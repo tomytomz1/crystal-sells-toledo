@@ -22,6 +22,15 @@ it merely because a commit SHA changes.** It deliberately carries no SHA — res
 - **Zoho code is dormant rollback code, imported by nothing.** It is not the live
   path. (Zoho *Mail* SMTP, used for the lead acknowledgement email, is separate
   and is live.)
+- **The consumer acknowledgement email identifies the licensee and the
+  brokerage, and no team.** `api/_lib/mail.mjs` signs it *Crystal Saylor,
+  REALTOR®* and *Key Realty LTD*, each on its own 14px/700 line. **No team or
+  group name appears**, which is what keeps OAC 1301:5-1-21(B)(2) from
+  engaging, and `tests/mail.test.mjs` fails if one returns or if either
+  identity is dropped or demoted. Corrected in
+  [#50](https://github.com/tomytomz1/crystal-sells-toledo/pull/50), merged as
+  `093f0387`; before that, both signatures named a group. Ohio requires the
+  **brokerage** name, which is unchanged.
 
 ## Communications consent — merged, and ON in Production
 
@@ -147,18 +156,73 @@ Schema in the production HubSpot portal:
 entries above were written before a Campaign existed; one now does, and it
 is rejected.
 
-| Twilio object | State — 16 September 2026 | Evidence |
+| Twilio object | State — 17 September 2026 | Evidence |
 |---|---|---|
 | Primary / Individual Customer Profile | **APPROVED** | operator-supplied Twilio email |
 | A2P 10DLC Brand | **APPROVED**, Sole proprietor | operator-supplied console screenshot |
 | Messaging Service | **EXISTS**, one 10DLC number attached | operator report |
-| **A2P Campaign** | **SUBMITTED and REJECTED — error 30882, "Terms and Conditions issues"** | operator report |
-| Twilio support ticket **#29582556** | **OPEN**, transferred to Twilio's 10DLC Onboarding team | operator report |
+| **A2P Campaign** | **SUBMITTED and REJECTED — error 30882, "Terms and Conditions issues"**. Remediated in the Console; **NOT resubmitted**. **Approval is not established.** | operator report |
+| Twilio support ticket **#29582556** | **OPEN** with the 10DLC Onboarding team. The operator has asked what triggered the classification and how this Campaign should be resubmitted. **Awaiting reply.** | operator report |
 | Twilio Campaign **"Check for errors"** | still returns *"This registration needs additional review. Our pre-check was unable to verify some of the information you provided."* | operator report |
 
 **Everything in that table is the operator's own report of an external
 system. No agent session has ever opened the Twilio console, and nothing
 in this repository can observe it.**
+
+**Brand approval, Campaign approval, legal-page compliance, use-case
+classification, identity consistency and resubmission eligibility are six
+separate questions.** Only the first is settled. Collapsing any two of
+them is the specific error this section exists to prevent.
+
+#### What error 30882 does and does not say
+
+From Twilio's first-party error reference for
+[30882](https://www.twilio.com/docs/api/errors/30882). **Evidence class:
+search-surfaced excerpts of that page, consistent across three
+independent searches. `twilio.com` is unreachable from every agent
+environment used on this project, so no agent has loaded the page
+itself.**
+
+| The page says | It does **not** say |
+|---|---|
+| **Description:** rejected due to *"Terms and Conditions issues"* | that 30882 *means* affiliate marketing |
+| **Possible Cause:** *"affiliated marketing is not a supported use case. Terms and conditions do not support this use case."* | that this is the only cause, or the cause here |
+| **"Ineligible for resubmission. However, if you feel that this was in error, contact Twilio Customer Support."** | that the rejection is final, or that appeal is unavailable |
+
+Two corrections to earlier readings recorded in this project:
+
+1. **"30882 means affiliate marketing" is an overstatement.** Affiliate
+   marketing is listed as a *possible cause*. The error's own description
+   is the broader "Terms and Conditions issues".
+2. **"Categorically ineligible for resubmission" is an overstatement.**
+   The same page names a support appeal in the next sentence. **Ticket
+   #29582556 is that path**, and the operator is already on it — so the
+   Console offering *"Revise errors and resubmit"* is not necessarily a
+   contradiction of the documentation.
+
+**Twilio has not identified what triggered this rejection.** Until it
+does, no cause is established.
+
+#### Hypothesis — an identity inconsistency, unproven
+
+Before 17 September the team/group name appeared in **two places the
+Campaign touched**: the operator's correspondence with Twilio, and the
+consumer acknowledgement email. It appears in **neither** the registered
+Brand (*Crystal Sells Toledo*) nor anywhere on the website (*Crystal
+Saylor · Key Realty LTD*) — `CLAUDE.md` rule 7 and
+`docs/compliance-audit.md` §A-2 forbid it there.
+
+A third business identity reaching a vetter, present in neither the Brand
+nor the site, is a **plausible** route to a third-party or affiliate
+reading. **It is a hypothesis and nothing more.** Twilio has not confirmed
+it, and it may have played no part.
+
+**Both occurrences are now removed** — the operator's signature on
+17 September, and the acknowledgement email in
+[#50](https://github.com/tomytomz1/crystal-sells-toledo/pull/50),
+merged as `093f0387`. **That correction stands on rule 7 and on Ohio
+advertising law independently of A2P**, and must not be recorded as
+having fixed the rejection.
 
 **THE CAMPAIGN HAS NOT BEEN RESUBMITTED.** The existing rejected Campaign
 is being **edited**, not replaced. The operator has already changed it, by
@@ -172,17 +236,28 @@ already exists in Twilio and is not this repository's to change.**
 
 #### What was added on 16 September 2026, and the one finding behind it
 
-**THE FINDING: the consent disclosure may not be machine-readable.** The
-real opt-in is on **step 2** of the two-step `/home-value` form. Steps
-toggle with the `hidden` attribute in `assets/js/main.js`, so a crawler
-that does not run the script — or runs it and never clicks *next* — reads
-step 1 and stops. A browser-based external extraction of production
-`/home-value` returned the page and **both SMS legal links**, but **did
-not surface the step-2 SMS disclosure in its extracted text**;
-`/sms-privacy` and `/sms-terms` were directly crawlable. That extraction
-is **operator-supplied evidence of an external tool's behaviour** — it is
-not a measurement of Twilio's verifier, and nobody here knows what
-Twilio's verifier does.
+**THE FINDING, AS MEASURED — and it is narrower than this section first
+claimed.** The real opt-in is on **step 2** of the two-step `/home-value`
+form. Measured against the built output of the deployed commit:
+
+- the **full SMS disclosure is present in the served raw HTML** — the
+  canonical sentence, *How may Crystal follow up?*, *Message frequency
+  varies*, *Message and data rates may apply*, *Reply STOP to opt out*,
+  the `sms_consent` field, and both `/sms-privacy` and `/sms-terms` links;
+- `<div data-step="2">` is served with **no `hidden` attribute**.
+  JavaScript adds it at runtime via `showStep(form, 0)`.
+
+So: **a raw-HTML or text-based scraper does see the disclosure. A
+rendering-based checker that executes the page JavaScript and does not
+advance the form may not visually expose step 2.**
+`/sms-consent-evidence` provides a static, directly visible review surface
+for that second case.
+
+**The earlier wording here — that the disclosure "may not be
+machine-readable" — was too broad and is withdrawn.** It generalised from
+one external extraction tool's behaviour, which is
+**operator-supplied evidence of that tool**, not a measurement of Twilio's
+verifier. Nobody here knows what Twilio's verifier does.
 
 **THE REMEDY: `/sms-consent-evidence`,** a new public page that
 republishes the same consent experience as **static, script-free text** at
@@ -265,29 +340,48 @@ fix.** It is a test, not a deployment change.
 
 #### What this does and does not establish
 
-**It does not prove Twilio will approve anything.** It adds
-machine-verifiable consent evidence intended to reduce ambiguity in
-Twilio's pre-check and human review. Whether the pre-check clears, and
-whether a reviewer accepts the surfaces, is unknown and unknowable from
-here.
+**It does not prove Twilio will approve anything.** It adds a statically
+visible consent-evidence surface intended to reduce ambiguity in Twilio's
+pre-check and human review. Whether the pre-check clears, and whether a
+reviewer accepts the surfaces, is unknown and unknowable from here.
 
-**Nothing is live until it is deployed.** These are source changes on a
-branch. The live site still serves the previous pages until `main` merges
-and Vercel redeploys, and **a resubmission before that redeploy would be
-reviewed against pages that do not yet carry any of this.**
+**THE MESSAGING SURFACES ARE LIVE, AND THEIR CONTENT WAS VERIFIED BY THE
+OPERATOR — 17 September 2026.** The operator ran a status and content
+check from their own terminal and pasted the output:
 
-**THE HUMAN NEXT STEPS, IN ORDER.** Every one is an operator action in an
-external system; none was performed or simulated here.
+| URL | Status | Content verified present |
+|---|---|---|
+| `/sms-privacy` | **200** | *"We do not sell or share your SMS opt-in data"*, *Crystal Sells Toledo* |
+| `/sms-terms` | **200** | *SMS Terms*, *Message frequency varies*, *Message and data rates may apply*, *Reply STOP to opt out*, *Reply HELP for help*, *Carriers are not liable*, *not a condition of service* |
+| `/sms-consent-evidence` | **200** | the canonical SMS disclosure, *How may Crystal follow up?* |
+| `/home-value` | **200** | — |
 
-1. Independent review of the pull request.
-2. Merge, once reviewed and CI is green.
-3. Let Vercel Production deploy.
-4. Verify live: `/sms-consent-evidence`, `/home-value` step 2,
-   `/sms-privacy`, `/sms-terms`.
-5. Re-run Twilio's Campaign **"Check for errors"**.
-6. Follow the guidance on ticket **#29582556**.
-7. **Decide whether and when to resubmit the existing Campaign.** That
-   decision is the operator's. Nothing here schedules or requests it.
+**EVIDENCE CLASS — this distinction is the point.** This is
+**operator-run verification**, pasted from their terminal. **No agent
+browsed production**: `crystalsellstoledo.com` is unreachable from every
+agent environment used on this project, confirmed across `curl` (gateway
+403 to CONNECT), a first-party fetch tool (`EGRESS_BLOCKED`) and a real
+Chromium browser (`ERR_TUNNEL_CONNECTION_FAILED`). Repository source and
+live observation remain separate categories and are not conflated here.
+
+All three SMS pages are feature-gated, so their returning 200 also
+establishes that `COMMUNICATIONS_CONSENT_ENABLED` is live in Production
+and the deployed build is the flag-on build.
+
+**THE HUMAN NEXT STEPS, IN ORDER. Steps 1–4 are DONE.** Every one is an
+operator action in an external system; none was performed or simulated by
+any agent.
+
+1. ~~Independent review of the pull request.~~ **DONE.**
+2. ~~Merge once reviewed and CI green.~~ **DONE.**
+3. ~~Let Vercel Production deploy.~~ **DONE.**
+4. ~~Verify live: `/sms-consent-evidence`, `/home-value` step 2,
+   `/sms-privacy`, `/sms-terms`.~~ **DONE** — the table above.
+5. **Await Twilio's reply on ticket #29582556** — what triggered the
+   classification, and how this Campaign should be resubmitted.
+6. **Only then decide whether and when to resubmit.** That decision is the
+   operator's. **Nothing here schedules or requests it**, and the
+   documentation's own appeal route is the ticket, not the Submit button.
 
 ### STOP / HELP inbound activation — audited 15 September 2026, NOT ACTIVATED
 
