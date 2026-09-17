@@ -243,6 +243,31 @@ engages and Key Realty LTD must then be displayed in equal or greater prominence
 the team name and the salesperson's name. The current lockup would need extending to three
 names at parity, not two.
 
+### Addendum — 17 September 2026: the scan's scope, and one surface outside it
+
+The finding above stands: it is about **this website**, and it was true of the website then and
+now. But "every deployed surface" meant every surface *of the site*. It did not include
+`api/_lib/mail.mjs`, and **both signatures of the lead acknowledgement email named the Degnan
+Group** from before this audit until 17 September 2026.
+
+That is the acknowledgement every consumer who submits a form receives. It is also the artefact
+most likely to be produced to a carrier or a regulator as opt-in evidence — so of all the places
+for the one inconsistency to survive, it was close to the worst.
+
+**Corrected.** Both signatures now read `Key Realty LTD` alone. Ohio's requirement is the
+**brokerage** name, which is unchanged; the team name was optional and is gone. Equal prominence
+is unaffected — the licensee line and the brokerage line remain one 14px/700 line each, and
+removing the third name from the brokerage line strengthens that parity rather than disturbing
+it. `tests/mail.test.mjs` now fails if a team or group name reappears, if the brokerage or the
+licensee is dropped, or if either line is demoted relative to the other; all three failure modes
+were verified by mutation.
+
+**The lesson, and it is not about Ohio.** A scan that establishes a negative is only as good as
+its enumerated scope, and this one's scope was stated accurately and then read as though it were
+total. The website guard (`tests/browser.test.mjs`) had enforced rule 7 on built output since
+before the audit; nothing enforced it on the server-side email, because nobody had listed the
+email as a surface. **Where a rule says "anywhere", the enumeration of surfaces is the rule.**
+
 ### A-3 / A-4 · REALTOR® and the NAR Code — **RESOLVED**
 
 **Owner confirms Crystal Saylor is an active REALTOR® and a current NAR member**, and a member

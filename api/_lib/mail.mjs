@@ -75,9 +75,37 @@ export function escapeHtml(value) {
    No tracking pixel, no click wrapping, no UTM parameters, no marketing
    footer - the only links are Crystal's own contact details. */
 
+/* THE BROKERAGE IS NAMED HERE; NO TEAM IS.
+   ---------------------------------------------------------------------
+   Both signatures carried the brokerage followed by a team name until
+   17 September 2026. CLAUDE.md rule 7 forbids naming that team anywhere,
+   and docs/compliance-audit.md A-2 records why: under OAC 1301:5-1-21(B)
+   the enhanced team-advertising requirements attach when a licensee
+   ADVERTISES as part of a team, and naming the group engages (B)(2) - the
+   brokerage must then appear at equal or greater prominence alongside
+   BOTH the team name and the salesperson's name.
+
+   That audit scanned every deployed surface of the WEBSITE and found zero
+   occurrences. It did not scan this file. So the one place the group was
+   still named was the acknowledgement every consumer receives - the
+   surface least likely to be re-audited, and the one most likely to be
+   produced as opt-in evidence to a carrier or a regulator.
+
+   Ohio requires the BROKERAGE name. That is Key Realty LTD, and it stays.
+   The team name is optional and costs more than it is worth here.
+
+   Equal prominence is unaffected: "Crystal Saylor, REALTOR(R)" and
+   "Key Realty LTD" remain one 14px/700 line each, which is what rule 2
+   protects. Removing the third name from the brokerage line strengthens
+   that parity rather than disturbing it.
+
+   The name is deliberately not written out in this comment. Grepping the
+   repository for it should find the banned-string lists and the audit,
+   not a copy sitting next to the signature it was removed from.
+   tests/mail.test.mjs fails if any team or group name reappears here. */
 const SIGNATURE_TEXT = [
   "Crystal Saylor, REALTOR®",
-  "Key Realty LTD | Degnan Group",
+  "Key Realty LTD",
   "Ohio Real Estate Salesperson | License #2025003655",
   "(419) 245-4655",
   "crystal@crystalsellstoledo.com",
@@ -105,7 +133,7 @@ const SIGNATURE_HTML = `<div style="font-family:Verdana, Arial, sans-serif; colo
             Crystal Saylor, REALTOR&reg;
         </div>
         <div style="font-size:14px; line-height:18px; font-weight:700; margin:0 0 2px 0">
-            Key Realty LTD | Degnan Group
+            Key Realty LTD
         </div>
         <div style="font-size:12px; line-height:17px; margin:0 0 4px 0">
             Ohio Real Estate Salesperson | License #2025003655
