@@ -192,3 +192,64 @@ describe("the consent-enabled build is verified by the gate", () => {
     });
   }
 });
+
+/* =====================================================================
+   Gate 8 — the guards that must hold in BOTH flag states.
+   =====================================================================
+   The consent guards above are flag-asymmetric by nature: they describe a
+   surface that only exists when the programme is on. The Gate 8 guards are
+   not. A future sender importing the pure resolver directly is a defect
+   whether or not the opt-in UI is rendering, so these mutations must fail
+   with the flag OFF *and* ON.
+
+   Each case was verified to fail by construction before being written
+   down; they are kept so the guards cannot quietly stop biting.
+   ===================================================================== */
+describe("the Gate 8 send-time boundary cannot be bypassed", () => {
+  const GATE8 = "api/_lib/send-permission.mjs";
+
+  const CASES = [
+    {
+      name: "a future sender that imports the pure resolver directly",
+      apply: (dir) => writeFileSync(join(dir, "api/_lib/twilio-sender.mjs"),
+        'import { canSendSms } from "./permission.mjs";\n' +
+        'export const send = (s, p) => canSendSms(s, p);\n'),
+      expect: /calls canSendSms\(\) directly - every sender must go through/,
+    },
+    {
+      name: "a Gate 8 that stops consulting the durable ledger",
+      apply: (dir) => edit(dir, GATE8, (s) =>
+        s.replace("public.get_suppression_state($1)", "public.some_other_thing($1)")),
+      expect: /does not call public\.get_suppression_state/,
+    },
+    {
+      name: "a Gate 8 that reads the ledger table instead of the narrow function",
+      apply: (dir) => edit(dir, GATE8, (s) =>
+        s.replace("FROM public.get_suppression_state($1)", "FROM communication_consent_events")),
+      expect: /names the ledger table/,
+    },
+    {
+      name: "a Gate 8 that reuses the append credential for send authorization",
+      apply: (dir) => edit(dir, GATE8, (s) =>
+        s.replace('export const SUPPRESSION_LOOKUP_TIMEOUT_MS',
+                  'const reused = process.env.CONSENT_LEDGER_URL;\nexport const SUPPRESSION_LOOKUP_TIMEOUT_MS')),
+      expect: /reuses the append credential/,
+    },
+  ];
+
+  for (const c of CASES) {
+    test(`${c.name}: fails the gate with the flag OFF and ON`, () => {
+      const dir = freshTree();
+      try {
+        c.apply(dir);
+        for (const on of [false, true]) {
+          const r = buildAndCheck(dir, on);
+          assert.equal(r.ok, false,
+            `the gate accepted it with the flag ${on ? "ON" : "OFF"} - the guard is vacuous`);
+          assert.match(r.output, c.expect,
+            `it failed with the flag ${on ? "ON" : "OFF"}, but not for the expected reason:\n${r.output}`);
+        }
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+  }
+});
