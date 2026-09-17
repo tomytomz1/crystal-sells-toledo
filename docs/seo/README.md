@@ -84,6 +84,27 @@ The window always ends **three days ago**. Search Console does not finalise a
 day's figures for two to three days, and including an unsettled tail makes every
 snapshot look like a decline.
 
+## The shape changed once, on purpose
+
+`2026-09-14.json` — the first live snapshot — carries a `landingPages` array in
+the **raw** shape Google returned: one page split across several rows by query
+string (`/`, `/?gtm_latency=1`, `/?fbclid=…`), each with a `users` count.
+
+Every snapshot after it folds those rows by path and **omits `users` per page**.
+The reasoning is in `tools/seo-report.mjs`: sessions and key events add across
+folded rows, distinct users do not, and an inflated per-page `users` would be
+worse than none.
+
+**The first file was deliberately not rewritten.** It is a record of what Google
+actually returned on 17 September 2026, and editing a data record to match a
+later code change destroys the only thing it is good for. Read it as raw; read
+everything after it as folded.
+
+Two things the fold does *not* do: it leaves `(not set)` — GA4's placeholder for
+an unattributed session — intact rather than folding it into a path, and it
+treats `/sell` and `/sell/` as different pages. Neither has come up in real data
+yet.
+
 ## Failure
 
 The script exits non-zero and names the cause. It never writes a partial

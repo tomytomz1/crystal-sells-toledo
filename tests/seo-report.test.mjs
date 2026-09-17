@@ -313,7 +313,18 @@ describe("the snapshot it writes", () => {
         if (!dimensions?.length) return json({ rows: [row([], 68, 46, 1)] });
         if (dimensions[0].name === "sessionDefaultChannelGroup")
           return json({ rows: [row(["Direct"], 38, 30, 1), row(["Organic Search"], 3, 3, 0)] });
-        return json({ rows: [row(["/"], 40, 35, 1)] });
+        /* The shapes a real GA4 response actually carried on 2026-09-17:
+           one page split across three rows by query string, plus the
+           `(not set)` placeholder. */
+        return json({
+          rows: [
+            row(["/"], 40, 35, 1),
+            row(["/?gtm_latency=1"], 2, 2, 0),
+            row(["/?fbclid=IwY2xjawUTmZdw"], 1, 1, 0),
+            row(["(not set)"], 6, 2, 0),
+            row(["/sell"], 2, 2, 0),
+          ],
+        });
       });
     });
     server.listen(0, "127.0.0.1");
@@ -358,6 +369,57 @@ describe("the snapshot it writes", () => {
     assert.equal(searchConsole.queries[0].position, 61.5);
     assert.equal(snapshot.parsed.analytics.totals.sessions, 68);
     assert.equal(snapshot.parsed.analytics.channels[0].channel, "Direct");
+  });
+
+  test("folds landing pages by path, and reports no per-page user count", async () => {
+    const parsed = await withGoogle(async (base) => {
+      const { code, stdout } = await run({
+        GOOGLE_SERVICE_ACCOUNT_EMAIL: SERVICE_ACCOUNT,
+        GOOGLE_SERVICE_ACCOUNT_KEY: privateKey,
+        GSC_SITE_URL: "sc-domain:example.com",
+        GA4_PROPERTY_ID: "123456",
+        GOOGLE_TOKEN_URL: `${base}/token`,
+        GOOGLE_API_BASE: base,
+      });
+      assert.equal(code, 0, stdout);
+      const written = stdout.match(/([\d-]{10})\.json/);
+      return JSON.parse(readFileSync(join(OUT, `${written[1]}.json`), "utf8"));
+    });
+
+    const pages = parsed.analytics.landingPages;
+    const home = pages.find((p) => p.page === "/");
+
+    /* Three rows for one page — 40 + 2 + 1 — become one. Without this the
+       homepage reads as 40 sessions and two URLs nobody linked appear as
+       separate pages. */
+    assert.equal(home.sessions, 43);
+    assert.equal(home.keyEvents, 1);
+    assert.ok(
+      !pages.some((p) => p.page.includes("?")),
+      "no query string survives into the snapshot",
+    );
+
+    /* Users are distinct people and do not add across rows. Rather than
+       emit 35 + 2 + 1 = 38 for a page GA4 would count differently, the
+       field is absent. */
+    assert.equal(home.users, undefined, "no per-page user count is invented");
+    assert.deepEqual(Object.keys(home).sort(), ["keyEvents", "page", "sessions"]);
+
+    /* GA4's unattributed placeholder is not a path and is not folded. */
+    assert.equal(pages.find((p) => p.page === "(not set)").sessions, 6);
+    assert.equal(pages.find((p) => p.page === "/sell").sessions, 2);
+
+    /* Sessions still reconcile against the total GA4 reported. */
+    assert.equal(
+      pages.reduce((n, p) => n + p.sessions, 0),
+      51,
+      "folding preserves every session",
+    );
+    assert.deepEqual(
+      pages.map((p) => p.sessions),
+      [...pages.map((p) => p.sessions)].sort((a, b) => b - a),
+      "busiest page first",
+    );
   });
 
   test("states which sources it queried, so a skipped one cannot read as a zero", async () => {
