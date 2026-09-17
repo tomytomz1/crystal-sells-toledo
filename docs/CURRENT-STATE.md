@@ -23,7 +23,7 @@ it merely because a commit SHA changes.** It deliberately carries no SHA — res
   path. (Zoho *Mail* SMTP, used for the lead acknowledgement email, is separate
   and is live.)
 
-## Communications consent — merged, and OFF
+## Communications consent — merged, and ON in Production
 
 Three phases are merged to `main`:
 
@@ -45,17 +45,34 @@ Schema in the production HubSpot portal:
 
 ### The gate
 
-- **`COMMUNICATIONS_CONSENT_ENABLED` remains OFF / absent from Vercel
-  Production.** With it absent, no `cst_*` property is requested or written and
-  the contact-search request is byte-identical to the pre-consent one.
-- **The communications consent UI is inactive.** No visitor sees a tick box, and
-  the published privacy policy carries no messaging section.
+> **Evidence class.** Nothing in this repository can read a Vercel environment
+> variable. Every statement below about what is set in Production rests on
+> **operator report and operator-verified browser observation**, recorded in
+> "THE NEXT OPERATOR ACTIONS" further down. Git proves the code and the build;
+> it does not prove the environment.
+
+- **`COMMUNICATIONS_CONSENT_ENABLED=true` IS SET in Vercel Production**
+  (operator-reported, step 2 of the operator actions below). The earlier
+  statement here — that it remained OFF and absent — described the state before
+  activation and is superseded.
+- **The communications consent UI is LIVE.** Operator-verified on live
+  `/home-value`: two separate boxes, both unchecked, neither required, the
+  section marked Optional, the SMS copy carrying frequency / rates / STOP /
+  HELP / not-a-condition-of-service, both legal links present, and the voice
+  wording identifying automated technology and an artificial, prerecorded or
+  AI-generated voice. `/sms-privacy`, `/sms-terms` and `/sms-consent-evidence`
+  build and ship with the flag on (14 pages enabled, 10 disabled).
 - **No consumer SMS or AI voice traffic is active.** No Twilio SMS is sent and no
-  Retell call is placed.
-- **The ledger database exists and is verified. It is connected to Preview
-  only.** Provisioned and grant-verified on 9 September 2026 — see "The ledger"
-  below. `CONSENT_LEDGER_URL` is set in Vercel **Preview** and is **absent from
-  Production**, so the live site has no connection to it.
+  Retell call is placed. **Collecting consent is not sending on it** — there is
+  no outbound sender of any kind in this repository.
+- **The ledger database exists and is verified, and `CONSENT_LEDGER_URL` IS SET
+  in Production** (operator-reported, step 1 below), on the `consent_ledger_app`
+  role. Provisioned and grant-verified on 9 September 2026 — see "The ledger"
+  below. It is also set in Preview. The earlier statement here — Preview only,
+  absent from Production — is superseded.
+  - **`CONSENT_LEDGER_SENDER_URL` is a different credential and is in NO
+    environment.** It is the EXECUTE-only sender role Gate 8 reads suppression
+    with. See "Gate 8" below.
 - **Preview has no standing live-CRM write access.** `HUBSPOT_ACCESS_TOKEN`,
   `HUBSPOT_PORTAL_ID` and `HUBSPOT_FORM_GUID` were scoped to Production **and
   Preview** on 10 September 2026 for the gate 4 Stage B round trip, and the
@@ -89,6 +106,11 @@ Schema in the production HubSpot portal:
   `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
   Vercel **Preview only**. **Gate 4 closed on 10 September 2026 — both stages.
   Gate 5 closed the same day.** Gates 6–10 remain.
+  - **"Preview only" is SUPERSEDED.** Both variables were subsequently set in
+    **Production** as well — see the operator actions below and the gate
+    section at the top of this file. The sentence above records why Preview was
+    chosen for the Gate 4 round trip at the time; it no longer describes where
+    the variables are.
 - **A2P/TCR readiness is a separate activation dependency. Gate 6 is still
   OPEN — but every blocker that previously kept it open is now CLOSED, and
   what remains is different in kind.**
@@ -170,8 +192,10 @@ Schema in the production HubSpot portal:
   not be submitted until the reviewer can visit the live opt-in URL and
   actually see the production SMS consent checkbox, unchecked and optional,
   with its disclosure. That needs `COMMUNICATIONS_CONSENT_ENABLED=true` in
-  Vercel **Production**, which is deliberately **not** set — it is set in
-  **Preview only**. The full pre-submission checklist, and the sequencing
+  Vercel **Production**, which at the time of this entry was deliberately
+  **not** set — it was set in **Preview only**. **That dependency is now
+  SATISFIED:** the flag is set in Production and the live opt-in page has been
+  operator-verified. The full pre-submission checklist, and the sequencing
   reason behind it, is
   `docs/updates/2026-09-09-a2p-campaign-answers.md` §7. **That sequencing is
   unchanged by the Brand approval and must not be reordered without a separate
@@ -783,7 +807,11 @@ Stated plainly, because the rest of this section reads like everything works.
   submission — both preview failures happened while HubSpot was absent, so the
   block was never rendered. What an operator actually sees when the ledger is
   unreachable and the CRM is not is unverified.
-- **Production with the feature on.** Never enabled there, and not scheduled.
+- **The ledger's failure semantics in Production with the feature on.** The
+  feature **is** now on in Production (see the gate section at the top), but no
+  ledger failure has been observed there — only in Preview, and only with
+  HubSpot absent. The earlier sentence here — *never enabled there, and not
+  scheduled* — described the pre-activation state and is superseded.
 - **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
   has been observed. Whether a permanent purge behaves the same is untested.
 - **Gate 7 in production.** The SMS half is built and tested and has never run.
@@ -796,10 +824,12 @@ Stated plainly, because the rest of this section reads like everything works.
   **Migration `002` is no longer on this list** — it was applied to the live
   production branch and verified there on 10 September 2026. See "The
   suppression lookup" below.
-- **Anything calling `get_suppression_state()` from application code.** The
-  function and the sender credential exist and are proven by hand. No code
-  path in `api/` resolves suppression at send time, and the sender connection
-  string is in no environment. That is gate 8, and it has not begun.
+- **Anything calling `get_suppression_state()` from application code *on a real
+  send*.** The function and the sender credential exist and are proven by hand.
+  **Gate 8 is now merged** and `api/_lib/send-permission.mjs` does resolve
+  suppression at send time — but **nothing imports it**, so no send-time
+  resolution ever happens, and `CONSENT_LEDGER_SENDER_URL` is in no
+  environment. See "Gate 8" below.
 - **Gate 7's remaining halves.** No voice ingress exists; unsuppression is not
   designed; webhook retry is unconfigured. None of these is a deployment step —
   each is unbuilt work.
@@ -853,11 +883,12 @@ permanent rows asserting an opt-out that never happened — does not apply.
 `db/001` is untouched and the ledger still holds the same eight rows described
 above.
 
-**Nothing calls any of this.** Send-time enforcement is gate 8 and has not
-begun. The sender connection string is in **no** environment — not Production,
-not Preview, and it is not `CONSENT_LEDGER_URL`, which remains the
-`INSERT`-only website credential. Applying `002` therefore changed no
-behaviour of the site or the endpoint.
+**Nothing calls any of this on a real send.** Send-time enforcement is gate 8,
+which is **now merged** — but no sender imports it, so the path is never
+entered. The sender connection string `CONSENT_LEDGER_SENDER_URL` is in **no**
+environment — not Production, not Preview, and it is not `CONSENT_LEDGER_URL`,
+which is the `INSERT`-only website credential. Applying `002` therefore changed
+no behaviour of the site or the endpoint.
 
 Neon vaults the sender password and will display it in the Connect panel, as
 it does for `consent_ledger_app`: **Neon console access is equivalent to
@@ -1053,8 +1084,10 @@ action, 10 September 2026** (`api/operator-action.js`,
 
 **Not built — genuinely later phases:**
 
-- **Send-time enforcement.** Nothing in `api/` calls `get_suppression_state()`.
-  That is gate 8, and it has not begun.
+- **A sender to enforce against.** Gate 8 itself is **merged**:
+  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. What does not
+  exist is anything that calls *Gate 8* — no Twilio sender, no Retell caller.
+  The boundary is built; the thing it stands in front of is not.
 - **Re-opt-in / unsuppression — NOW DESIGNED, STILL NOT BUILT.** The
   `unsuppressed` event type exists and **nothing writes it.** A
   `reoptin_requested` event is recorded, deliberately without clearing anything
@@ -1083,7 +1116,8 @@ static guards are tested — and **no message path is live**: no Twilio number
 points at `POST /api/twilio-inbound`, and `TWILIO_AUTH_TOKEN` is set in no
 environment (with it absent the endpoint answers 503 and reads no request
 body). **The database half is now applied and verified** — see "The suppression
-lookup" above — but nothing calls it, so its existence changes no behaviour.
+lookup" above. Gate 8 (merged) is the only code that calls it, and **nothing
+calls Gate 8**, so its existence still changes no behaviour.
 
 **Gate 7 is still open, and what keeps it open changed on 10 September 2026.**
 Two of the four items — surfacing an unclassified message, and letting the
@@ -1147,7 +1181,9 @@ been applied and verified against the live production branch**, creating the
 function and the sender role; `db/001` is unchanged.
 
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
-is tested, but nothing sends or calls, so nothing calls it in production.
+is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
+caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
+decides nothing in production.
 
 ## The lead path's body read — bounded in size AND in time
 
@@ -1539,15 +1575,13 @@ into this change:**
 - **No token, minting tool or operator UI.**
 - **Nothing writes an `unsuppressed` event.** The ledger builder can now
   format and validate one; no code path constructs or appends one.
-- **Gate 8 send-time enforcement EXISTS AS CODE ON A BRANCH, and is not
-  active.** `api/_lib/send-permission.mjs` calls `get_suppression_state()`,
-  so the sentence that used to sit here — *nothing calls it from application
-  code* — is no longer true of the branch. It remains true of `main` until
-  the Gate 8 pull request merges. **The sender connection string
-  `CONSENT_LEDGER_SENDER_URL` is still in NO environment**, so even after a
-  merge every otherwise-sendable communication fails closed with
-  `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is still no SMS sender and no
-  voice caller of any kind.** See the Gate 8 section below.
+- **Gate 8 send-time enforcement IS MERGED TO `main`, and is not active.**
+  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. **Nothing
+  imports that module**, so no application code path reaches it. **The sender
+  connection string `CONSENT_LEDGER_SENDER_URL` is in NO environment**, so were
+  something to call it today, every otherwise-sendable communication would fail
+  closed with `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is still no SMS sender
+  and no voice caller of any kind.** See the Gate 8 section below.
 - **No outbound automation is activated**, and no Twilio Consent Management
   API call is made. **One external system WAS touched:** the production Neon
   database, by the operator, to apply this migration. Twilio, HubSpot, Retell,
@@ -1655,7 +1689,15 @@ change was design-only: `buildSuppressionEvent()` validates `event_type` with
 could enter an unamendable table and be invisible to every fold. Recorded as
 implementation step 2 of the plan, not widened into.
 
-## Gate 8 — the send-time authorization boundary. CODE ONLY, NOT ACTIVE.
+## Gate 8 — the send-time authorization boundary. MERGED, NOT ACTIVATED.
+
+**Two different things, and conflating them is the mistake this heading exists
+to prevent:**
+
+| | |
+|---|---|
+| **Gate 8 code** | **MERGED to `main`** — PR [#41](https://github.com/tomytomz1/crystal-sells-toledo/pull/41), 17 September 2026 |
+| **Gate 8 live sender path** | **NOT ACTIVATED, NOT PROVEN** — nothing imports the module, the credential is in no environment, and no live call has ever been made |
 
 **What it is.** One function every future automated SMS or AI-voice sender must
 call immediately before its external side effect. It answers exactly one
@@ -1673,10 +1715,41 @@ HubSpot record, mutates no consent, mutates no suppression and books nothing.
 **This work creates no sender of any kind.** It is a read-and-decide boundary
 that can only ever refuse more than the system already refuses.
 
-**Where it lives.** Pull request **#41**, branch
-`chatgpt/gate8-send-time-permission`. Current `main` was merged into that branch
-on 16 September 2026 so the boundary is reviewed against the architecture it will
-land in; nothing from #42, #43 or #44 was reverted. **Not merged.**
+### Outbound automation — NONE OF IT IS BUILT
+
+Gate 8 is an authorization boundary. It is **not** any of the following, none of
+which exists in this repository in any form:
+
+| | |
+|---|---|
+| outbound Twilio SMS sender | **NOT BUILT** |
+| Retell outbound AI caller | **NOT BUILT** |
+| lead-response orchestrator | **NOT BUILT** |
+| autonomous calendar booking | **NOT BUILT** |
+| AI qualification / disposition | **NOT BUILT** |
+| nurture engine | **NOT BUILT** |
+| cold PropStream outreach | **NOT BUILT** |
+| AIREOS multi-tenant platform | **NOT BUILT** |
+
+Verified by `grep` over `api/` and `tools/`: no `messages.create`, no
+`calls.create`, no TwiML `<Message>`, no Retell client. Every occurrence of
+"twilio" or "retell" in `api/` is a comment, a constant, or the **inbound**
+webhook.
+
+**Merging Gate 8 did not move any of these closer to existing.** A boundary with
+nothing behind it refuses everything, which is the only behaviour it can have
+until a sender is written.
+
+**Where it lives.** `api/_lib/send-permission.mjs` on `main`, merged by pull
+request [#41](https://github.com/tomytomz1/crystal-sells-toledo/pull/41).
+`main` was merged into that branch twice before it landed — once on 16 September
+at `9736ce2`, once on 17 September at `8ea48a1` — so the boundary was reviewed
+against the architecture it actually landed in. Nothing from #42–#47 was
+reverted.
+
+**Nothing imports it.** `grep` over `api/` and `tools/` finds no importer other
+than the module's own tests and the static guard in `tools/check.mjs`. Being
+merged and being reachable are different facts, and only the first is true.
 
 ### The order is the compliance argument
 
