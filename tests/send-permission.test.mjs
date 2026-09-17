@@ -14,15 +14,39 @@ import { REASON } from "../api/_lib/permission.mjs";
 import {
   SENDER_LEDGER_URL_VAR,
   LOOKUP_ERROR,
-  authorizeSms,
-  authorizeAutomatedVoice,
-  lookupDurableSuppression,
   suppressionLookupLogShape,
-  _setSuppressionExecutor,
-  _resetSuppressionExecutor,
-  _setContactLookup,
-  _resetContactLookup,
+  _gateForTest,
 } from "../api/_lib/send-permission.mjs";
+import * as gate8 from "../api/_lib/send-permission.mjs";
+
+/* ---------------------------------------------------------------------
+   THE BOUNDARY SHIM — test-local, and deliberately so.
+   ---------------------------------------------------------------------
+   Gate 8 no longer exports setters over module-level state. Measured on
+   the version that did: `_setSuppressionExecutor(async () => [])` turned
+   a number carrying a durable SMS block from
+   `{ allowed: false, reason: "DURABLE_SMS_BLOCK" }` into
+   `{ allowed: true, reason: "ALLOWED" }` — a production-reachable
+   always-allow, which is CLAUDE.md rule 21 exactly.
+
+   The boundaries are now injected by construction. This shim rebuilds a
+   FRESH gate whenever a test changes one, so the ~38 call sites below
+   read unchanged — and, crucially, the gate it builds is its own: the
+   exported `authorizeSms` this repository ships is untouched by anything
+   in this file. The test at the very bottom proves that.
+   --------------------------------------------------------------------- */
+const deps = { suppressionExecutor: undefined, contactLookup: undefined };
+let gate = _gateForTest(deps);
+const rebuild = () => { gate = _gateForTest({ ...deps }); };
+
+const _setSuppressionExecutor = (fn) => { deps.suppressionExecutor = fn; rebuild(); };
+const _resetSuppressionExecutor = () => { deps.suppressionExecutor = undefined; rebuild(); };
+const _setContactLookup = (fn) => { deps.contactLookup = fn; rebuild(); };
+const _resetContactLookup = () => { deps.contactLookup = undefined; rebuild(); };
+
+const authorizeSms = (...args) => gate.authorizeSms(...args);
+const authorizeAutomatedVoice = (...args) => gate.authorizeAutomatedVoice(...args);
+const lookupDurableSuppression = (...args) => gate.lookupDurableSuppression(...args);
 
 const { GRANTED, NEVER_GRANTED } = PERMISSION_STATE;
 const PHONE = "(419) 555-1234";
@@ -470,5 +494,85 @@ describe("Gate 8 — Tier-4 completion", () => {
     assert.deepEqual(exported.sort(), ["authorizeAutomatedVoice", "authorizeSms"],
       "a third authorize* entry point exists and is not covered by these tests");
     assert.ok(REASON.UNSUPPORTED_CHANNEL, "there is no reason code for an unknown channel");
+  });
+});
+
+/* =====================================================================
+   GATE 8 IS NOT REPLACEABLE — CLAUDE.md rule 21
+   =====================================================================
+   The version of this module that exported `_setSuppressionExecutor`
+   let any importer convert gate 8 into an always-allow. Measured before
+   the fix, with a contact carrying granted SMS consent and a number
+   carrying a durable block:
+
+     truthful executor  -> { allowed: false, reason: "DURABLE_SMS_BLOCK" }
+     _setSuppressionExecutor(async () => [])
+                        -> { allowed: true,  reason: "ALLOWED" }
+
+   A fabricated empty result set is indistinguishable from "this consumer
+   never opted out". These tests hold that door shut.
+   ===================================================================== */
+describe("gate 8 is not replaceable at runtime", () => {
+  test("the module exports NO mutator", () => {
+    for (const name of Object.keys(gate8))
+      assert.ok(!/^_set|^_reset/.test(name), `gate 8 exports a mutator: ${name}`);
+    assert.equal(gate8._setSuppressionExecutor, undefined, "the executor seam is back");
+    assert.equal(gate8._setContactLookup, undefined, "the contact seam is back");
+  });
+
+  test("a test gate is a DIFFERENT function from the exported one", () => {
+    const g = _gateForTest({ suppressionExecutor: async () => [] });
+    assert.notEqual(g.authorizeSms, gate8.authorizeSms,
+      "_gateForTest() handed back the exported gate itself");
+    assert.notEqual(g.lookupDurableSuppression, gate8.lookupDurableSuppression);
+  });
+
+  test("the OLD bypass, replayed: a permissive test gate allows, the exported one does not", async () => {
+    /* The exact shape that used to work, now confined to its own gate. */
+    const permissive = _gateForTest({
+      suppressionExecutor: async () => [],
+      contactLookup: async () => contact(granted({ sms: true })),
+    });
+    assert.deepEqual(await permissive.authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON }),
+      { allowed: true, reason: "ALLOWED" },
+      "the replay of the bypass no longer reproduces — this test would prove nothing");
+
+    /* THE EXPORTED GATE, unchanged by any of the above.
+
+       The feature flag is deliberately OFF here. That is the one branch
+       of authorize() that reaches NO provider at all — it returns the
+       resolver's local decision before any HubSpot or Neon call — so
+       this assertion exercises the real exported function without
+       contacting anything. Turning the flag on would send the real
+       findContactByEmail at api.hubapi.com, which no test in this
+       repository is allowed to do. */
+    const real = await gate8.authorizeSms({ email: EMAIL, phone: PHONE }, { env: OFF });
+    assert.equal(real.allowed, false,
+      "the exported gate 8 was influenced by a test gate's boundaries");
+  });
+
+  test("two test gates do not share boundaries", async () => {
+    const allow = _gateForTest({
+      suppressionExecutor: async () => [],
+      contactLookup: async () => contact(granted({ sms: true })),
+    });
+    const block = _gateForTest({
+      suppressionExecutor: async () => [{ channel: "sms", suppressed_at: "2026-09-10T00:00:00.000Z" }],
+      contactLookup: async () => contact(granted({ sms: true })),
+    });
+    assert.equal((await allow.authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON })).allowed, true);
+    assert.equal((await block.authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON })).allowed, false);
+    /* And the first is still permissive — building the second did not
+       reach back into it. */
+    assert.equal((await allow.authorizeSms({ email: EMAIL, phone: PHONE }, { env: ON })).allowed, true);
+  });
+
+  test("a gate built with no boundaries falls back to the REAL ones", () => {
+    /* Not called — calling it would contact HubSpot. The point is that
+       the defaults are the real dependencies, so a partially-specified
+       test gate cannot silently become permissive. */
+    const g = _gateForTest({});
+    assert.equal(typeof g.authorizeSms, "function");
+    assert.equal(typeof g.lookupDurableSuppression, "function");
   });
 });

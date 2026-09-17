@@ -47,8 +47,10 @@ import { fileURLToPath } from "node:url";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SENDER = "api/_lib/sms-sender.mjs";
+const GATE8 = "api/_lib/send-permission.mjs";
 const LEAD = "api/lead.js";
 const BEHAVIOUR = "tests/sms-sender.test.mjs";
+const GATE8_BEHAVIOUR = "tests/send-permission.test.mjs";
 
 describe("the outbound sender guards", () => {
   let dir, root;
@@ -74,7 +76,8 @@ describe("the outbound sender guards", () => {
 
   const pristine = (rel) => readFileSync(join(REPO, rel), "utf8");
   afterEach(() => {
-    for (const rel of [SENDER, LEAD, BEHAVIOUR]) writeFileSync(join(root, rel), pristine(rel));
+    for (const rel of [SENDER, GATE8, LEAD, BEHAVIOUR, GATE8_BEHAVIOUR])
+      writeFileSync(join(root, rel), pristine(rel));
   });
 
   /* NODE_TEST_CONTEXT MUST NOT BE INHERITED. Node sets it in every test
@@ -96,7 +99,7 @@ describe("the outbound sender guards", () => {
     }
   }
   const runCheck = () => run(["tools/check.mjs"]);
-  const runBehaviour = () => run(["--test", BEHAVIOUR]);
+  const runBehaviour = (file = BEHAVIOUR) => run(["--test", file]);
 
   /** Apply one textual mutation, proving first that it is a real one. */
   function mutate(rel, from, to) {
@@ -117,8 +120,8 @@ describe("the outbound sender guards", () => {
     assert.match(output, pattern);
   }
 
-  function caughtByTests(why) {
-    const { ok, output } = runBehaviour();
+  function caughtByTests(why, file = BEHAVIOUR) {
+    const { ok, output } = runBehaviour(file);
     assert.ok(!ok, `the behavioural suite passed with ${why}`);
     return output;
   }
@@ -136,6 +139,11 @@ describe("the outbound sender guards", () => {
   test("the copied tree passes the behavioural suite before anything is broken", () => {
     const { ok, output } = runBehaviour();
     assert.ok(ok, "an unmodified copy already fails the sender tests:\n" + output.slice(-4000));
+  });
+
+  test("the copied tree passes the gate 8 suite before anything is broken", () => {
+    const { ok, output } = runBehaviour(GATE8_BEHAVIOUR);
+    assert.ok(ok, "an unmodified copy already fails the gate 8 tests:\n" + output.slice(-4000));
   });
 
   /* ===================================================================
@@ -185,6 +193,75 @@ describe("the outbound sender guards", () => {
   });
 
   /* ===================================================================
+     1b  GATE 8 ITSELF CANNOT BE SWAPPED AT RUNTIME
+     ===================================================================
+     Found during the correction-verification pass, one layer below the
+     sender: `_setSuppressionExecutor(async () => [])` turned a number
+     carrying a durable SMS block from
+     `{ allowed: false, reason: "DURABLE_SMS_BLOCK" }` into
+     `{ allowed: true, reason: "ALLOWED" }`. Same shape, higher stakes —
+     a sender that cannot replace gate 8 is still bypassable if gate 8
+     can be converted into an always-allow.
+     =================================================================== */
+
+  test("reintroducing an exported executor setter in gate 8 is refused", () => {
+    append(GATE8, "\nexport function _setSuppressionExecutor(fn) { executorOverride = fn; }\n");
+    refusedByCheck(/exports a _set\*\/_reset\* mutator/,
+      "a runtime switch that can turn a gate 8 deny into an allow");
+  });
+
+  test("a module-scope mutable binding in gate 8 is refused", () => {
+    append(GATE8, "\nlet executorOverride = neonExecutor;\n");
+    refusedByCheck(/module-scope mutable binding/,
+      "something gate 8 could look up and something else could rewrite");
+  });
+
+  test("binding gate 8 to a fake suppression executor is refused", () => {
+    mutate(GATE8, "const GATE = makeGate({ suppressionExecutor: neonExecutor, contactLookup: findContactByEmail });",
+      "const GATE = makeGate({ suppressionExecutor: async () => [], contactLookup: findContactByEmail });");
+    refusedByCheck(/not built over neonExecutor/,
+      "a gate 8 whose durable suppression read is fabricated");
+  });
+
+  test("binding gate 8 to a fake consent read is refused", () => {
+    mutate(GATE8, "const GATE = makeGate({ suppressionExecutor: neonExecutor, contactLookup: findContactByEmail });",
+      "const GATE = makeGate({ suppressionExecutor: neonExecutor, contactLookup: async () => null });");
+    refusedByCheck(/not built over findContactByEmail/,
+      "a gate 8 whose consent read is fabricated");
+  });
+
+  test("exporting authorizeSms from anything but the bound gate is refused", () => {
+    mutate(GATE8, "export const authorizeSms = GATE.authorizeSms;",
+      "export const authorizeSms = (a, o) => authorizeWith({ suppressionExecutor: async () => [], contactLookup: findContactByEmail }, \"sms\", a, o);");
+    refusedByCheck(/authorizeSms is not exported from the bound gate/,
+      "an export that carries boundaries of its own choosing");
+  });
+
+  test("another api/ module using the test-only gate factory is refused", () => {
+    append(LEAD, "\nimport { _gateForTest } from \"./_lib/send-permission.mjs\";\n" +
+      "export const g = _gateForTest({ suppressionExecutor: async () => [] });\n");
+    refusedByCheck(/only api\/_lib\/send-permission\.mjs may name _gateForTest/,
+      "production code building its own gate 8");
+  });
+
+  test("letting a test gate share the exported gate's boundaries fails the gate 8 suite", () => {
+    /* No static reading can tell whether _gateForTest() hands back an
+       independent gate or the shipped one. The suite is the guard. */
+    mutate(GATE8, `export function _gateForTest({
+  suppressionExecutor = neonExecutor,
+  contactLookup = findContactByEmail,
+} = {}) {
+  return makeGate({ suppressionExecutor, contactLookup });
+}`,
+      `export function _gateForTest() {
+  return GATE;
+}`);
+    const output = caughtByTests("_gateForTest() handing back the shipped gate", GATE8_BEHAVIOUR);
+    assert.match(output, /DIFFERENT function|share boundaries|bypass/,
+      "the gate 8 suite failed, but not on the non-replaceability invariant");
+  });
+
+  /* ===================================================================
      2  CONTAINMENT — one send site, and it is the sender
      =================================================================== */
 
@@ -225,6 +302,24 @@ describe("the outbound sender guards", () => {
     append(LEAD, "\nexport const grab = (c) => { const fn = c.messages.create; return fn; };\n");
     refusedByCheck(/reaches the Twilio message-create API/,
       "a reference to the send function handed out of the sender");
+  });
+
+  test("another api/ module DESTRUCTURING create() off messages is refused", () => {
+    /* The one shape on the reviewer's list that the first three patterns
+       missed: the text never contains "messages.create". */
+    append(LEAD, "\nexport const go3 = (c) => { const { create } = c.messages; return create({}); };\n");
+    refusedByCheck(/destructures create\(\) off a Twilio messages resource/,
+      "a destructuring bypass of the send guard");
+  });
+
+  test("another api/ module aliasing the messages resource is refused", () => {
+    append(LEAD, "\nexport const go4 = (c) => { const messages = c.messages; return messages.create({}); };\n");
+    refusedByCheck(/reaches the Twilio message-create API/, "an aliased messages resource");
+  });
+
+  test("another api/ module re-exporting the sender is refused", () => {
+    append(LEAD, "\nexport { sendSms } from \"./_lib/sms-sender.mjs\";\n");
+    refusedByCheck(/deliberately unreachable/, "a re-export of the dark sender");
   });
 
   test("another api/ module constructing a Twilio client is refused", () => {

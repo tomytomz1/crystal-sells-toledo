@@ -1120,6 +1120,34 @@ for (const file of pages) {
     if (/CONSENT_LEDGER_URL\b/.test(stripped(gate8Src)))
       fail(GATE8_REL, "reuses the append credential for send authorization - the sender role must be separate");
 
+    /* GATE 8 ITSELF MAY NOT BE CONVERTED INTO AN ALWAYS-ALLOW.
+       -------------------------------------------------------------------
+       PR #51 removed a production-callable override from the SENDER, and
+       then found the same shape one layer down, in the boundary the
+       sender depends on. Measured on this file before the fix, with a
+       contact carrying granted SMS consent and a number carrying a
+       durable block:
+
+         truthful executor   -> { allowed: false, reason: "DURABLE_SMS_BLOCK" }
+         _setSuppressionExecutor(async () => [])
+                             -> { allowed: true,  reason: "ALLOWED" }
+
+       A fabricated empty result set is indistinguishable from "this
+       consumer never opted out", so that seam was a deny-to-allow
+       conversion reachable from any importer. The boundaries are now
+       injected by construction and closed over. CLAUDE.md rule 21. */
+    if (/^(?:let|var)\s/m.test(stripped(gate8Src)))
+      fail(GATE8_REL, "declares a module-scope mutable binding - gate 8 must close over its boundaries, not look them up");
+    if (/export\s+(?:function|const|let|var)\s+_(?:set|reset)/.test(gate8Src))
+      fail(GATE8_REL, "exports a _set*/_reset* mutator - a runtime switch inside gate 8 can turn a deny into an allow");
+    if (!/\bconst\s+GATE\s*=\s*makeGate\(\s*\{[^}]*\bsuppressionExecutor:\s*neonExecutor\b/.test(gate8Src))
+      fail(GATE8_REL, "the bound gate is not built over neonExecutor - the durable suppression read must be the real one");
+    if (!/\bconst\s+GATE\s*=\s*makeGate\(\s*\{[^}]*\bcontactLookup:\s*findContactByEmail\b/.test(gate8Src))
+      fail(GATE8_REL, "the bound gate is not built over findContactByEmail - the consent read must be the real one");
+    for (const name of ["authorizeSms", "authorizeAutomatedVoice", "lookupDurableSuppression"])
+      if (!new RegExp(`export\\s+const\\s+${name}\\s*=\\s*GATE\\.${name}\\s*;`).test(gate8Src))
+        fail(GATE8_REL, `${name} is not exported from the bound gate - every export must carry the real boundaries`);
+
     /* Nothing in api/ may decide a send for itself. */
     const apiDir = join(ROOT, "..", "api");
     const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -1132,6 +1160,11 @@ for (const file of pages) {
       for (const fn of ["canSendSms", "canPlaceAutomatedVoiceCall"])
         if (new RegExp(`\\b${fn}\\b`).test(code))
           fail(rel, `calls ${fn}() directly - every sender must go through ${GATE8_REL}, which reads durable suppression last`);
+      /* The test-only gate factory. Production code calling it would be
+         building its own gate 8 over boundaries of its choosing, which
+         is the removed bypass in a different shape. */
+      if (/\b_gateForTest\b/.test(code))
+        fail(rel, `builds a gate 8 over injected boundaries - only ${GATE8_REL} may name _gateForTest`);
     }
   }
 
@@ -1194,6 +1227,11 @@ for (const file of pages) {
         [/\bmessages\s*\.\s*create\b/, "reaches the Twilio message-create API"],
         [/\bmessages\s*\[\s*["'`]create["'`]\s*\]/, "reaches the Twilio message-create API by computed access"],
         [/\[\s*["'`]messages["'`]\s*\]/, "reaches the Twilio messages resource by computed access"],
+        /* `const { create } = client.messages` — the one realistic shape
+           the first three miss, because the text never contains
+           "messages.create". Found by tracing the reviewer's own list
+           rather than by trusting that three patterns were enough. */
+        [/\{[^{}]*\bcreate\b[^{}]*\}\s*=\s*[^;=]*\bmessages\b/, "destructures create() off a Twilio messages resource"],
       ];
       const SENDER_ONLY = [
         ...CREATE_SHAPES,

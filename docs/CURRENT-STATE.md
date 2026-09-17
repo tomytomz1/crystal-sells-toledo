@@ -1660,12 +1660,29 @@ do not anticipate, and none of it is evidence about the live provider. See
 *What the build guard actually proves* below before repeating any of this as a
 guarantee.
 
-**The "cannot be swapped" half was not true at first.** PR #51's original head
-exported `_setAuthorizer()` over a module-level `let`, so any importer could have
-replaced Gate 8 with `async () => ({ allowed: true })` — an authorization bypass
-shipped inside the production path, with a static guard that proved only the
-seam's *default* was correct. Independent review caught it; the seam is gone, not
-renamed. `CLAUDE.md` rule 21 and `docs/ENGINEERING-LESSONS.md` carry the lesson.
+**The "cannot be swapped" half was not true at first, twice.**
+
+PR #51's original head exported `_setAuthorizer()` over a module-level `let`, so
+any importer could have replaced Gate 8 with `async () => ({ allowed: true })` —
+an authorization bypass shipped inside the production path, with a static guard
+that proved only the seam's *default* was correct. Independent review caught it;
+the seam is gone, not renamed.
+
+**Then the same shape turned up one layer down, inside Gate 8 itself.** A
+verification pass measured what `send-permission.mjs`'s own seams could do:
+
+```
+contact with granted SMS consent + a number carrying a durable block
+  truthful executor                    -> { allowed: false, reason: "DURABLE_SMS_BLOCK" }
+  _setSuppressionExecutor(async () => []) -> { allowed: true,  reason: "ALLOWED" }
+```
+
+A fabricated empty result set is indistinguishable from "this consumer never
+opted out", so that seam converted a deny into an allow — and a sender that
+cannot replace Gate 8 is still bypassable if Gate 8 can be turned into an
+always-allow. Gate 8 now injects its boundaries by construction too, with the
+same guards and mutation cases. `CLAUDE.md` rule 21 and
+`docs/ENGINEERING-LESSONS.md` carry the lesson.
 
 **What it is not.** It sends no SMS, places no call, sends no email, writes no
 HubSpot record, mutates no consent, mutates no suppression and books nothing.
@@ -1811,8 +1828,8 @@ overclaim, caught in independent review and withdrawn.** The accurate division:
 - **exactly one** Twilio message-create call site exists under `api/`, and it is
   in `api/_lib/sms-sender.mjs`. No other module there reaches the message-create
   API **in any of the shapes the guard names** — `messages.create`,
-  `messages["create"]`, `client["messages"]`, or a bare reference with no call
-  parenthesis — and none constructs a Twilio client, names an outbound Messaging
+  `messages["create"]`, `client["messages"]`, a bare reference with no call
+  parenthesis, or a destructuring (`const { create } = client.messages`) — and none constructs a Twilio client, names an outbound Messaging
   Service parameter, or reads an outbound Twilio credential;
 - **no module under `api/` — the sender included — writes `api.twilio.com` or
   the `Messages.json` REST resource as a literal**, which closes the
@@ -1822,6 +1839,11 @@ overclaim, caught in independent review and withdrawn.** The accurate division:
   mutator**, so there is no runtime switch for Gate 8 inside it; the exported
   `sendSms` is built at module load over `authorizeSms` **and** `realClient`;
   and no module under `api/` other than the sender names `_senderForTest`;
+- **and the same is now true of Gate 8 itself** — `api/_lib/send-permission.mjs`
+  declares no module-scope mutable binding, exports no `_set*`/`_reset*`, binds
+  its gate over `neonExecutor` **and** `findContactByEmail` at module load,
+  exports every entry point from that bound gate, and no other module under
+  `api/` may name `_gateForTest`;
 - **the sender never names `TWILIO_AUTH_TOKEN`** — the outbound path may not
   reach for the inbound master secret;
 - the sender checks its feature flag **before** it reaches Gate 8, and compares
@@ -1876,6 +1898,8 @@ distinction exactly, and not to be restated as implemented enforcement.
 |---|---|
 | a future sender will call Gate 8 at all | **still unenforceable** — the guards constrain only the shapes they know |
 | Gate 8 can be swapped at runtime on the current sender | **NO — statically refused.** No module-scope mutable binding, no exported mutator, and the exported `sendSms` is built over `authorizeSms` at module load |
+| Gate 8's own boundaries can be swapped at runtime | **NO — statically refused, as of the second correction round.** Until then `_setSuppressionExecutor(async () => [])` turned a `DURABLE_SMS_BLOCK` into `ALLOWED`; measured, not theorised |
+| the ledger append seam (`consent-ledger.mjs` `_setExecutor`) is closed | **NO — named follow-up.** It gates an `INSERT`: it can fabricate evidence, but cannot turn a send deny into an allow |
 | the outbound API key is *restricted* to the minimum Messaging permissions | **NOT ESTABLISHED BY ANY CODE HERE.** Only the `SK` SID shape is checked; an `SK` SID says nothing about a key's type or permissions. Operator verification in the Twilio Console |
 | that a real Twilio 4xx arrives as one of the SDK exception classes | **inferred from `node_modules/twilio`, never observed on the wire** |
 | the *current* sender calls Gate 8 adjacent to the side effect | **enforced textually** between its two call sites; **not** proved in general |

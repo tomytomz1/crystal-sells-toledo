@@ -182,7 +182,8 @@ The build now fails if any of these stops being true:
   in the sender;
 - no module under `api/` other than the sender reaches the message-create API **in
   any of the shapes the guard names** — `messages.create`, `messages["create"]`,
-  `client["messages"]`, or a *bare reference* with no call parenthesis at all;
+  `client["messages"]`, a *bare reference* with no call parenthesis at all, or a
+  *destructuring* (`const { create } = client.messages`);
 - no other module under `api/` constructs a Twilio client, names an outbound
   Messaging Service parameter, or reads an outbound Twilio credential;
 - **no module under `api/`, the sender included, writes `api.twilio.com` or the
@@ -193,6 +194,10 @@ The build now fails if any of these stops being true:
   wiring it up is a deliberate act that has to delete this guard;
 - **the sender declares no module-scope `let` or `var`, and exports no `_set*`
   mutator** — the two shapes a runtime Gate 8 override needs;
+- **and neither does Gate 8 itself** — `api/_lib/send-permission.mjs` binds its
+  gate over `neonExecutor` and `findContactByEmail` at module load, exports every
+  entry point from that bound gate, and no other module under `api/` may name
+  `_gateForTest`;
 - **the sender never names `TWILIO_AUTH_TOKEN`** — the outbound path must not
   reach for the inbound master secret, which is the whole reason it has its own
   key pair;
@@ -283,7 +288,9 @@ and the ones that did not move say so and say why.
 ## Tests
 
 `tests/sms-sender.test.mjs` — **77 passing**, Tier 4, behaviour only.
-`tests/sms-sender-guards.test.mjs` — **39 passing**, the mutation cases. They are
+`tests/send-permission.test.mjs` — **37 passing**, Gate 8, including five new
+non-replaceability tests.
+`tests/sms-sender-guards.test.mjs` — **50 passing**, the mutation cases. They are
 separate files so the runtime mutations below can run the behavioural suite
 against a throwaway tree without recursing into themselves.
 
@@ -332,15 +339,18 @@ The cases that carry the most weight:
 - across **seventeen** outcomes, no result and no log shape carries a phone,
   email, body, credential or provider text.
 
-**Permanent mutation cases — 37 of them, in two kinds.**
+**Permanent mutation cases — 47 of them, in two kinds**, covering the sender
+*and* Gate 8.
 
-**Static (31).** Break one invariant in a throwaway copy and assert the real
+**Static (40).** Break one invariant in a throwaway copy and assert the real
 `tools/check.mjs` refuses it with the message that invariant owns: a reintroduced
 `_setAuthorizer`, a module-scope `let`, a module-scope `var`, an exported
 `sendSms` bound to a fake authorizer, one bound to a fake provider, another module
 using `_senderForTest`, a second send site, computed access inside the sender, a
 send from another module, computed access on the call, computed access on the
-resource, a **bare reference** with no call parenthesis, a client built elsewhere,
+resource, a **bare reference** with no call parenthesis, a **destructuring** of
+`create` off a messages resource, an aliased resource, a re-export of the sender,
+a client built elsewhere,
 an outbound credential read elsewhere, the sender reaching for
 `TWILIO_AUTH_TOKEN`, a raw REST call from inside and from outside the sender, a
 plain import, a namespace import and a dynamic import of the dark sender, an inserted `await`, `.then()`, timer, `queueMicrotask` and
@@ -348,17 +358,25 @@ plain import, a namespace import and a dynamic import of the dark sender, an ins
 deleted denial, a send moved above the authorization, a flag checked too late, and
 a non-strict flag.
 
-**Runtime (6).** Some invariants cannot be read off the source at all — whether a
-4xx is classified as a refusal, whether a malformed call throws. For those the
-**test suite** is the guard, so these mutate the sender in a throwaway copy and
+The Gate 8 half adds: a reintroduced executor setter, a module-scope mutable
+binding, a gate bound to a fabricated suppression read, one bound to a fabricated
+consent read, an export that carries boundaries of its own, and another `api/`
+module naming `_gateForTest`. The containment half adds the destructuring,
+aliasing and re-export shapes.
+
+**Runtime (7).** Some invariants cannot be read off the source at all — whether a
+4xx is classified as a refusal, whether a malformed call throws, whether
+`_gateForTest()` hands back an independent gate or the shipped one. For those the
+**test suite** is the guard, so these mutate the source in a throwaway copy and
 assert the real behavioural suite **fails**: a rejection collapsed back into
 `unknown`, a timeout reported as definitely not sent, duck typing instead of
 `instanceof`, a malformed message left to throw, malformed options reinterpreted,
-and a second provider attempt. Each asserts the *specific* failing test name, so a
-mutation that fails the suite for some unrelated reason does not count.
+a second provider attempt, and a `_gateForTest()` that shares the shipped gate's
+boundaries. Each asserts the *specific* failing test name, so a mutation that
+fails the suite for some unrelated reason does not count.
 
-Two controls run first: the pristine copy must pass `tools/check.mjs` **and** the
-behavioural suite. Every mutation asserts its target is present *before* mutating
+Three controls run first: the pristine copy must pass `tools/check.mjs`, the
+sender suite **and** the Gate 8 suite. Every mutation asserts its target is present *before* mutating
 and that the text actually changed — a mutation test that does not mutate reports
 green while proving nothing, which this project has shipped once before.
 
@@ -373,15 +391,25 @@ in a combined targeted run of **251 pass, 0 fail**.
 
 `npm run check` passes.
 
-**Full local suite** — `npm test` (build + check + every test file):
-**1126 tests, 1121 pass, 0 fail, 5 skipped**, 139 s.
+**Full local suite** — `npm test` (build + check + every test file), after the
+second correction round: **1143 tests, 1138 pass, 0 fail, 5 skipped**, 126 s.
 
-**The 5 skips are precise, not incidental.** They are `db/003 — the unsuppression
-fold, against a real PostgreSQL`, which skips because `CST_TEST_PG_URL` is unset:
-**no real PostgreSQL was exercised in this run**, so db/003's fold and privilege
-matrix were not executed here. That suite is unrelated to this change and skips
-the same way in CI unless an operator supplies a scratch cluster. Nothing else was
-skipped, and nothing in this change depends on it.
+**The 5 skips, named exactly.** They are the five real-PostgreSQL boundary tests
+in `tests/ledger-hardening.test.mjs` — *a genuine append reports the count
+PostgreSQL actually applied*, *a replay reports 0*, *a partial conflict reports
+the healed count*, *a real unsuppression row is accepted by the real table*, and
+*a database error still throws rather than reporting 0 rows*. All five skip
+because `CST_TEST_PG_URL` is unset. The db/003 suite in
+`tests/unsuppression-fold.test.mjs` skips for the same reason, at suite level.
+
+**No real PostgreSQL was exercised in this run**, so neither the ledger-hardening
+boundary behaviour nor db/003's fold and privilege matrix was executed here.
+Both skip the same way in CI unless an operator supplies a scratch cluster.
+Nothing else was skipped, and nothing in this change depends on either.
+
+*(An earlier version of this section attributed all five skips to db/003. That was
+imprecise: the five counted skips are the ledger-hardening suite's, and db/003
+skips separately.)*
 
 ---
 

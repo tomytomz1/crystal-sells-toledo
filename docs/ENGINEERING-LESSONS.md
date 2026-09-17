@@ -523,11 +523,37 @@ Three things, together:
 `api/_lib/security.mjs` is not in this class; its helpers clear an internal
 counter and inject no behaviour.
 
-**None was changed in #51**, deliberately: none sits in front of a provider side
-effect this repository can currently cause, and converting gate 8's own internals
-during a correction round for the module in front of it is how a delta stops
-being reviewable. Recorded as named, sequenced follow-ups in
-`docs/updates/2026-09-17-outbound-sms-sender.md`, gate 8's seams first.
+**Gate 8's two seams WERE fixed in #51, in a later pass.** The first correction
+round deferred them as follow-ups. A subsequent verification pass measured what
+they actually did, and the answer changed the decision:
+
+```
+_setContactLookup(async () => contactWithGrantedSmsConsent)
+_setSuppressionExecutor(async () => [{ channel: "sms", suppressed_at: "…" }])
+    authorizeSms(...) -> { allowed: false, reason: "DURABLE_SMS_BLOCK" }
+
+_setSuppressionExecutor(async () => [])            // fabricate "no rows"
+    authorizeSms(...) -> { allowed: true,  reason: "ALLOWED" }
+```
+
+**A fabricated empty result set is indistinguishable from "this consumer never
+opted out."** That is a deny-to-allow conversion, not a fail-closed seam, and it
+sits on the exact path the new sender depends on — so "a sender that cannot
+replace gate 8" was not the whole invariant. Gate 8 now injects its boundaries by
+construction, exports no mutator, and carries the same static guards and mutation
+cases as the sender.
+
+**The other two remain follow-ups**, and the reason is now measured rather than
+assumed: `api/_lib/consent-ledger.mjs`'s `_setExecutor` gates an `INSERT`, so it
+can fabricate evidence but cannot turn a send deny into an allow; `zoho.mjs` is
+imported by nothing. `api/_lib/security.mjs` is not in this class at all.
+Sequenced in `docs/updates/2026-09-17-outbound-sms-sender.md`.
+
+**The general lesson from the sequencing**, worth as much as the rule itself:
+*"recorded as a follow-up" is a judgement that has to be made on measured
+behaviour, not on the shape alone.* Two seams that look identical in `grep` can
+differ by exactly the thing that matters — whether either can manufacture an
+allow.
 
 **Promoted rule**
 `CLAUDE.md` rule 21.
