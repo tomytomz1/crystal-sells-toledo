@@ -459,3 +459,75 @@ Corrected in both endpoints and four documents (#26, #27).
 `CLAUDE.md` § Inactivity-is-not-enforcement rule. Gate 8 is what will make the
 ledger authoritative at send time, and it must exist before any automated
 outbound communication is activated.
+
+---
+
+## 2026-09-17 — A test seam production code can reach is not a test seam
+
+**Failure**
+The first outbound SMS sender, at
+[#51](https://github.com/tomytomz1/crystal-sells-toledo/pull/51) head `8b2ec3b`,
+held its gate 8 binding in a module-level `let` and exported a setter for it:
+
+```js
+let authorize = authorizeSms;
+export function _setAuthorizer(fn) { authorize = fn; }
+export function _resetAuthorizer() { authorize = authorizeSms; }
+```
+
+Any importer could have written `_setAuthorizer(async () => ({ allowed: true }))`
+and replaced the send-time authorization boundary outright. **The one module in
+the repository able to text a consumer shipped an authorization-bypass mechanism
+inside its production path.** Found by independent review, after the head was
+pushed, after CI passed, and after a handoff had called the work complete.
+
+**Why it mattered**
+Gate 8 exists so that a consumer who sent STOP is never texted again. A bypass
+reachable from ordinary application code makes that a convention, not a boundary
+— and it would leave every test in the suite green while doing it, because the
+tests were the thing the seam was built for.
+
+**Why existing evidence missed it**
+`tools/check.mjs` had a guard for this module, and it passed. It proved the
+seam's **default** pointed at gate 8, and that `_resetAuthorizer()` restored it.
+Both were true. Neither had anything to do with the defect: the default was never
+the problem, and a guard aimed at the wrong half of a mechanism is a guard that
+reports green forever. The pre-handoff adversarial review in the same session
+found four other things and did not find this one.
+
+**Permanent invariant**
+**Inject boundaries by construction and close over them.** A module that can
+cause an external side effect must not hold its boundary in mutable state that
+any importer can rewrite. Build the production instance once over the real
+boundary; let tests build their **own** instance over theirs.
+
+A guard proving a mutable seam's *default* proves nothing about what the seam can
+be set to. The question is never "what is it bound to?" — it is "who can
+rebind it?"
+
+**Required proof**
+Three things, together:
+
+1. the module declares no module-scope mutable binding and exports no mutator —
+   both statically enforced, both with mutation cases;
+2. the exported instance is statically shown to be built over the real boundary;
+3. a behavioural test builds a permissive test instance and then shows the
+   **exported** one still reaching the real boundary and refusing.
+
+**Repo-wide search result**
+`grep` over `api/` and `tools/` for `_set`, `export function _` and module-scope
+`let` found the same shape in four other modules: `_setExecutor` /
+`_resetExecutor` (`api/_lib/consent-ledger.mjs`), `_setSuppressionExecutor` and
+`_setContactLookup` (`api/_lib/send-permission.mjs` — **gate 8 itself**), and
+`_resetTokenCache` (`api/_lib/zoho.mjs`, imported by nothing).
+`api/_lib/security.mjs` is not in this class; its helpers clear an internal
+counter and inject no behaviour.
+
+**None was changed in #51**, deliberately: none sits in front of a provider side
+effect this repository can currently cause, and converting gate 8's own internals
+during a correction round for the module in front of it is how a delta stops
+being reviewable. Recorded as named, sequenced follow-ups in
+`docs/updates/2026-09-17-outbound-sms-sender.md`, gate 8's seams first.
+
+**Promoted rule**
+`CLAUDE.md` rule 21.

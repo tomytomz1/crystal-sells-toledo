@@ -1180,9 +1180,28 @@ for (const file of pages) {
             Every outbound shape is refused outside the sender. Comments
             are stripped first: a doc comment naming messages.create() is
             documentation, not a send. */
+      /* THE SHAPES, NOT ONE SPELLING. `messages.create(` alone is a
+         one-line bypass: `client.messages["create"]`, `client["messages"]`
+         and `const fn = client.messages.create` all reach the same API and
+         all used to pass. The call parenthesis is deliberately NOT
+         required - taking a REFERENCE to the send function outside the
+         sender is already the thing being forbidden.
+
+         What this still does not catch: a name assembled from fragments
+         at runtime. Nothing here is a parser, and this is stated rather
+         than papered over. */
+      const CREATE_SHAPES = [
+        [/\bmessages\s*\.\s*create\b/, "reaches the Twilio message-create API"],
+        [/\bmessages\s*\[\s*["'`]create["'`]\s*\]/, "reaches the Twilio message-create API by computed access"],
+        [/\[\s*["'`]messages["'`]\s*\]/, "reaches the Twilio messages resource by computed access"],
+      ];
       const SENDER_ONLY = [
-        [/\bmessages\s*\.\s*create\s*\(/, "creates a Twilio message"],
+        ...CREATE_SHAPES,
         [/\btwilio\s*\(/, "constructs a Twilio API client"],
+        /* The test-only sender factory. Production code calling it would
+           be building a second sender over boundaries of its choosing,
+           which is the bypass in a different shape. */
+        [/\b_senderForTest\b/, "builds a sender over injected boundaries"],
         /* The SDK's outbound parameter spelling, and the outbound
            credentials. Deliberately CASE-SENSITIVE and deliberately not
            `MessagingServiceSid`: api/twilio-inbound.js legitimately
@@ -1223,25 +1242,71 @@ for (const file of pages) {
       }
 
       /* Exactly one, not merely at least one. Two call sites is two
-         places to forget the gate. */
+         places to forget the gate. And the computed-access shapes must
+         not appear in the sender either, because a second route through
+         them would not be counted here. */
       const sites = senderSrc.match(/\bmessages\s*\.\s*create\s*\(/g) || [];
       if (sites.length !== 1)
         fail(SENDER_REL, `has ${sites.length} Twilio message-create call sites - there must be exactly one`);
+      for (const [re, what] of CREATE_SHAPES.slice(1))
+        if (re.test(senderSrc))
+          fail(SENDER_REL, `${what} - the one send site must be a plain messages.create() call so it can be counted`);
 
-      /* 3. THE SENDER ROUTES THROUGH GATE 8, and its test seam restores
-            the real gate rather than some other default. */
+      /* 3. THE SENDER ROUTES THROUGH GATE 8, AND GATE 8 CANNOT BE SWAPPED.
+            ---------------------------------------------------------------
+            An earlier version of this module exported `_setAuthorizer()`
+            and read a module-level `let authorize`. Independent review of
+            PR #51 called that what it was: an authorization-bypass
+            mechanism shipped inside the production path. Any importer
+            could replace gate 8 with `async () => ({ allowed: true })`,
+            and the guard proving the DEFAULT pointed at gate 8 did not
+            help, because the default was never the problem.
+
+            So the production sender is now BUILT ONCE over the real
+            boundaries and closes over them, and these three guards keep
+            it that way. */
       if (!/import\s*\{[^}]*\bauthorizeSms\b[^}]*\}\s*from\s*"\.\/send-permission\.mjs"/.test(senderSrc))
         fail(SENDER_REL, "does not import authorizeSms from ./send-permission.mjs - the sender must go through gate 8");
-      if (!/\blet\s+authorize\s*=\s*authorizeSms\s*;/.test(senderSrc))
-        fail(SENDER_REL, "the authorizer does not default to authorizeSms - a seam whose default is not gate 8 is not a seam");
-      if (!/_resetAuthorizer\s*\([^)]*\)\s*\{\s*authorize\s*=\s*authorizeSms\s*;?\s*\}/.test(senderSrc))
-        fail(SENDER_REL, "_resetAuthorizer() does not restore authorizeSms - a test could leave the gate replaced");
+
+      /* (a) The exported sender is bound to the REAL gate 8 and the REAL
+             client factory, at module load. */
+      if (!/export\s+const\s+sendSms\s*=\s*makeSender\(\s*\{[^}]*\bauthorize:\s*authorizeSms\b/.test(senderSrc))
+        fail(SENDER_REL, "the exported sendSms is not built over authorizeSms - the production sender must close over gate 8 itself");
+      if (!/export\s+const\s+sendSms\s*=\s*makeSender\(\s*\{[^}]*\bclientFactory:\s*realClient\b/.test(senderSrc))
+        fail(SENDER_REL, "the exported sendSms is not built over realClient - the production sender must close over the real provider");
+
+      /* (b) NO MODULE-SCOPE MUTABLE BINDING. A `let` or `var` at column
+             zero is exactly the shape the bypass had: something the send
+             path reads at call time and an exported setter can rewrite.
+             `const` is fine; a `let` inside a function is indented. */
+      if (/^(?:let|var)\s/m.test(senderSrc))
+        fail(SENDER_REL, "declares a module-scope mutable binding - the send path must close over its boundaries, not look them up");
+
+      /* (c) NO EXPORTED SETTER. Belt and braces with (b): even a setter
+             over something other than the authorizer is a runtime switch
+             inside a module that can text a consumer. */
+      if (/export\s+(?:function|const|let|var)\s+_set/.test(senderSrc))
+        fail(SENDER_REL, "exports a _set* mutator - there must be no runtime switch inside the sender");
+
+      /* (d) THE OUTBOUND PATH NEVER READS THE INBOUND MASTER SECRET.
+             TWILIO_AUTH_TOKEN is the account's master credential and the
+             signature key api/_lib/twilio.mjs verifies inbound webhooks
+             with. Separating the two is the entire reason outbound has
+             its own API Key pair; a sender that reaches for the auth
+             token silently undoes that, and would send on a credential
+             that cannot be rotated without breaking gate 7. */
+      if (/TWILIO_AUTH_TOKEN/.test(senderSrc))
+        fail(SENDER_REL, "reads TWILIO_AUTH_TOKEN - the outbound sender must use its own API Key pair, never the inbound master secret");
 
       /* 4. THE FLAG IS STRICT, AND FIRST. Off by default, on only for
             the exact string, and checked before the gate 8 call so a
             dark system spends no provider round trip. */
-      if (!/env\[OUTBOUND_SMS_FLAG\]\s*===\s*"true"/.test(senderSrc))
+      if (!/OUTBOUND_SMS_FLAG[^\n]{0,60}===\s*"true"/.test(senderSrc))
         fail(SENDER_REL, "the outbound flag is not compared strictly to \"true\" - outbound messaging must not switch on through a typo");
+      /* And not by any looser test alongside it. `!== "false"` is the
+         shape that turns a compliance switch on by default. */
+      if (/OUTBOUND_SMS_FLAG[^\n]{0,60}(?:!==?\s*"false"|[^!=]==\s*"true")/.test(senderSrc))
+        fail(SENDER_REL, "compares the outbound flag loosely - only the exact string \"true\" may enable outbound messaging");
 
       const flagAt = senderSrc.search(/outboundSmsEnabled\s*\(\s*env\s*\)/);
       const authAt = senderSrc.search(/\bawait\s+authorize\s*\(/);
