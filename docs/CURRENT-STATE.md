@@ -174,34 +174,59 @@ classification, identity consistency and resubmission eligibility are six
 separate questions.** Only the first is settled. Collapsing any two of
 them is the specific error this section exists to prevent.
 
-#### What error 30882 does and does not say
+#### What error 30882 is, and what it is not
 
-From Twilio's first-party error reference for
-[30882](https://www.twilio.com/docs/api/errors/30882). **Evidence class:
-search-surfaced excerpts of that page, consistent across three
-independent searches. `twilio.com` is unreachable from every agent
-environment used on this project, so no agent has loaded the page
-itself.**
+[30882](https://www.twilio.com/docs/api/errors/30882) is a **Terms &
+Conditions vetting rejection**. Twilio's reference lists **several
+possible causes**, among them a missing or unsuitable
+`TermsAndConditionsUrl`, affiliate marketing or third-party lead
+generation, policy language indicating mobile or opt-in data is shared,
+sold or bought by third parties or affiliates, consent that is not direct
+and campaign-specific, and other use-case or Messaging Policy conflicts.
 
-| The page says | It does **not** say |
-|---|---|
-| **Description:** rejected due to *"Terms and Conditions issues"* | that 30882 *means* affiliate marketing |
-| **Possible Cause:** *"affiliated marketing is not a supported use case. Terms and conditions do not support this use case."* | that this is the only cause, or the cause here |
-| **"Ineligible for resubmission. However, if you feel that this was in error, contact Twilio Customer Support."** | that the rejection is final, or that appeal is unavailable |
+Its solutions are correspondingly plural: correct the Terms & Conditions
+URL, update the terms and the consent flow and **resubmit the Campaign
+for review** in the Console or through the API, or contact Twilio Support
+where the rejection appears erroneous.
 
-Two corrections to earlier readings recorded in this project:
+**The distinction that matters here:**
 
-1. **"30882 means affiliate marketing" is an overstatement.** Affiliate
-   marketing is listed as a *possible cause*. The error's own description
-   is the broader "Terms and Conditions issues".
-2. **"Categorically ineligible for resubmission" is an overstatement.**
-   The same page names a support appeal in the next sentence. **Ticket
-   #29582556 is that path**, and the operator is already on it — so the
-   Console offering *"Revise errors and resubmit"* is not necessarily a
-   contradiction of the documentation.
+> **Resubmission is appropriate after a remediable Terms or consent
+> defect is corrected. If a Campaign genuinely uses a prohibited use case,
+> resubmitting that same use case does not resolve the rejection.**
 
-**Twilio has not identified what triggered this rejection.** Until it
-does, no cause is established.
+**Which of those causes applies to this Campaign is unknown.** Twilio has
+not identified it. **No cause is established**, and 30882 must not be
+reduced to any single one of them.
+
+> **EVIDENCE CLASS, and it is weaker than it looks.** This reading comes
+> from the **operator's direct inspection of the live page on
+> 17 September 2026**. **No agent has ever loaded it** — `twilio.com` is
+> unreachable from every agent environment used on this project, and a
+> direct fetch was attempted again for this entry and refused
+> (`EGRESS_BLOCKED`).
+>
+> **A conflict a future reader should know about.** Five independent
+> agent searches, across two sessions, returned summaries attributing to
+> this page a sentence reading *"Ineligible for resubmission. However, if
+> you feel that this was in error, contact Twilio Customer Support."*
+> That sentence is **not** in the operator's reading of the live page and
+> **is not relied on here**. Either the page changed and the search index
+> is stale, or the summaries are unreliable. **Direct inspection outranks
+> a search snippet, so the live reading is what this file records** — but
+> nobody should treat the resubmission question as settled by this
+> document. **Ticket #29582556 is where it gets settled.**
+
+**Two earlier readings recorded in this project were overstatements and
+are withdrawn:**
+
+1. **"30882 means affiliate marketing."** Affiliate marketing is one
+   possible cause among several. The rejection is about the Terms &
+   Conditions review, not about a single verdict.
+2. **"30882 is categorically ineligible for resubmission."** The
+   reference contemplates resubmission after remediable Terms or consent
+   defects are corrected. What resubmission cannot fix is a genuinely
+   prohibited use case.
 
 #### Hypothesis — an identity inconsistency, unproven
 
