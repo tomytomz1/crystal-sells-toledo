@@ -241,7 +241,7 @@ describe("the acknowledgement message", () => {
     const m = buildAcknowledgement({ first_name: "Sam", email: "sam@example.com" });
     for (const line of [
       "Crystal Saylor, REALTOR",
-      "Key Realty LTD | Degnan Group",
+      "Key Realty LTD",
       "License #2025003655",
       "(419) 245-4655",
       "crystal@crystalsellstoledo.com",
@@ -253,6 +253,52 @@ describe("the acknowledgement message", () => {
     }
     assert.ok(m.text.includes("Ohio Real Estate Salesperson"));
     assert.ok(m.html.includes("Ohio Real Estate Salesperson"));
+  });
+
+  test("the acknowledgement names the brokerage and no team", () => {
+    /* CLAUDE.md rule 7. docs/compliance-audit.md A-2 established that the
+       WEBSITE advertises no team, which is what keeps OAC 1301:5-1-21(B)
+       from engaging - but that scan never covered this file, and both
+       signatures named a group until 17 September 2026. This is the
+       acknowledgement every consumer who submits a form receives, and the
+       artefact most likely to be handed to a carrier or a regulator as
+       opt-in evidence, so it is the worst place to carry a name the rest
+       of the program does not use.
+
+       tests/browser.test.mjs enforces the same rule on built site output.
+       This is its counterpart for the one surface that test cannot see. */
+    const m = buildAcknowledgement({ first_name: "Sam", email: "sam@example.com" });
+    const whole = JSON.stringify(m);
+
+    for (const banned of ["Degnan", "Group", "group", "Team", "team"])
+      assert.ok(!whole.includes(banned),
+        `the acknowledgement names a team or group ("${banned}") - see CLAUDE.md rule 7`);
+
+    /* Ohio requires the BROKERAGE, and removing the team must never take
+       it with it. Both halves of the message, both equally prominent. */
+    assert.ok(m.text.includes("Key Realty LTD"), "the text signature lost the brokerage");
+    assert.ok(m.html.includes("Key Realty LTD"), "the HTML signature lost the brokerage");
+    assert.ok(m.text.includes("Crystal Saylor"), "the text signature lost the licensee");
+    assert.ok(m.html.includes("Crystal Saylor"), "the HTML signature lost the licensee");
+
+    /* The same equal-prominence principle CLAUDE.md rule 2 protects on the
+       site, applied to the email's own lockup. Rule 2 itself is about the
+       `.legalid__name` CSS rule and does not reach these inline styles, so
+       this is the principle enforced here, not that rule re-run.
+
+       It pins the CURRENT lockup - 14px/700 on both lines - rather than
+       parity in the abstract. A deliberate redesign of the signature has
+       to come through this test and say so; a drive-by that shrinks one of
+       the two names cannot. Asserted on rendered HTML, not on intent. */
+    const line = (name) =>
+      new RegExp('<div style="([^"]*)"[^>]*>\\s*' + name).exec(m.html)?.[1] ?? "";
+    const licensee = line("Crystal Saylor, REALTOR");
+    const brokerage = line("Key Realty LTD");
+    assert.ok(licensee && brokerage, "could not locate both signature lines in the HTML");
+    for (const prop of ["font-size:14px", "font-weight:700"]) {
+      assert.ok(licensee.includes(prop), `the licensee line lost ${prop}`);
+      assert.ok(brokerage.includes(prop), `the brokerage line lost ${prop}`);
+    }
   });
 
   test("the signature headshot points at main in this repository", () => {
