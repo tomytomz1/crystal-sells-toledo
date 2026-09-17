@@ -84,6 +84,45 @@ The window always ends **three days ago**. Search Console does not finalise a
 day's figures for two to three days, and including an unsettled tail makes every
 snapshot look like a decline.
 
+## Reading the snapshots — `npm run seo:diff`
+
+`tools/seo-diff.mjs` reports what moved between the two most recent
+snapshots. `.github/workflows/seo-diff.yml` runs it automatically when the
+Monday snapshot workflow finishes, writes the report to the run summary, and
+opens an issue **only** when something crosses a threshold.
+
+It needs no credentials — it reads committed files.
+
+**Two things it will tell you that are easy to forget:**
+
+**The windows overlap.** Each snapshot covers a trailing 28 days and they are
+taken weekly, so consecutive snapshots share **21 of their 28 days**. A delta
+between them is *not* week-over-week change — it is the difference between two
+heavily overlapping windows, which damps real movement by roughly a factor of
+four and lags it by up to three weeks. The report says so every time, and says
+the opposite when a run was missed and the windows genuinely do not overlap.
+
+**A query vanishing is not necessarily lost traffic.** Search Console withholds
+low-volume queries, so a query can drop out of the table while the demand
+continues. The report flags that rather than letting it read as a decline.
+
+### It reports arithmetic. It does not advise.
+
+Whether anything in it should change the site is a judgement constrained by
+fair-housing language (rule 5), the licensed name staying out of `h1`/`h2`
+(rule 3), equal prominence under OAC 1301:5-1-02 (rule 2) and no fabricated
+biography (rule 6). `tools/check.mjs` can enforce the structural ones; **nothing
+can machine-check fair-housing risk in newly written prose.** No automation in
+this repository proposes or applies copy changes, and that is deliberate.
+
+### Thresholds
+
+In `MATERIAL` at the top of `tools/seo-diff.mjs`: a new query at 3+ impressions,
+an average-position move of 5+, a page impression move of 10+, or anything
+crossing into the top 20. Set where a change cannot be a rounding artefact at
+this site's volume. **Raise them as traffic grows; do not lower them to make the
+report look busier.**
+
 ## The shape changed once, on purpose
 
 `2026-09-14.json` — the first live snapshot — carries a `landingPages` array in

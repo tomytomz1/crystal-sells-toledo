@@ -10,6 +10,7 @@
     "check": "node tools/check.mjs",
     "verify:live": "node tools/verify-live.mjs",
     "seo:report": "node tools/seo-report.mjs",
+    "seo:diff": "node tools/seo-diff.mjs",
     "test": "node tools/build.mjs && node tools/check.mjs && node --test tests/*.test.mjs",
     "test:unit": "node --test tests/api.test.mjs",
     "test:browser": "node --test tests/browser.test.mjs",

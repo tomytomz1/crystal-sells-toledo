@@ -1,0 +1,89 @@
+name: SEO diff
+
+# Chained to the snapshot job rather than scheduled independently.
+#
+# `workflow_run` fires when "SEO snapshot" finishes, so this always reads a
+# snapshot that has just been written instead of racing the job that writes
+# it. Two consequences worth knowing:
+#
+#   - workflow_run only fires for workflows on the DEFAULT BRANCH, and this
+#     file must itself be on the default branch to trigger at all. On a
+#     topic branch it is inert.
+#   - the event's head_sha is the commit the SNAPSHOT job ran on, which is
+#     the commit BEFORE the one it created. Checking that sha out would read
+#     last week's data. The checkout below pins `main` instead.
+on:
+  workflow_run:
+    workflows: ["SEO snapshot"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: seo-diff
+  cancel-in-progress: false
+
+jobs:
+  diff:
+    # A failed snapshot wrote nothing, so there is nothing new to diff.
+    # A SKIPPED snapshot also reports success (the unconfigured path exits
+    # 0 by design), and that case is harmless: the two newest files are
+    # unchanged from last week, so the diff reports no movement and stays
+    # quiet rather than inventing one.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      # Only to raise an issue when something crosses a threshold. This
+      # workflow writes nothing to the repository.
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Deliberately main, not the event's head_sha — see the note above.
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The script writes its whole report to $GITHUB_STEP_SUMMARY and sets
+      # `material=true|false`. It never fails the job: "nothing moved" is a
+      # result, not an error, and a red badge for a quiet week would train
+      # everyone to ignore this workflow.
+      - name: What moved
+        id: diff
+        run: npm run seo:diff
+
+      # Only when something crossed a threshold. At the thresholds in
+      # tools/seo-diff.mjs that is rare by design, so this is a signal
+      # rather than a weekly notification nobody reads.
+      #
+      # An ISSUE, not a comment on the Pulse Log. That issue is the session
+      # handoff record `pulse Claude` depends on being readable; weekly bot
+      # comments would dilute it.
+      - name: Raise it
+        if: steps.diff.outputs.material == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "The weekly search diff crossed a reporting threshold."
+            echo
+            echo "Full report: [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+            echo
+            echo "**This is arithmetic, not advice.** Whether any of it should change the site is a"
+            echo "judgement with fair-housing, equal-prominence and Ohio advertising constraints on it"
+            echo "(CLAUDE.md rules 2, 3, 5, 6), and nothing automated makes that call."
+            echo
+            echo "Remember the windows overlap by 21 of 28 days — a delta here is not week-over-week."
+          } > /tmp/body.md
+          gh issue create \
+            --title "Search performance moved — $(date -u +%Y-%m-%d)" \
+            --body-file /tmp/body.md
