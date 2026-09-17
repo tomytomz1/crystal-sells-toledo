@@ -22,8 +22,17 @@ it merely because a commit SHA changes.** It deliberately carries no SHA — res
 - **Zoho code is dormant rollback code, imported by nothing.** It is not the live
   path. (Zoho *Mail* SMTP, used for the lead acknowledgement email, is separate
   and is live.)
+- **The consumer acknowledgement email identifies the licensee and the
+  brokerage, and no team.** `api/_lib/mail.mjs` signs it *Crystal Saylor,
+  REALTOR®* and *Key Realty LTD*, each on its own 14px/700 line. **No team or
+  group name appears**, which is what keeps OAC 1301:5-1-21(B)(2) from
+  engaging, and `tests/mail.test.mjs` fails if one returns or if either
+  identity is dropped or demoted. Corrected in
+  [#50](https://github.com/tomytomz1/crystal-sells-toledo/pull/50), merged as
+  `093f0387`; before that, both signatures named a group. Ohio requires the
+  **brokerage** name, which is unchanged.
 
-## Communications consent — merged, and OFF
+## Communications consent — merged, and ON in Production
 
 Three phases are merged to `main`:
 
@@ -45,17 +54,34 @@ Schema in the production HubSpot portal:
 
 ### The gate
 
-- **`COMMUNICATIONS_CONSENT_ENABLED` remains OFF / absent from Vercel
-  Production.** With it absent, no `cst_*` property is requested or written and
-  the contact-search request is byte-identical to the pre-consent one.
-- **The communications consent UI is inactive.** No visitor sees a tick box, and
-  the published privacy policy carries no messaging section.
+> **Evidence class.** Nothing in this repository can read a Vercel environment
+> variable. Every statement below about what is set in Production rests on
+> **operator report and operator-verified browser observation**, recorded in
+> "THE NEXT OPERATOR ACTIONS" further down. Git proves the code and the build;
+> it does not prove the environment.
+
+- **`COMMUNICATIONS_CONSENT_ENABLED=true` IS SET in Vercel Production**
+  (operator-reported, step 2 of the operator actions below). The earlier
+  statement here — that it remained OFF and absent — described the state before
+  activation and is superseded.
+- **The communications consent UI is LIVE.** Operator-verified on live
+  `/home-value`: two separate boxes, both unchecked, neither required, the
+  section marked Optional, the SMS copy carrying frequency / rates / STOP /
+  HELP / not-a-condition-of-service, both legal links present, and the voice
+  wording identifying automated technology and an artificial, prerecorded or
+  AI-generated voice. `/sms-privacy`, `/sms-terms` and `/sms-consent-evidence`
+  build and ship with the flag on (14 pages enabled, 10 disabled).
 - **No consumer SMS or AI voice traffic is active.** No Twilio SMS is sent and no
-  Retell call is placed.
-- **The ledger database exists and is verified. It is connected to Preview
-  only.** Provisioned and grant-verified on 9 September 2026 — see "The ledger"
-  below. `CONSENT_LEDGER_URL` is set in Vercel **Preview** and is **absent from
-  Production**, so the live site has no connection to it.
+  Retell call is placed. **Collecting consent is not sending on it** — there is
+  no outbound sender of any kind in this repository.
+- **The ledger database exists and is verified, and `CONSENT_LEDGER_URL` IS SET
+  in Production** (operator-reported, step 1 below), on the `consent_ledger_app`
+  role. Provisioned and grant-verified on 9 September 2026 — see "The ledger"
+  below. It is also set in Preview. The earlier statement here — Preview only,
+  absent from Production — is superseded.
+  - **`CONSENT_LEDGER_SENDER_URL` is a different credential and is in NO
+    environment.** It is the EXECUTE-only sender role Gate 8 reads suppression
+    with. See "Gate 8" below.
 - **Preview has no standing live-CRM write access.** `HUBSPOT_ACCESS_TOKEN`,
   `HUBSPOT_PORTAL_ID` and `HUBSPOT_FORM_GUID` were scoped to Production **and
   Preview** on 10 September 2026 for the gate 4 Stage B round trip, and the
@@ -81,259 +107,48 @@ Schema in the production HubSpot portal:
   and untruncated: the 23 base rows, then the eleven consent rows, including both
   disclosure texts in full (335 and 330 characters) and no ellipsis, "show more"
   or cut-off anywhere.
-- **Activation remains gated.** Gate 3 is now closed on **both** halves — code
-  merged, database provisioned and verified. Gates 4–10 remain outstanding,
-  listed in the decision document below. Gate 4's open question — a round-trip
-  requires `COMMUNICATIONS_CONSENT_ENABLED` on *somewhere*, and Production is
-  not a candidate — is answered: **Preview is that somewhere.**
-  `COMMUNICATIONS_CONSENT_ENABLED=true` and `CONSENT_LEDGER_URL` are set in
-  Vercel **Preview only**. **Gate 4 closed on 10 September 2026 — both stages.
-  Gate 5 closed the same day.** Gates 6–10 remain.
-- **A2P/TCR readiness is a separate activation dependency. Gate 6 is still
-  OPEN — but every blocker that previously kept it open is now CLOSED, and
-  what remains is different in kind.**
+- **Activation remains gated. Status TODAY, not chronology:**
 
-  **FOUR TWILIO OBJECTS, AND THEY ARE NOT THE SAME THING.** Read this table
-  before anything else in this entry; nearly every way of getting A2P status
-  wrong is a collapse of two of these rows into one.
-
-  | Twilio object | State — 15 September 2026 | Evidence |
+  | Gate | Status | Where it is decided |
   |---|---|---|
-  | **Primary / Individual Customer Profile** | **APPROVED** | operator-supplied Twilio email |
-  | **A2P 10DLC Brand** | **APPROVED** | operator-supplied console screenshot |
-  | **Brand identity** | **VERIFIED** | same screenshot |
-  | **A2P Campaign** | **NOT ESTABLISHED as created, submitted or approved** | no evidence of any Campaign |
+  | **3** — ledger append-only, provisioned | **CLOSED** — code merged, database provisioned and grant-verified | `docs/updates/2026-09-09-consent-ledger-provisioning-verification.md` |
+  | **4** — controlled ledger round trip | **CLOSED**, both stages, 10 September 2026 | `docs/updates/2026-09-10-consent-ledger-stage-b-verification.md` |
+  | **5** — HubSpot timeline display check | **CLOSED**, 10 September 2026 | same document |
+  | **6** — A2P Campaign approved | **OPEN** — Campaign submitted, **rejected 30882**, remediated, not resubmitted | *A2P Campaign* section below |
+  | **7** — inbound STOP / HELP suppression | **CODE MERGED, NOT ACTIVATED** — `TWILIO_AUTH_TOKEN` is in no environment, so every inbound request answers `503` | *STOP / HELP inbound activation* below |
+  | **8** — send-time authorization | **CODE MERGED, NOT ACTIVATED** — nothing imports it; `CONSENT_LEDGER_SENDER_URL` is in no environment | *Gate 8* below |
+  | **9** — controlled consent → send → STOP/DNC test | **OPEN**, with a named dependency | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |
 
-  **THE PRIMARY CUSTOMER PROFILE IS APPROVED — 15 September 2026.** The
-  operator supplied a Twilio email titled *"Twilio Primary Customer Profile
-  Approved"* stating that **Crystal Saylor's Individual Profile has been
-  approved**. That resolves the **Primary Compliance Profile rejection**
-  recorded here, and it is the **direct** evidence that the **Persona /
-  identity-verification remediation is complete** — the email names the profile
-  outcome rather than leaving it to be inferred from a Brand field. The email
-  also showed an Account SID and a Bundle SID; their values are deliberately
-  **not** recorded here.
+  **Gates 6, 7, 8 and 9 are what remain**, and none of them can close without an
+  operator acting in an external system. The earlier form of this bullet said
+  *"Gates 4–10 remain outstanding"* and then closed 4 and 5 two sentences later;
+  it also said the consent variables were in **Preview only**. Both were
+  chronology, and both were false by the time anyone read them. **The gate
+  ladder as originally numbered ran to 10; no definition of a gate 10 exists in
+  any decision document**, so it is not listed rather than invented.
+- **A2P/TCR readiness is a separate activation dependency. Gate 6 is OPEN.**
+  Current Twilio state, and the ordered operator steps that remain, are in
+  ***A2P Campaign — SUBMITTED, REJECTED 30882, NOT RESUBMITTED*** below. That
+  section is authoritative; nothing above it describes Twilio state.
 
-  This is **in addition to**, not a substitute for, the Brand evidence below.
-  A Customer Profile and a Brand are different registrations, and approval of
-  one is not approval of the other.
+  In one line: **Profile approved, Brand approved, Messaging Service exists,
+  Campaign submitted and rejected with 30882, remediated, not resubmitted, and
+  approval not established.** Ticket **#29582556** is open with Twilio's 10DLC
+  Onboarding team.
 
-  **THE BRAND IS APPROVED — 15 September 2026.** The operator supplied a
-  screenshot of Twilio Console → Trust Hub → Registrations → A2P 10DLC Brands →
-  Brand Details showing:
-
-  | | |
-  |---|---|
-  | Brand / program | **Crystal Sells Toledo** |
-  | Registration | A2P 10DLC Brand · SMS · United States |
-  | **Brand status** | **APPROVED** |
-  | **Brand type** | **Sole proprietor** |
-  | **Identity** | **VERIFIED** |
-  | Created · last updated | 15 September 2026 |
-  | Notification email | `crystal@crystalsellstoledo.com` |
-
-  The view also showed a Brand SID, an External Brand ID, a Bundle SID and a
-  **"Create campaign"** button, with **no linked Campaign visible**.
-
-  **THREE BLOCKERS ARE CLOSED.**
-
-  1. **The error-30753 / TCR email-allowlist hold — CLOSED.** Superseded on
-     12 September 2026, and now moot: the approved Brand carries
-     `crystal@crystalsellstoledo.com` as its notification address, so that
-     address is no longer rejecting a registration.
-  2. **Persona identity verification, and the Primary Compliance Profile
-     rejection behind it — CLOSED, on direct evidence.** The Twilio email
-     *"Twilio Primary Customer Profile Approved"* states the Individual Profile
-     is **approved**, which is exactly the object the blocker named. The Brand
-     Details view independently reports **Identity: VERIFIED**. Two separate
-     Twilio objects agreeing, neither of them inferred.
-  3. **Replacement Brand review — CLOSED.** The replacement registration is no
-     longer pending: the screenshot shows a Brand created **15 September 2026**
-     in status **Approved**.
-
-  **WHAT THIS EVIDENCE DOES NOT ESTABLISH, and must not be read as:**
-  a Campaign created, a Campaign submitted, a Campaign approved, a phone number
-  assigned to a Campaign, a Messaging Service configured or ready, or live SMS
-  readiness. **A "Create campaign" button is the opposite of a campaign** — the
-  supplied view showed no linked Campaign at all. **Brand approval is not
-  Campaign approval**, and collapsing the two is the specific error this entry
-  exists to prevent.
-
-  **GATE 6 REMAINS OPEN for A2P Campaign readiness and approval.** The gate is
-  defined by what must be true before a **live SMS test** is possible
-  (`docs/updates/2026-09-10-stop-dnc-suppression-decision.md` §5), and no
-  definition in this repository closes it on Brand approval alone. Still
-  required: **create and submit the Campaign, have it approved, attach the
-  number to a Messaging Service under that Campaign.** None has begun.
-
-  **The immediate dependency is not Twilio's — it is ours.** The Campaign must
-  not be submitted until the reviewer can visit the live opt-in URL and
-  actually see the production SMS consent checkbox, unchecked and optional,
-  with its disclosure. That needs `COMMUNICATIONS_CONSENT_ENABLED=true` in
-  Vercel **Production**, which is deliberately **not** set — it is set in
-  **Preview only**. The full pre-submission checklist, and the sequencing
-  reason behind it, is
-  `docs/updates/2026-09-09-a2p-campaign-answers.md` §7. **That sequencing is
-  unchanged by the Brand approval and must not be reordered without a separate
-  decision.**
-
-  **THE SOURCE IS NOW CAMPAIGN-READY; THE DEPLOYED SITE IS NOT — and the gap
-  between those two sentences is the whole remaining blocker.** Verified on
-  15 September 2026 by building with the flag ON and reading the generated
-  HTML rather than the templates:
-
-  - All **four** form pages — `index`, `contact`, `home-value`,
-    `43551-seller-review` — render the consent block **exactly once**: two
-    **separate** checkboxes, both **unchecked**, neither `required`, with
-    distinct field names, and no consent control among the required fields.
-  - The disclosure shown to the visitor is **byte-identical** to the string
-    `api/_lib/consent.mjs` records as the consent evidence — checked by
-    comparing the rendered label against `SMS_CONSENT.html` and
-    `AI_VOICE_CONSENT.html`, not by reading both and assuming.
-  - Every form page carries **both** the Privacy Policy and Communications
-    Terms links; `/privacy` and `/communications-terms` are both generated and
-    **indexable** (no `noindex`), so a reviewer can actually reach them.
-  - **With the flag OFF — production today — zero pages carry a checkbox,
-    `/communications-terms` is not built at all, and the privacy messaging
-    section is absent.** A reviewer visiting right now would find no opt-in
-    surface to approve.
-
-  **One real gap was found and closed in the source** (not in production): the
-  **Privacy Policy** did not state the message frequency or *"Message and data
-  rates may apply"*. Twilio rejects a website-opt-in campaign with **error
-  30908 — "Compliant Privacy Policy Required"** when the policy behind the
-  opt-in lacks those, alongside the mobile-information non-sharing statement
-  the page already had. The opt-in **checkbox** already carried both phrases
-  verbatim; **30908 is about the policy page, which is reviewed on its own.**
-  Both are now in `src/partials/privacy-messaging.html`, worded consistently
-  with the checkbox.
-
-  **The campaign use case was also wrong and is corrected.** The worksheet said
-  *"Customer Care / Conversational (low volume)"*. Per Twilio, a **Sole
-  Proprietor Brand has exactly one campaign use case available: `Sole
-  Proprietor`** — the multi-use-case menu belongs to Standard brands, so the
-  old answer named an option the Console will not offer. The **use case** is
-  the registration category; the **campaign description** is what explains that
-  the traffic is conversational customer care. Twilio states the Sole
-  Proprietor use case conveys nothing about purpose, which is why the
-  description decides approval. Also recorded: a Sole Proprietor campaign may
-  carry **only one** 10DLC number.
-
-  **PRODUCTION CONSENT IS NOW LIVE — operator action, 15 September 2026.**
-  The operator has performed steps 1–4 below. Recorded as
-  **operator-supplied evidence**; no agent session touched Vercel, and no
-  agent has viewed the live site.
-
-  - **`CONSENT_LEDGER_URL` added to Vercel Production**, using the
-    **`consent_ledger_app`** Neon role — the `INSERT`-only application
-    credential, not an owner credential. *(The value is recorded nowhere;
-    variable name and role only.)*
-  - **`COMMUNICATIONS_CONSENT_ENABLED=true` set in Vercel Production.**
-  - **Production redeployed.**
-  - **Live page verified** at `/home-value`: the consent block renders on
-    Step 2 with an SMS checkbox and a **separate** AI/automated-voice
-    checkbox, **both unchecked**, the section marked **Optional**, the SMS
-    copy visibly carrying *message frequency varies*, *message and data
-    rates may apply*, **STOP**, **HELP** and *consent is not a condition of
-    service*, both the Privacy Policy and Communications Terms links
-    present, and the voice wording identifying automated technology and an
-    artificial, prerecorded or AI-generated voice.
-
-  **This closes blockers 1 and 2** of the three listed for Campaign
-  submission. **The STOP/HELP inbound webhook remains inert** —
-  `TWILIO_AUTH_TOKEN` is in no environment — and that was always the item
-  the worksheet calls *"the one that matters most"*, because every sample
-  message promises *"Reply STOP to opt out"*.
-
-  **A MATERIAL VISUAL DEFECT WAS FOUND ON THE LIVE PAGE, FIXED, DEPLOYED
-  AND OPERATOR-VERIFIED AS READABLE — 15 September 2026** (PR
-  [#37](https://github.com/tomytomz1/crystal-sells-toledo/pull/37), merged
-  as `eb3d7e3`). The consent disclosure rendered at
-  **1.23:1** contrast against the dark form panel — near-black text on a
-  near-black ground, effectively invisible — with the legend and helper
-  note at **3.25:1**. All three are below the **4.5:1** WCAG AA floor for
-  normal text, on the one piece of copy that carries the SMS consent
-  disclosure.
-
-  The cause was a **missing dark-context override, not a wrong colour**:
-  `.consent__label` declares no `color` and inherited `body`'s
-  `--ink-soft`, while the legend and note used `--muted`, all three tuned
-  for the cream ground. Every sibling control in the same panels already
-  had an override; the consent block was added later and never received
-  one. Corrected by reusing the site's existing dark-form values, scoped to
-  the dark grounds only — `/contact`'s white card was already passing and
-  is untouched. Measured after: **12.5:1** for the disclosure, **9.8:1**
-  for the legend and note, on both dark grounds.
-
-  **CAMPAIGN STATUS AS AT THAT ENTRY: NOT CREATED, NOT SUBMITTED, NOT
-  APPROVED.** Enabling the opt-in surface is a prerequisite for submission,
-  not a submission. **That is no longer current** — the Campaign was later
-  submitted and rejected. See *A2P Campaign — SUBMITTED, REJECTED 30882*
-  below, which supersedes every campaign-status line in this entry.
-
-  **THE WEBSITE-SIDE CAMPAIGN PREFLIGHT IS CLOSED — 16 September 2026.
-  STOP/HELP ACTIVATION IS NOT.** Those are two different things and the
-  distinction is the whole point of this entry.
-
-  **Two kinds of evidence back this, and they are not interchangeable:**
-
-  | Claim | Evidence class |
-  |---|---|
-  | live `/home-value` opt-in surface renders, boxes separate and unchecked, section Optional | **operator screenshot** |
-  | consent disclosure is plainly readable after the contrast fix | **operator screenshot** |
-  | `https://crystalsellstoledo.com/privacy` **is reachable live** | **operator screenshot** |
-  | `https://crystalsellstoledo.com/communications-terms` **is reachable live** | **operator screenshot** |
-  | **what those two pages say** — the required messaging and mobile-information copy | **deployed repository source**, not a live read |
-
-  **The split matters.** The operator opened both pages and they loaded; that
-  establishes **reachability**, which is what a reviewer needs to be able to do
-  at all. What the pages *contain* is established from the source that was
-  built and deployed — `/privacy` carries *message frequency varies*, *message
-  and data rates may apply*, the mobile-information and opt-in non-sharing
-  statements, STOP/HELP, the Twilio disclosure and a separate AI-voice
-  disclosure; `/communications-terms` carries frequency, rates, *Reply STOP to
-  opt out*, *Reply HELP for help*, separate AI-voice consent, consent-not-a-
-  condition, and the non-sharing language. **No agent loaded either page**, so
-  nothing here is an agent's reading of live HTML.
-
-  **Error 30908 is therefore satisfied as far as this repository can establish
-  it:** the policy a reviewer opens is reachable, and the copy that was
-  deployed to it carries the required disclosures.
-
-  **What remains is NOT website work.** It is **inbound STOP/HELP activation** —
-  Twilio and Vercel configuration. See the STOP/HELP activation section below.
-
-  **Campaign status at the time of this entry: NOT CREATED, NOT SUBMITTED,
-  NOT APPROVED.** A closed website-side preflight is a prerequisite for
-  submission, not a submission, and **the overall A2P activation is not
-  complete.** **Superseded** — see *A2P Campaign — SUBMITTED, REJECTED
-  30882* below.
-
-  **THE NEXT OPERATOR ACTIONS, IN ORDER. Steps 1–5 are now DONE.**
-
-  1. ~~Add the Production consent-ledger credential.~~ **DONE** —
-     `CONSENT_LEDGER_URL`, `consent_ledger_app` role.
-  2. ~~Set `COMMUNICATIONS_CONSENT_ENABLED=true` in Vercel Production.~~
-     **DONE.**
-  3. ~~Redeploy.~~ **DONE.**
-  4. ~~Verify the live opt-in page.~~ **DONE** — and it surfaced the contrast
-     defect above.
-  5. ~~Deploy the contrast fix and re-check the live page.~~ **DONE** —
-     deployed and operator-verified on live `/home-value`: the disclosure is
-     plainly readable, both checkboxes present and unchecked, the section
-     marked Optional, the SMS copy carrying frequency / rates / STOP / HELP /
-     not-a-condition-of-service, both legal links present, and the voice
-     wording identifying automated technology and an artificial, prerecorded
-     or AI-generated voice.
-  6. **Confirm `/privacy` and `/communications-terms` on the live domain** —
-     reachable, indexable, carrying the message-frequency and
-     message-and-data-rates disclosures error 30908 requires.
-  7. **Only then create and submit the A2P Campaign**, selecting use case
-     **`Sole Proprietor`**.
-
-  **Every step here is an operator action in an external system. None was
-  performed or simulated by any agent session**, including the four now
-  marked done — those are the operator's own report.
+  The narrative that used to sit here — the 15 September Brand approval, the
+  three blockers it closed, the error-30908 privacy-policy fix, the Sole
+  Proprietor use-case correction, the operator enabling Production consent, and
+  the contrast defect found on the live page and fixed in
+  [#37](https://github.com/tomytomz1/crystal-sells-toledo/pull/37) — was
+  **history, and every campaign-status sentence in it had become false.** It is
+  removed rather than annotated, because this file answers *what is true
+  today*. It is preserved where history belongs:
+  `docs/updates/2026-09-09-a2p-campaign-answers.md`,
+  `docs/updates/2026-09-16-a2p-campaign-live-preflight.md`,
+  `docs/updates/2026-09-16-a2p-30882-remediation.md`,
+  `docs/updates/2026-09-16-a2p-consent-evidence.md`, the pull requests
+  themselves, and issue #16.
 
 ### A2P Campaign — SUBMITTED, REJECTED 30882, NOT RESUBMITTED
 
@@ -341,18 +156,98 @@ Schema in the production HubSpot portal:
 entries above were written before a Campaign existed; one now does, and it
 is rejected.
 
-| Twilio object | State — 16 September 2026 | Evidence |
+| Twilio object | State — 17 September 2026 | Evidence |
 |---|---|---|
 | Primary / Individual Customer Profile | **APPROVED** | operator-supplied Twilio email |
 | A2P 10DLC Brand | **APPROVED**, Sole proprietor | operator-supplied console screenshot |
 | Messaging Service | **EXISTS**, one 10DLC number attached | operator report |
-| **A2P Campaign** | **SUBMITTED and REJECTED — error 30882, "Terms and Conditions issues"** | operator report |
-| Twilio support ticket **#29582556** | **OPEN**, transferred to Twilio's 10DLC Onboarding team | operator report |
+| **A2P Campaign** | **SUBMITTED and REJECTED — error 30882, "Terms and Conditions issues"**. Remediated in the Console; **NOT resubmitted**. **Approval is not established.** | operator report |
+| Twilio support ticket **#29582556** | **OPEN** with the 10DLC Onboarding team. The operator has asked what triggered the classification and how this Campaign should be resubmitted. **Awaiting reply.** | operator report |
 | Twilio Campaign **"Check for errors"** | still returns *"This registration needs additional review. Our pre-check was unable to verify some of the information you provided."* | operator report |
 
 **Everything in that table is the operator's own report of an external
 system. No agent session has ever opened the Twilio console, and nothing
 in this repository can observe it.**
+
+**Brand approval, Campaign approval, legal-page compliance, use-case
+classification, identity consistency and resubmission eligibility are six
+separate questions.** Only the first is settled. Collapsing any two of
+them is the specific error this section exists to prevent.
+
+#### What error 30882 is, and what it is not
+
+[30882](https://www.twilio.com/docs/api/errors/30882) is a **Terms &
+Conditions vetting rejection**. Twilio's reference lists **several
+possible causes**, among them a missing or unsuitable
+`TermsAndConditionsUrl`, affiliate marketing or third-party lead
+generation, policy language indicating mobile or opt-in data is shared,
+sold or bought by third parties or affiliates, consent that is not direct
+and campaign-specific, and other use-case or Messaging Policy conflicts.
+
+Its solutions are correspondingly plural: correct the Terms & Conditions
+URL, update the terms and the consent flow and **resubmit the Campaign
+for review** in the Console or through the API, or contact Twilio Support
+where the rejection appears erroneous.
+
+**The distinction that matters here:**
+
+> **Resubmission is appropriate after a remediable Terms or consent
+> defect is corrected. If a Campaign genuinely uses a prohibited use case,
+> resubmitting that same use case does not resolve the rejection.**
+
+**Which of those causes applies to this Campaign is unknown.** Twilio has
+not identified it. **No cause is established**, and 30882 must not be
+reduced to any single one of them.
+
+> **EVIDENCE CLASS, and it is weaker than it looks.** This reading comes
+> from the **operator's direct inspection of the live page on
+> 17 September 2026**. **No agent has ever loaded it** — `twilio.com` is
+> unreachable from every agent environment used on this project, and a
+> direct fetch was attempted again for this entry and refused
+> (`EGRESS_BLOCKED`).
+>
+> **A conflict a future reader should know about.** Five independent
+> agent searches, across two sessions, returned summaries attributing to
+> this page a sentence reading *"Ineligible for resubmission. However, if
+> you feel that this was in error, contact Twilio Customer Support."*
+> That sentence is **not** in the operator's reading of the live page and
+> **is not relied on here**. Either the page changed and the search index
+> is stale, or the summaries are unreliable. **Direct inspection outranks
+> a search snippet, so the live reading is what this file records** — but
+> nobody should treat the resubmission question as settled by this
+> document. **Ticket #29582556 is where it gets settled.**
+
+**Two earlier readings recorded in this project were overstatements and
+are withdrawn:**
+
+1. **"30882 means affiliate marketing."** Affiliate marketing is one
+   possible cause among several. The rejection is about the Terms &
+   Conditions review, not about a single verdict.
+2. **"30882 is categorically ineligible for resubmission."** The
+   reference contemplates resubmission after remediable Terms or consent
+   defects are corrected. What resubmission cannot fix is a genuinely
+   prohibited use case.
+
+#### Hypothesis — an identity inconsistency, unproven
+
+Before 17 September the team/group name appeared in **two places the
+Campaign touched**: the operator's correspondence with Twilio, and the
+consumer acknowledgement email. It appears in **neither** the registered
+Brand (*Crystal Sells Toledo*) nor anywhere on the website (*Crystal
+Saylor · Key Realty LTD*) — `CLAUDE.md` rule 7 and
+`docs/compliance-audit.md` §A-2 forbid it there.
+
+A third business identity reaching a vetter, present in neither the Brand
+nor the site, is a **plausible** route to a third-party or affiliate
+reading. **It is a hypothesis and nothing more.** Twilio has not confirmed
+it, and it may have played no part.
+
+**Both occurrences are now removed** — the operator's signature on
+17 September, and the acknowledgement email in
+[#50](https://github.com/tomytomz1/crystal-sells-toledo/pull/50),
+merged as `093f0387`. **That correction stands on rule 7 and on Ohio
+advertising law independently of A2P**, and must not be recorded as
+having fixed the rejection.
 
 **THE CAMPAIGN HAS NOT BEEN RESUBMITTED.** The existing rejected Campaign
 is being **edited**, not replaced. The operator has already changed it, by
@@ -366,17 +261,28 @@ already exists in Twilio and is not this repository's to change.**
 
 #### What was added on 16 September 2026, and the one finding behind it
 
-**THE FINDING: the consent disclosure may not be machine-readable.** The
-real opt-in is on **step 2** of the two-step `/home-value` form. Steps
-toggle with the `hidden` attribute in `assets/js/main.js`, so a crawler
-that does not run the script — or runs it and never clicks *next* — reads
-step 1 and stops. A browser-based external extraction of production
-`/home-value` returned the page and **both SMS legal links**, but **did
-not surface the step-2 SMS disclosure in its extracted text**;
-`/sms-privacy` and `/sms-terms` were directly crawlable. That extraction
-is **operator-supplied evidence of an external tool's behaviour** — it is
-not a measurement of Twilio's verifier, and nobody here knows what
-Twilio's verifier does.
+**THE FINDING, AS MEASURED — and it is narrower than this section first
+claimed.** The real opt-in is on **step 2** of the two-step `/home-value`
+form. Measured against the built output of the deployed commit:
+
+- the **full SMS disclosure is present in the served raw HTML** — the
+  canonical sentence, *How may Crystal follow up?*, *Message frequency
+  varies*, *Message and data rates may apply*, *Reply STOP to opt out*,
+  the `sms_consent` field, and both `/sms-privacy` and `/sms-terms` links;
+- `<div data-step="2">` is served with **no `hidden` attribute**.
+  JavaScript adds it at runtime via `showStep(form, 0)`.
+
+So: **a raw-HTML or text-based scraper does see the disclosure. A
+rendering-based checker that executes the page JavaScript and does not
+advance the form may not visually expose step 2.**
+`/sms-consent-evidence` provides a static, directly visible review surface
+for that second case.
+
+**The earlier wording here — that the disclosure "may not be
+machine-readable" — was too broad and is withdrawn.** It generalised from
+one external extraction tool's behaviour, which is
+**operator-supplied evidence of that tool**, not a measurement of Twilio's
+verifier. Nobody here knows what Twilio's verifier does.
 
 **THE REMEDY: `/sms-consent-evidence`,** a new public page that
 republishes the same consent experience as **static, script-free text** at
@@ -459,29 +365,48 @@ fix.** It is a test, not a deployment change.
 
 #### What this does and does not establish
 
-**It does not prove Twilio will approve anything.** It adds
-machine-verifiable consent evidence intended to reduce ambiguity in
-Twilio's pre-check and human review. Whether the pre-check clears, and
-whether a reviewer accepts the surfaces, is unknown and unknowable from
-here.
+**It does not prove Twilio will approve anything.** It adds a statically
+visible consent-evidence surface intended to reduce ambiguity in Twilio's
+pre-check and human review. Whether the pre-check clears, and whether a
+reviewer accepts the surfaces, is unknown and unknowable from here.
 
-**Nothing is live until it is deployed.** These are source changes on a
-branch. The live site still serves the previous pages until `main` merges
-and Vercel redeploys, and **a resubmission before that redeploy would be
-reviewed against pages that do not yet carry any of this.**
+**THE MESSAGING SURFACES ARE LIVE, AND THEIR CONTENT WAS VERIFIED BY THE
+OPERATOR — 17 September 2026.** The operator ran a status and content
+check from their own terminal and pasted the output:
 
-**THE HUMAN NEXT STEPS, IN ORDER.** Every one is an operator action in an
-external system; none was performed or simulated here.
+| URL | Status | Content verified present |
+|---|---|---|
+| `/sms-privacy` | **200** | *"We do not sell or share your SMS opt-in data"*, *Crystal Sells Toledo* |
+| `/sms-terms` | **200** | *SMS Terms*, *Message frequency varies*, *Message and data rates may apply*, *Reply STOP to opt out*, *Reply HELP for help*, *Carriers are not liable*, *not a condition of service* |
+| `/sms-consent-evidence` | **200** | the canonical SMS disclosure, *How may Crystal follow up?* |
+| `/home-value` | **200** | — |
 
-1. Independent review of the pull request.
-2. Merge, once reviewed and CI is green.
-3. Let Vercel Production deploy.
-4. Verify live: `/sms-consent-evidence`, `/home-value` step 2,
-   `/sms-privacy`, `/sms-terms`.
-5. Re-run Twilio's Campaign **"Check for errors"**.
-6. Follow the guidance on ticket **#29582556**.
-7. **Decide whether and when to resubmit the existing Campaign.** That
-   decision is the operator's. Nothing here schedules or requests it.
+**EVIDENCE CLASS — this distinction is the point.** This is
+**operator-run verification**, pasted from their terminal. **No agent
+browsed production**: `crystalsellstoledo.com` is unreachable from every
+agent environment used on this project, confirmed across `curl` (gateway
+403 to CONNECT), a first-party fetch tool (`EGRESS_BLOCKED`) and a real
+Chromium browser (`ERR_TUNNEL_CONNECTION_FAILED`). Repository source and
+live observation remain separate categories and are not conflated here.
+
+All three SMS pages are feature-gated, so their returning 200 also
+establishes that `COMMUNICATIONS_CONSENT_ENABLED` is live in Production
+and the deployed build is the flag-on build.
+
+**THE HUMAN NEXT STEPS, IN ORDER. Steps 1–4 are DONE.** Every one is an
+operator action in an external system; none was performed or simulated by
+any agent.
+
+1. ~~Independent review of the pull request.~~ **DONE.**
+2. ~~Merge once reviewed and CI green.~~ **DONE.**
+3. ~~Let Vercel Production deploy.~~ **DONE.**
+4. ~~Verify live: `/sms-consent-evidence`, `/home-value` step 2,
+   `/sms-privacy`, `/sms-terms`.~~ **DONE** — the table above.
+5. **Await Twilio's reply on ticket #29582556** — what triggered the
+   classification, and how this Campaign should be resubmitted.
+6. **Only then decide whether and when to resubmit.** That decision is the
+   operator's. **Nothing here schedules or requests it**, and the
+   documentation's own appeal route is the ticket, not the Submit button.
 
 ### STOP / HELP inbound activation — audited 15 September 2026, NOT ACTIVATED
 
@@ -546,12 +471,14 @@ sentence *"all three are absent today"* must **not** be read as establishing
 that `ZOHO_SMTP_*` is absent from Production; it cannot, because nothing in a
 git repository can observe a Vercel environment.
 
-**So the operator action is CONFIRMATION.** Open Vercel → Environment Variables
-→ Production and check the four names are present. **Do not recreate, rotate or
-re-enter them on the strength of this document** — rotating a live
-acknowledgement transport to satisfy a doc would be a self-inflicted outage.
-If they turn out to be absent, that is the moment to add them, and the lead
-acknowledgement email was not working either.
+**THAT CONFIRMATION HAS BEEN DONE.** The operator opened Vercel → Environment
+Variables → Production and reported all four names **present**. Recorded as
+**presence only, operator-reported**: the values were not inspected, nothing was
+rotated, recreated or edited, and SMTP delivery was not retested. **Do not
+recreate, rotate or re-enter them** — rotating a live acknowledgement transport
+to satisfy a document would be a self-inflicted outage. The paragraph above
+records why the repository alone could never settle the question; it no longer
+describes an outstanding action.
 
 **The secret must be randomly generated**, at least 32 bytes, and any character
 set is fine — it is stretched through HKDF-SHA256, so only length is
@@ -648,10 +575,16 @@ Decision, findings, sources and the full gate list:
 and the resolved gaps:
 `docs/updates/2026-09-09-consent-evidence-ledger-implementation-plan.md`.
 
-### The ledger — built, provisioned, verified, and wired to Preview only
+### The ledger — built, provisioned, verified, and wired in Production
 
 **Code, migration and tests are merged. The database exists and its append-only
-grant has been proven. Vercel Preview points at it; Production does not.**
+grant has been proven.** `CONSENT_LEDGER_URL` is set in Vercel **Production**,
+on the `INSERT`-only `consent_ledger_app` role — **not** an owner credential —
+and in **Preview** as well. That is **operator-reported**: nothing in this
+repository can read a Vercel environment variable, and no agent has.
+
+The heading and this paragraph previously said *Preview only* and *Production
+does not*. Both were true when written and are false now.
 
 - `api/_lib/consent-ledger.mjs` is the only module that names the table, its
   columns or `CONSENT_LEDGER_URL`. `tools/check.mjs` enforces that containment.
@@ -783,7 +716,11 @@ Stated plainly, because the rest of this section reads like everything works.
   submission — both preview failures happened while HubSpot was absent, so the
   block was never rendered. What an operator actually sees when the ledger is
   unreachable and the CRM is not is unverified.
-- **Production with the feature on.** Never enabled there, and not scheduled.
+- **The ledger's failure semantics in Production with the feature on.** The
+  feature **is** now on in Production (see the gate section at the top), but no
+  ledger failure has been observed there — only in Preview, and only with
+  HubSpot absent. The earlier sentence here — *never enabled there, and not
+  scheduled* — described the pre-activation state and is superseded.
 - **Permanent deletion.** Only HubSpot's standard delete (90-day recycle bin)
   has been observed. Whether a permanent purge behaves the same is untested.
 - **Gate 7 in production.** The SMS half is built and tested and has never run.
@@ -796,10 +733,12 @@ Stated plainly, because the rest of this section reads like everything works.
   **Migration `002` is no longer on this list** — it was applied to the live
   production branch and verified there on 10 September 2026. See "The
   suppression lookup" below.
-- **Anything calling `get_suppression_state()` from application code.** The
-  function and the sender credential exist and are proven by hand. No code
-  path in `api/` resolves suppression at send time, and the sender connection
-  string is in no environment. That is gate 8, and it has not begun.
+- **Anything calling `get_suppression_state()` from application code *on a real
+  send*.** The function and the sender credential exist and are proven by hand.
+  **Gate 8 is now merged** and `api/_lib/send-permission.mjs` does resolve
+  suppression at send time — but **nothing imports it**, so no send-time
+  resolution ever happens, and `CONSENT_LEDGER_SENDER_URL` is in no
+  environment. See "Gate 8" below.
 - **Gate 7's remaining halves.** No voice ingress exists; unsuppression is not
   designed; webhook retry is unconfigured. None of these is a deployment step —
   each is unbuilt work.
@@ -853,11 +792,12 @@ permanent rows asserting an opt-out that never happened — does not apply.
 `db/001` is untouched and the ledger still holds the same eight rows described
 above.
 
-**Nothing calls any of this.** Send-time enforcement is gate 8 and has not
-begun. The sender connection string is in **no** environment — not Production,
-not Preview, and it is not `CONSENT_LEDGER_URL`, which remains the
-`INSERT`-only website credential. Applying `002` therefore changed no
-behaviour of the site or the endpoint.
+**Nothing calls any of this on a real send.** Send-time enforcement is gate 8,
+which is **now merged** — but no sender imports it, so the path is never
+entered. The sender connection string `CONSENT_LEDGER_SENDER_URL` is in **no**
+environment — not Production, not Preview, and it is not `CONSENT_LEDGER_URL`,
+which is the `INSERT`-only website credential. Applying `002` therefore changed
+no behaviour of the site or the endpoint.
 
 Neon vaults the sender password and will display it in the Connect panel, as
 it does for `consent_ledger_app`: **Neon console access is equivalent to
@@ -906,15 +846,22 @@ and `api/_lib/optout.mjs`:
   the ledger commit — costing Twilio its answer, and leaving an arbitrary,
   **uncounted** subset of contacts unmarked. It could never unwrite the
   ledger row, which is what the durable record is. **The CRM flags are
-  best-effort operational state, not the evidence** — and, until gate 8, they
-  are the only suppression signal any code here reads at all: `api/lead.js`
-  folds a submission onto a contact's existing flags so a ticked box cannot
-  grant through a suppression, and nothing in `api/` calls
-  `get_suppression_state()`. Two conditions keep an incomplete projection from
-  being a live exposure today — the consent feature is **off in Production**,
-  so even that read does not happen there, and **no automated outbound sender
-  exists**. Neither is a property of this code, which is why **gate 8 must
-  precede activation of any automated outbound SMS or AI voice**. The
+  best-effort operational state, not the evidence.** `api/lead.js` folds a
+  submission onto a contact's existing flags so a ticked box cannot grant
+  through a suppression.
+
+  **`get_suppression_state()` IS now called from `api/` — gate 8 is merged.**
+  `api/_lib/send-permission.mjs` calls it as the final provider read before any
+  authorization. What keeps an incomplete CRM projection from being a live
+  exposure today is **one** condition, not two: **no automated outbound sender
+  exists, so nothing ever enters gate 8 and no send-time lookup is ever
+  performed.** The consent feature **is ON in Production** — the earlier form of
+  this paragraph said it was off, and said nothing in `api/` called the lookup;
+  both are now false.
+
+  That single remaining condition is **not a property of this code**, which is
+  why **gate 8 must stand in front of any automated outbound SMS or AI voice**
+  the moment one is written. The
   remaining budget is passed **into** each HubSpot request and the socket is
   aborted when it runs out, covering the response **body** and not only its
   headers. The deadline is measured from handler entry rather than from the
@@ -950,16 +897,22 @@ the endpoint, `TWILIO_AUTH_TOKEN` is set in no environment, and with it absent
 the endpoint answers 503 without reading the body. **No suppression row has ever
 been committed.**
 
-**`TWILIO_AUTH_TOKEN` is not the only thing gating it.** For a *classified*
-message the endpoint answers 503 a second time at `consentLedgerConfigured()`,
-which is exactly `CONSENT_LEDGER_URL` being non-empty — and that variable is
-**Preview-only and absent from Production**. So activating the webhook with only
-the token in Production would authenticate and classify a real STOP and then
-refuse it, writing nothing, on every message rather than during an outage. **Gate
-7 activation requires both `TWILIO_AUTH_TOKEN` and the `INSERT`-only
-`CONSENT_LEDGER_URL` in Production.** That credential is `consent_ledger_app`;
-it is **not** the `EXECUTE`-only `consent_ledger_sender` string, which stays in no
-environment until gate 8.
+**Gate 7 activation needs two variables in Production, and one of them is now
+there.** For a *classified* message the endpoint answers 503 a second time at
+`consentLedgerConfigured()`, which is exactly `CONSENT_LEDGER_URL` being
+non-empty. **That variable IS set in Production** (operator-reported), on the
+`INSERT`-only `consent_ledger_app` role — so the second gate is satisfied and
+**`TWILIO_AUTH_TOKEN` is the only remaining blocker**. It is in no environment,
+so every inbound request still answers 503 before anything is parsed.
+
+This paragraph previously said `CONSENT_LEDGER_URL` was *Preview-only and absent
+from Production*, and warned that adding only the token would authenticate a real
+STOP and then refuse to write it. That risk is **gone**, because the ledger
+credential arrived first. Adding the token now completes gate 7 rather than
+creating a half-configured endpoint.
+
+`consent_ledger_app` is **not** the `EXECUTE`-only `consent_ledger_sender`
+string, which remains in no environment.
 
 **And since 10 September 2026 there is a third, for a different reason.** An
 *unclassified* message now answers 503 when `OPERATOR_ACTION_SECRET` is absent or
@@ -1053,8 +1006,10 @@ action, 10 September 2026** (`api/operator-action.js`,
 
 **Not built — genuinely later phases:**
 
-- **Send-time enforcement.** Nothing in `api/` calls `get_suppression_state()`.
-  That is gate 8, and it has not begun.
+- **A sender to enforce against.** Gate 8 itself is **merged**:
+  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. What does not
+  exist is anything that calls *Gate 8* — no Twilio sender, no Retell caller.
+  The boundary is built; the thing it stands in front of is not.
 - **Re-opt-in / unsuppression — NOW DESIGNED, STILL NOT BUILT.** The
   `unsuppressed` event type exists and **nothing writes it.** A
   `reoptin_requested` event is recorded, deliberately without clearing anything
@@ -1083,7 +1038,8 @@ static guards are tested — and **no message path is live**: no Twilio number
 points at `POST /api/twilio-inbound`, and `TWILIO_AUTH_TOKEN` is set in no
 environment (with it absent the endpoint answers 503 and reads no request
 body). **The database half is now applied and verified** — see "The suppression
-lookup" above — but nothing calls it, so its existence changes no behaviour.
+lookup" above. Gate 8 (merged) is the only code that calls it, and **nothing
+calls Gate 8**, so its existence still changes no behaviour.
 
 **Gate 7 is still open, and what keeps it open changed on 10 September 2026.**
 Two of the four items — surfacing an unclassified message, and letting the
@@ -1147,7 +1103,9 @@ been applied and verified against the live production branch**, creating the
 function and the sender role; `db/001` is unchanged.
 
 The permission resolver (`canSendSms`, `canPlaceAutomatedVoiceCall`) exists and
-is tested, but nothing sends or calls, so nothing calls it in production.
+is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
+caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
+decides nothing in production.
 
 ## The lead path's body read — bounded in size AND in time
 
@@ -1533,21 +1491,21 @@ into this change:**
 ### What does NOT exist
 
 - **No unsuppression endpoint.** `api/operator-unsuppress.js` **does not
-  exist**, and nothing in `api/` calls either new function.
+  exist**, and nothing in `api/` calls either **db/003 unsuppression** function
+  — `get_active_blocks()` or the fold. (Distinct from `get_suppression_state()`,
+  which gate 8 *does* call; see the gate 8 section.)
 - **No HubSpot unsuppression projection.** Nothing clears a `cst_*` flag or a
   consent artefact.
 - **No token, minting tool or operator UI.**
 - **Nothing writes an `unsuppressed` event.** The ledger builder can now
   format and validate one; no code path constructs or appends one.
-- **Gate 8 send-time enforcement EXISTS AS CODE ON A BRANCH, and is not
-  active.** `api/_lib/send-permission.mjs` calls `get_suppression_state()`,
-  so the sentence that used to sit here — *nothing calls it from application
-  code* — is no longer true of the branch. It remains true of `main` until
-  the Gate 8 pull request merges. **The sender connection string
-  `CONSENT_LEDGER_SENDER_URL` is still in NO environment**, so even after a
-  merge every otherwise-sendable communication fails closed with
-  `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is still no SMS sender and no
-  voice caller of any kind.** See the Gate 8 section below.
+- **Gate 8 send-time enforcement IS MERGED TO `main`, and is not active.**
+  `api/_lib/send-permission.mjs` calls `get_suppression_state()`. **Nothing
+  imports that module**, so no application code path reaches it. **The sender
+  connection string `CONSENT_LEDGER_SENDER_URL` is in NO environment**, so were
+  something to call it today, every otherwise-sendable communication would fail
+  closed with `SUPPRESSION_LOOKUP_UNAVAILABLE`. **There is still no SMS sender
+  and no voice caller of any kind.** See the Gate 8 section below.
 - **No outbound automation is activated**, and no Twilio Consent Management
   API call is made. **One external system WAS touched:** the production Neon
   database, by the operator, to apply this migration. Twilio, HubSpot, Retell,
@@ -1578,9 +1536,11 @@ and `EXECUTE` on the two wrappers, which is **append-only**. A holder could have
 appended ledger rows, including an `unsuppressed` row, and read one number's
 state at a time. It could not `SELECT` the table, could not `UPDATE`, `DELETE`
 or `TRUNCATE`, could not enumerate (both functions take one number and neither
-has an argument-free form), and could not cause a message to be sent — there is
-no send path at all: gate 8 is not built, no application code calls either
-function, and no outbound messaging is activated. **No evidence of misuse was
+has an argument-free form), and could not cause a message to be sent — there was
+no send path at all. **Stated for the exposure window, which is what this entry
+is about:** at that time gate 8 was not built. It is now merged and
+`api/_lib/send-permission.mjs` does call `get_suppression_state()`, but **no
+outbound sender imports it**, so no message can be sent today either. **No evidence of misuse was
 sought or is claimed either way** — the ledger was not audited for unexpected
 rows, and the least-privilege bound is the reason that is an acceptable
 position, not a substitute for having looked.
@@ -1655,7 +1615,15 @@ change was design-only: `buildSuppressionEvent()` validates `event_type` with
 could enter an unamendable table and be invisible to every fold. Recorded as
 implementation step 2 of the plan, not widened into.
 
-## Gate 8 — the send-time authorization boundary. CODE ONLY, NOT ACTIVE.
+## Gate 8 — the send-time authorization boundary. MERGED, NOT ACTIVATED.
+
+**Two different things, and conflating them is the mistake this heading exists
+to prevent:**
+
+| | |
+|---|---|
+| **Gate 8 code** | **MERGED to `main`** — PR [#41](https://github.com/tomytomz1/crystal-sells-toledo/pull/41), 17 September 2026 |
+| **Gate 8 live sender path** | **NOT ACTIVATED, NOT PROVEN** — nothing imports the module, the credential is in no environment, and no live call has ever been made |
 
 **What it is.** One function every future automated SMS or AI-voice sender must
 call immediately before its external side effect. It answers exactly one
@@ -1673,10 +1641,41 @@ HubSpot record, mutates no consent, mutates no suppression and books nothing.
 **This work creates no sender of any kind.** It is a read-and-decide boundary
 that can only ever refuse more than the system already refuses.
 
-**Where it lives.** Pull request **#41**, branch
-`chatgpt/gate8-send-time-permission`. Current `main` was merged into that branch
-on 16 September 2026 so the boundary is reviewed against the architecture it will
-land in; nothing from #42, #43 or #44 was reverted. **Not merged.**
+### Outbound automation — NONE OF IT IS BUILT
+
+Gate 8 is an authorization boundary. It is **not** any of the following, none of
+which exists in this repository in any form:
+
+| | |
+|---|---|
+| outbound Twilio SMS sender | **NOT BUILT** |
+| Retell outbound AI caller | **NOT BUILT** |
+| lead-response orchestrator | **NOT BUILT** |
+| autonomous calendar booking | **NOT BUILT** |
+| AI qualification / disposition | **NOT BUILT** |
+| nurture engine | **NOT BUILT** |
+| cold PropStream outreach | **NOT BUILT** |
+| AIREOS multi-tenant platform | **NOT BUILT** |
+
+Verified by `grep` over `api/` and `tools/`: no `messages.create`, no
+`calls.create`, no TwiML `<Message>`, no Retell client. Every occurrence of
+"twilio" or "retell" in `api/` is a comment, a constant, or the **inbound**
+webhook.
+
+**Merging Gate 8 did not move any of these closer to existing.** A boundary with
+nothing behind it refuses everything, which is the only behaviour it can have
+until a sender is written.
+
+**Where it lives.** `api/_lib/send-permission.mjs` on `main`, merged by pull
+request [#41](https://github.com/tomytomz1/crystal-sells-toledo/pull/41).
+`main` was merged into that branch twice before it landed — once on 16 September
+at `9736ce2`, once on 17 September at `8ea48a1` — so the boundary was reviewed
+against the architecture it actually landed in. Nothing from #42–#47 was
+reverted.
+
+**Nothing imports it.** `grep` over `api/` and `tools/` finds no importer other
+than the module's own tests and the static guard in `tools/check.mjs`. Being
+merged and being reachable are different facts, and only the first is true.
 
 ### The order is the compliance argument
 
