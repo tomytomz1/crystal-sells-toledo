@@ -1713,6 +1713,33 @@ confirmed this property accepts that dimension, and an unrecognised dimension
 fails the whole report with a 400. Worth revisiting when someone can test it.
 `(not set)` is GA4's unattributed placeholder, is not a path, and is not folded.
 
+### Entity identity — `sameAs` is on the PERSON, not the business
+
+The homepage graph has two nodes: a `RealEstateAgent` `#agent` named
+**Crystal Sells Toledo**, and a `Person` `#crystal` named **Crystal Saylor**
+nested as its `employee`.
+
+`sameAs` means "URLs that unambiguously identify *this* entity". LinkedIn,
+Facebook and Instagram identify **the person**. They were on `#agent`, which
+asserted that a personal LinkedIn profile identifies the business — wrong, and
+wrong in exactly the direction that hurts, since `crystal saylor` is the query
+the site ranks 8th for. They now sit on `#crystal`.
+
+The three URLs are the ones the **Google Business Profile itself declares**,
+which is the authority for what her profiles are. They have **not** been
+independently fetched; LinkedIn, Facebook and Instagram all refuse automated
+requests, so a fetch would prove nothing either way.
+
+**The Business Profile URL is not in `sameAs` yet.** The profile exists, is
+correctly named `Crystal Saylor – Key Realty LTD`, category *Real estate agent*,
+at the same address this graph publishes — but **verification has failed and it
+is not live.** An unverified profile does not rank, and there is no stable URL
+to point at. Add it once verification clears.
+
+**Not done, deliberately:** making the `Person` the primary entity rather than
+nested staff. Plausible, unproven, and a larger change than the defect above
+warranted. Not widened into.
+
 ### What the data shows
 
 From `docs/seo/2026-09-14.json`, the first live snapshot — 18 August to 14
