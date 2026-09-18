@@ -3,6 +3,7 @@
    convenience, never a guarantee. */
 
 import { parseConsentFlag } from "./consent.mjs";
+import { addressOutsideOhio, looksLikeKeyboardSmash } from "./lead-quality.mjs";
 
 export const FORM_TYPES = new Set(["home_value", "contact", "buyer_inquiry"]);
 
@@ -148,6 +149,16 @@ export function validateLead(raw) {
   const message = cap("message", squashMultiline(raw.message));
   const notes = cap("notes", squashMultiline(raw.notes));
 
+  /* A second deterministic spam layer behind Turnstile's token gate. This is
+     deliberately NOT a general-language classifier. It only catches long
+     adjacent-key runs (qwert..., asdfg..., zxcvb...) and extreme single-key
+     repeats, the exact shape observed in successful junk submissions. */
+  if ([first_name, last_name, message, notes].some(looksLikeKeyboardSmash))
+    throw new FieldError(
+      "SUSPECT_INPUT",
+      "Please enter your actual name and property details."
+    );
+
   /* The enquiry block is the whole lead. A contact row carrying a name and an
      email but no address, timeline or condition looks like a lead in HubSpot
      and is worthless to work: there is nothing to price, nothing to schedule
@@ -166,6 +177,15 @@ export function validateLead(raw) {
       throw new FieldError(
         "INVALID_PROPERTY_ADDRESS",
         "Please enter the property's physical street address rather than a P.O. Box."
+      );
+    /* Crystal accepts seller business only for Ohio properties. Reject only
+       affirmative out-of-state evidence (state token or non-Ohio ZIP). An
+       otherwise plausible address with no state/ZIP is allowed rather than
+       risking a false negative on a homeowner who typed "123 Main St, Toledo". */
+    if (addressOutsideOhio(property_address))
+      throw new FieldError(
+        "OUTSIDE_SERVICE_AREA",
+        "Crystal currently provides seller valuation services for Ohio properties only."
       );
     if (!timeline)
       throw new FieldError("MISSING_TIMELINE", "Please choose when you might sell.");
