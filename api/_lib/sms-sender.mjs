@@ -1,10 +1,9 @@
-/* The outbound SMS sender — DARK. Nothing calls this.
+/* The outbound SMS sender — DARK BY DEFAULT.
    =====================================================================
-   The first component in this repository that can cause an external
-   messaging side effect. It is deliberately unreachable: no endpoint
-   imports it, no orchestrator exists, and `tools/check.mjs` fails the
-   build if anything under `api/` other than this file calls the Twilio
-   message-create API.
+   This is the only component in the repository that may cause an outbound
+   SMS side effect. Gate 9 gives it one narrow internal caller,
+   api/_lib/lead-sms-ack.mjs; no public endpoint calls it directly and
+   tools/check-sms-sender.mjs enforces that reachability boundary.
 
    WHAT THIS MODULE IS. A transport. It is handed a message that has
    already been decided elsewhere and it either sends that exact message
@@ -59,8 +58,8 @@
    has been attempted, a timeout or a socket error is AMBIGUOUS - Twilio
    may have accepted and queued the message while our answer was lost.
    Retrying that blind is how a consumer receives the same text twice.
-   Durable orchestration belongs to the layer above, which does not
-   exist yet.
+   Gate 9 adds only a narrow acknowledgement orchestrator above this
+   transport; it does not turn this transport into a durable outbox.
 
    Accordingly the result distinguishes three states and never collapses
    them: definitely not sent, confirmed accepted, and unconfirmed. See
@@ -121,6 +120,14 @@ export const TWILIO_MESSAGING_SERVICE_SID_VAR = "TWILIO_MESSAGING_SERVICE_SID";
  *  CLAUDE.md rule 11. A silently shortened message is a message the
  *  operator did not approve. */
 export const MAX_SMS_BODY_CHARS = 1600;
+
+/**
+ * Bound the provider request itself. In twilio-node 6.1.0 the RequestClient
+ * constructor option is used both as the HTTPS socket timeout and the default
+ * Axios request timeout. A courtesy SMS must not be allowed to consume the
+ * entire lead function's execution budget after HubSpot already stored the lead.
+ */
+export const TWILIO_REQUEST_TIMEOUT_MS = 5000;
 
 /* Twilio resource SIDs are a two-letter prefix and 32 hex characters.
    Checked because a structurally impossible SID is a configuration
@@ -289,10 +296,14 @@ export function outboundConfig(env = process.env) {
 function realClient({ accountSid, apiKeySid, apiKeySecret }) {
   /* autoRetry is false by default in twilio 6.1.0 and, when enabled,
      retries only 429 responses - verified in
-     node_modules/twilio/lib/base/RequestClient.js. It is set explicitly
-     anyway: this module's one-attempt promise should not rest on a
-     library default that a future upgrade could change. */
-  return twilio(apiKeySid, apiKeySecret, { accountSid, autoRetry: false });
+     node_modules/twilio/lib/base/RequestClient.js. Both timeout and
+     autoRetry are explicit so the one-attempt bounded-request promise
+     does not rest on library defaults that a future upgrade could change. */
+  return twilio(apiKeySid, apiKeySecret, {
+    accountSid,
+    autoRetry: false,
+    timeout: TWILIO_REQUEST_TIMEOUT_MS,
+  });
 }
 
 const notSent = (reason) => ({ status: SMS_STATUS.NOT_SENT, reason });
@@ -462,15 +473,16 @@ export const sendSms = makeSender({ authorize: authorizeSms, clientFactory: real
  * TEST ONLY. Builds an INDEPENDENT sender over injected boundaries.
  *
  * It cannot affect the exported `sendSms` above, which never looks its
- * boundaries up. `tools/check.mjs` fails the build if any module under
- * `api/` other than this one names it — and, separately, if anything
- * under `api/` imports this module at all.
+ * boundaries up. `tools/check-sms-sender.mjs` fails the build if any
+ * production module other than the designated acknowledgement orchestrator
+ * imports this module, and if any module besides this one reaches Twilio's
+ * message-create side effect directly.
  */
 export function _senderForTest({ authorize, clientFactory } = {}) {
   return makeSender({ authorize, clientFactory });
 }
 
-/** PII-free diagnostics for a future sender's log line. Structure only:
+/** PII-free diagnostics for the internal acknowledgement log line. Structure only:
  *  no number, no address, no body, no credential, no provider text. */
 export function smsSendLogShape(result) {
   return {
