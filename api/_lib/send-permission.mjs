@@ -18,16 +18,14 @@
    this function immediately before its external side effect and must not cache
    an earlier ALLOWED result.
 
-   THAT LAST SENTENCE IS A REQUIREMENT ON THE CALLER, NOT AN ENFORCED
-   PROPERTY. The build guard in tools/check.mjs stops any other module under
-   api/ from naming the pure send predicates, so the resolver cannot be reached
-   behind Gate 8's back from inside api/. It does NOT and cannot establish that
-   a future sender calls this function at all, that the call sits adjacent to
-   the Twilio or Retell side effect, or that no earlier ALLOWED was cached and
-   replayed. No sender exists yet; a static check cannot constrain the call
-   ordering of code that has not been written. Enforcing those three is part of
-   building the first sender. Do not restate them as guarantees - see
-   docs/CURRENT-STATE.md, "What the build guard actually proves".
+   FOR THE DARK SMS SENDER, THAT REQUIREMENT IS NOW ENFORCED. The
+   outbound/Gate 8 build guard proves that the exported sender is bound to
+   authorizeSms(), that the durable lookup remains the last provider read,
+   and that no suspension point sits between an allowed decision and the
+   Twilio side effect. The sender itself is still unreachable from live code:
+   nothing imports it, outbound credentials are absent, and the outbound flag
+   is not enabled. A future AI-voice sender does not inherit those guarantees
+   automatically and must get equivalent enforcement before activation.
 
    Missing configuration, database failure, malformed lookup results, or a
    CRM read failure all become DENY decisions. No dependency outage can be
@@ -91,14 +89,19 @@ async function neonExecutor(text, params, { url, signal }) {
   return sql.query(text, params);
 }
 
-let suppressionExecutor = neonExecutor;
-let contactLookup = findContactByEmail;
+/* NO MODULE-SCOPE MUTABLE BOUNDARY LIVES HERE. An earlier version held
+   `let suppressionExecutor` and `let contactLookup` with exported
+   setters, and that was a bypass of exactly the kind PR #51's own
+   correction removed from the sender: measured on this file,
+   `_setSuppressionExecutor(async () => [])` turned a number carrying a
+   durable SMS block from `{ allowed: false, reason: "DURABLE_SMS_BLOCK" }`
+   into `{ allowed: true, reason: "ALLOWED" }`. A fabricated empty result
+   set is indistinguishable from "this consumer never opted out".
 
-/** Test seams. Never called by production code. */
-export function _setSuppressionExecutor(fn) { suppressionExecutor = fn; }
-export function _resetSuppressionExecutor() { suppressionExecutor = neonExecutor; }
-export function _setContactLookup(fn) { contactLookup = fn; }
-export function _resetContactLookup() { contactLookup = findContactByEmail; }
+   The two implementations below therefore take their boundary as an
+   argument, makeGate() binds them ONCE, and the exported functions close
+   over that binding. Nothing at module scope can be rewritten, so no
+   importer can convert gate 8 into an always-allow. CLAUDE.md rule 21. */
 
 function resultRows(result) {
   if (Array.isArray(result)) return result;
@@ -131,8 +134,11 @@ function parseSuppressionRows(result) {
 /**
  * Ask the durable ledger whether this exact phone currently has an active
  * block. This function never enumerates and never names the table.
+ *
+ * The executor is the FIRST ARGUMENT and never a module-level binding -
+ * see the note above. Callers get the bound form from makeGate().
  */
-export async function lookupDurableSuppression(phone, {
+async function lookupWith(suppressionExecutor, phone, {
   env = process.env,
   timeoutMs = SUPPRESSION_LOOKUP_TIMEOUT_MS,
 } = {}) {
@@ -214,7 +220,7 @@ function usableTarget(phone) {
  * The returned object is always the permission resolver's decision shape.
  * Nothing in this module manufactures an "allowed: true" result.
  */
-async function authorize(channel, { email, phone } = {}, {
+async function authorizeWith({ suppressionExecutor, contactLookup }, channel, { email, phone } = {}, {
   env = process.env,
   timeoutMs = SUPPRESSION_LOOKUP_TIMEOUT_MS,
 } = {}) {
@@ -272,7 +278,7 @@ async function authorize(channel, { email, phone } = {}, {
 
   let durableSuppression;
   try {
-    durableSuppression = await lookupDurableSuppression(phone, { env, timeoutMs });
+    durableSuppression = await lookupWith(suppressionExecutor, phone, { env, timeoutMs });
   } catch {
     return decisionFor(channel, found.consent, phone, {
       env,
@@ -286,10 +292,42 @@ async function authorize(channel, { email, phone } = {}, {
   });
 }
 
-export function authorizeSms({ email, phone } = {}, opts) {
-  return authorize("sms", { email, phone }, opts);
+/**
+ * Bind gate 8 to a pair of boundaries, once.
+ *
+ * Called exactly twice in this repository: immediately below, to build
+ * THE gate over the real Neon executor and the real HubSpot lookup, and
+ * from `_gateForTest()`. The boundaries are closed over, so nothing can
+ * substitute them afterwards.
+ */
+function makeGate({ suppressionExecutor, contactLookup }) {
+  const deps = { suppressionExecutor, contactLookup };
+  return {
+    lookupDurableSuppression: (phone, opts) => lookupWith(suppressionExecutor, phone, opts),
+    authorizeSms: ({ email, phone } = {}, opts) => authorizeWith(deps, "sms", { email, phone }, opts),
+    authorizeAutomatedVoice: ({ email, phone } = {}, opts) =>
+      authorizeWith(deps, "ai_voice", { email, phone }, opts),
+  };
 }
 
-export function authorizeAutomatedVoice({ email, phone } = {}, opts) {
-  return authorize("ai_voice", { email, phone }, opts);
+/* THE gate. Built at module load over the real boundaries, and `const`,
+   so the exported functions below can never be pointed anywhere else. */
+const GATE = makeGate({ suppressionExecutor: neonExecutor, contactLookup: findContactByEmail });
+
+export const lookupDurableSuppression = GATE.lookupDurableSuppression;
+export const authorizeSms = GATE.authorizeSms;
+export const authorizeAutomatedVoice = GATE.authorizeAutomatedVoice;
+
+/**
+ * TEST ONLY. Builds an INDEPENDENT gate over injected boundaries.
+ *
+ * It cannot affect the exported functions above, which never look their
+ * boundaries up. `tools/check.mjs` fails the build if any module under
+ * `api/` other than this one names it.
+ */
+export function _gateForTest({
+  suppressionExecutor = neonExecutor,
+  contactLookup = findContactByEmail,
+} = {}) {
+  return makeGate({ suppressionExecutor, contactLookup });
 }

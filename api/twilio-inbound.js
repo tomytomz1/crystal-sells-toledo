@@ -16,8 +16,9 @@
  *   1. verify the signature      — before ANY interpretation of the body
  *   2. classify                  — Twilio's OptOutType if present, else ours
  *   3. append to the ledger      — the durable record, and the DESIGNED
- *                                  enforcement source of truth; nothing
- *                                  reads it at send time yet (gate 8)
+ *                                  enforcement source of truth; gate 8
+ *                                  reads it at send time, and nothing on
+ *                                  a live path reaches gate 8 yet
  *   4. project into HubSpot      — best-effort, for the operator's eyes,
  *                                  and HARD-BOUNDED in both the number of
  *                                  requests and the wall clock
@@ -30,19 +31,31 @@
  * application can amend or delete it. Step 4 is BEST-EFFORT OPERATIONAL
  * STATE for the operator's eyes in the CRM.
  *
- * WHAT THAT DOES NOT YET MEAN. The ledger is not consulted before sending
- * anything, because nothing in `api/` calls `get_suppression_state()` —
- * send-time enforcement is GATE 8 and has NOT BEGUN, and the EXECUTE-only
- * sender credential is in no environment. So the ledger row is durable,
- * authoritative EVIDENCE today; it is not yet an enforcement lookup.
+ * WHAT THAT DOES NOT YET MEAN. Gate 8 — `api/_lib/send-permission.mjs` —
+ * is MERGED, and it does call `get_suppression_state()` as the last read
+ * before it answers. The EXECUTE-only sender credential
+ * `CONSENT_LEDGER_SENDER_URL` IS configured in Production on the dedicated
+ * sender role. But nothing on a live path reaches gate 8 yet: the outbound
+ * SMS sender remains dark and unimported, and its Twilio credentials and
+ * activation flag are absent. The ledger therefore has a configured
+ * send-time lookup capability, but it is not yet an active messaging
+ * enforcement path.
  *
- * WHY THIS IS NOT A LIVE MESSAGING EXPOSURE. No automated outbound sender
- * exists: nothing here sends an SMS and nothing places an AI voice call.
- * There is no send for an unread suppression to leak past.
+ * WHY THIS IS NOT A LIVE MESSAGING EXPOSURE. An outbound SMS sender now
+ * exists — `api/_lib/sms-sender.mjs` — and it is DARK. No endpoint and no
+ * orchestrator imports it; its feature flag is set in no environment; its
+ * outbound Twilio credentials are not configured; and `tools/check.mjs`
+ * fails the build if anything under `api/` imports it, or reaches Twilio
+ * to send by any other route. Nothing places an AI voice call at all. So
+ * there is still no send for an unread suppression to leak past — but
+ * that is now a property of configuration and a static guard, not of the
+ * absence of any sending code.
  *
- * GATE 8 MUST BE IN PLACE BEFORE OUTBOUND AUTOMATED COMMUNICATIONS ARE
- * ACTIVATED. Until it is, the guarantee this endpoint offers is the
- * durable record and nothing beyond it.
+ * GATE 8 MUST BE CONFIGURED AND IN THE SEND PATH BEFORE OUTBOUND
+ * AUTOMATED COMMUNICATIONS ARE ACTIVATED. Merged code is not enforcement.
+ * Until a real outbound path is activated through gate 8 and verified end to
+ * end, the guarantee this endpoint offers is the durable record and nothing
+ * beyond it.
  *
  * That is why this endpoint may answer 200 when HubSpot fails — the
  * evidence is durable and the CRM copy is not the evidence — and why it
@@ -140,17 +153,19 @@ const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>
    suppression signal any code in this repository reads at all — api/lead.js
    folds a submission onto a contact's existing state so a ticked box cannot
    grant through a suppression, and that read is of the FLAGS, never of the
-   ledger. Send-time enforcement against the ledger is GATE 8 and has not
-   begun.
+   ledger. Send-time enforcement against the ledger is GATE 8, which is
+   merged but which nothing on a live path calls.
 
-   Two things keep that from being a live exposure today, and both are
-   conditions rather than properties of this code: the consent feature is
-   OFF in Production, so even that read does not happen there; and no
-   automated outbound sender exists, so there is no send for an unread
-   suppression to leak past. Neither is a reason the projection does not
-   matter — they are reasons GATE 8 MUST PRECEDE ACTIVATION. The bound
-   makes the shortfall explicit instead of silent, which is the whole
-   improvement here.
+   What keeps that from being a live exposure today is a CONDITION, not a
+   property of this code: the only outbound sender in the repository,
+   `api/_lib/sms-sender.mjs`, is dark — unimported, its flag unset, its
+   credentials absent — so there is no send for an unread suppression to
+   leak past. (The consent feature itself is ON in Production, so the
+   `cst_*` read above DOES happen there; an earlier version of this
+   comment said otherwise and was wrong.) That is not a reason the
+   projection does not matter — it is the reason GATE 8 MUST STAND IN
+   FRONT OF ACTIVATION. The bound makes the shortfall explicit instead of
+   silent, which is the whole improvement here.
 
    WHY THIS IS NOT api/operator-action.js's 12 SECONDS. That endpoint has
    a 30 s maxDuration and one human waiting for a page. This one has:
@@ -593,8 +608,8 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
  * Flag every contact holding this number. Never throws: by the time this
  * runs the suppression is DURABLY RECORDED in the ledger, and this CRM
  * copy is best-effort operational state rather than the evidence — so a
- * HubSpot outage must not turn into a Twilio retry loop. It is not yet
- * read by any send-time enforcement path; that is gate 8.
+ * HubSpot outage must not turn into a Twilio retry loop. Gate 8 does read
+ * these flags before answering, but no activated path reaches gate 8.
  *
  * Bounded by MAX_PROJECTION_CONTACTS requests and by an absolute deadline
  * PROJECTION_DEADLINE_MS after handler entry — see the bound above.
