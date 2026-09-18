@@ -54,26 +54,30 @@ Resolve `origin/main` dynamically. Do not pin this file to a commit SHA merely b
 | **3 — append-only ledger provisioned** | **CLOSED.** Database, role grants, and append-only behavior verified. |
 | **4 — controlled ledger round trip** | **CLOSED.** Application path to Neon and HubSpot verified. |
 | **5 — HubSpot timeline display** | **CLOSED.** Full consent/enquiry block rendered untruncated. |
-| **6 — A2P Campaign approved** | **OPEN / PENDING_REVIEW.** Corrected campaign was resubmitted; Twilio reports `PENDING_REVIEW`, submission count 2. |
+| **6 — A2P Campaign approved** | **CLOSED.** Twilio approved the corrected A2P 10DLC campaign on 18 Sep 2026 and reports it registered with carriers. |
 | **7 — inbound STOP suppression boundary** | **CLOSED FOR THE APPLICATION BOUNDARY.** Real STOP -> Twilio `OptOutType=STOP` -> signed Production webhook -> Neon suppression -> HubSpot projection is proven. Twilio-generated handset confirmations remain a separate provider incident. |
 | **8 — send-time authorization** | **CLOSED FOR THE DARK AUTHORIZATION BOUNDARY; SENDER STILL DARK.** Dedicated sender-role DB lookup has been executed successfully by the deployed Production app. No outbound SMS path is active. |
-| **9 — controlled consent -> send -> STOP/DNC** | **OPEN.** Wait for Gate 6 approval and deliberate outbound activation. |
+| **9 — controlled consent -> send -> STOP/DNC** | **OPEN.** A2P approval is complete; remaining work is deliberate outbound activation followed by one controlled end-to-end exercise. |
 
 ## Gate 6 — Twilio A2P 10DLC
+
+**CLOSED — approved 18 September 2026.**
 
 Current state:
 
 - Primary / Individual Customer Profile: **approved**.
 - A2P Brand: **approved**, Sole Proprietor.
 - Messaging Service exists with one 10DLC number.
-- Campaign `CM3425248ff3928f6f9c78894afe908ae6`: **`PENDING_REVIEW`** after corrected
-  resubmission; submission count **2**.
-- Twilio's resubmission receipt says no further operator action is required while review is
-  in progress and says most resubmissions are reviewed within 1–3 business days.
-- Support ticket `#29582556` remains open.
+- Campaign `CM3425248ff3928f6f9c78894afe908ae6`: **approved** after corrected resubmission.
+- Twilio's approval notice states that the campaign is registered with carriers.
+- The approval notice was received on 18 Sep 2026 after the second submission.
 
-Do not edit/resubmit the campaign again while this review is pending. The next useful event
-is either approval or a new specific rejection reason.
+The earlier 30882 rejection and `PENDING_REVIEW` state are historical. Do not resubmit or
+edit the approved campaign merely to reproduce the old remediation sequence.
+
+Gate 6 approval does **not** itself activate application sending. The dark sender, API-key
+credentials, feature flag, consent checks, durable suppression checks, and controlled Gate 9
+exercise remain separate application controls.
 
 ## Gate 7 — inbound SMS / suppression
 
@@ -109,8 +113,8 @@ The handset did not receive Twilio-generated HELP, STOP, or START confirmations 
 - Twilio Debugger showed no relevant error.
 
 That delivery problem is with Twilio/carrier handling of the system-generated confirmation,
-not evidence that the application suppression path failed. Keep it tracked in support ticket
-`#29582556`; do not change the working inbound configuration while Gate 6 is pending.
+not evidence that the application suppression path failed. Keep it tracked separately; do
+not change the working inbound configuration solely because Gate 6 is now approved.
 
 A later START was recorded as a re-opt-in request. START did not itself restore local consent.
 
@@ -182,28 +186,34 @@ None of that activates outbound SMS:
 - outbound Twilio API-key variables have not been configured for activation;
 - no SMS was sent by the application sender during Gate 8 verification.
 
-Do not add the outbound Twilio credentials or set `OUTBOUND_SMS_ENABLED=true` while Gate 6
-is pending.
+Now that Gate 6 is approved, outbound credentials may be configured only as part of a
+deliberate Gate 9 activation plan. Do not set `OUTBOUND_SMS_ENABLED=true` until the controlled
+send target, fresh consent evidence, rollback/disable path, and evidence-capture steps are
+ready.
 
 ## Remaining application / provider gaps
 
-- Gate 6: wait for Twilio's A2P review result.
 - Twilio-generated STOP/HELP/START confirmation delivery to the handset remains an open
   provider incident.
-- Gate 9 remains open until compliant outbound sending is deliberately activated.
+- Gate 9 remains open until compliant outbound sending is deliberately activated and tested.
 - No automated AI-voice caller exists and no spoken-DNC Retell ingress exists.
 - Local unsuppression and Twilio provider-level opt-out state remain separate systems.
 
 ## Safe next sequence
 
-1. Leave the A2P campaign untouched while it is `PENDING_REVIEW`.
-2. Keep the outbound application sender dark; do not add API-key credentials or enable it.
-3. Continue Twilio support follow-up for the missing system-generated confirmations if
-   needed.
-4. If Gate 6 is approved, deliberately configure the outbound Twilio API-key variables and
-   separately decide whether to set `OUTBOUND_SMS_ENABLED=true`.
-5. Execute Gate 9 as one controlled consent -> send -> STOP/DNC exercise and capture
-   Twilio, Neon, and HubSpot evidence.
+1. Preserve the approved A2P campaign and working Messaging Service configuration.
+2. Prepare the controlled Gate 9 test before enabling the sender: choose a controlled target,
+   capture fresh evidenced SMS consent, define the exact test message, and keep the disable
+   path immediately available.
+3. Configure the outbound Twilio API-key variables required by the dark sender without
+   changing `OUTBOUND_SMS_ENABLED` yet.
+4. Re-verify the exact Production configuration boundary, then deliberately set
+   `OUTBOUND_SMS_ENABLED=true` only for the controlled test.
+5. Execute one consent -> authorized send -> STOP/DNC exercise and capture Twilio, Neon, and
+   HubSpot evidence.
+6. Disable or leave enabled only according to the explicit post-test operating decision.
+7. Continue separate Twilio support follow-up for missing system-generated confirmations if
+   still reproducible.
 
 ## Repository / release controls
 
