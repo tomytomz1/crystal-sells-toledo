@@ -1998,14 +1998,17 @@ for (const file of pages) {
           fail(rel, `GET calls ${writeName} - a scanner could change suppression state`);
     }
 
+    const cutoffAt = code.indexOf("clearanceCutoff = new Date(payload.issuedAt * 1000)");
     const preAt = code.indexOf("beforeBlocks = await getActiveBlocks(");
     const appendAt = code.indexOf("await appendOperatorUnsuppression(");
     const postReadAt = code.indexOf("afterRows = await getSuppressionLanes(");
     const projectAt = code.indexOf("await projectToHubSpot(");
-    if (preAt === -1 || appendAt === -1 || postReadAt === -1)
-      fail(rel, "required pre-read -> append -> post-read sequence is missing");
-    else if (!(preAt < appendAt && appendAt < postReadAt))
+    if (cutoffAt === -1 || preAt === -1 || appendAt === -1 || postReadAt === -1)
+      fail(rel, "required cutoff -> pre-read -> append -> post-read sequence is missing");
+    else if (!(cutoffAt < preAt && preAt < appendAt && appendAt < postReadAt))
       fail(rel, "durable-state ordering is wrong");
+    if (!code.includes("const occurredAt = clearanceCutoff"))
+      fail(rel, "lane-clearance event time is not pinned to the pre-existing capability cutoff");
     if (!/rowsAffected\s*===\s*1/.test(code))
       fail(rel, "does not require rowsAffected === 1 before a new clearance may project");
     if (projectAt !== -1 && postReadAt !== -1 && projectAt < postReadAt)

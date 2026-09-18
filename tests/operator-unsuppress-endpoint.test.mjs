@@ -221,6 +221,8 @@ describe("POST durable transition", () => {
     const m = JSON.parse(metadata);
     assert.equal(m.approval_id, AID);
     assert.equal(m.approved_by, "operator");
+    assert.equal(m.request_observed_at, m.capability_issued_at);
+    assert.match(m.capability_issued_at, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(m.entered_via, "operator_unsuppress");
     assert.equal(m.twilio_reconciled, false);
     assert.deepEqual(m.invalidates, []);

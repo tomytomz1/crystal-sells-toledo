@@ -377,7 +377,15 @@ async function handlePost(req, res) {
   }
 
   /* PRE-READ AT POST TIME. The GET may be minutes old and is evidence only
-     for the human; the write decision uses this fresh read. */
+     for the human; the write decision uses this fresh read.
+
+     RACE BOUNDARY: a consumer_request is a lane clearance in db/003. If its
+     occurred_at were "now" AFTER this read, a new STOP that landed between
+     the read and the append could carry an earlier timestamp and be swept by
+     the clearance. The sealed capability's iat is the conservative cutoff:
+     any block at or after token issuance survives, and db/003 keeps exact
+     timestamp ties in the blocked direction. */
+  const clearanceCutoff = new Date(payload.issuedAt * 1000).toISOString();
   let beforeBlocks;
   try { beforeBlocks = await getActiveBlocks(payload.phone); }
   catch (err) {
@@ -424,7 +432,7 @@ async function handlePost(req, res) {
   }
 
   const before = suppressionFromLedgerRows(beforeBlocks);
-  const occurredAt = new Date().toISOString();
+  const occurredAt = clearanceCutoff;
   const observed = beforeBlocks.map(blockView);
   const targets = scopeBlocks.filter((b) => selected.includes(b.dedupe_key)).map(blockView);
 
@@ -446,7 +454,11 @@ async function handlePost(req, res) {
         token_v: payload.v,
         attestation,
         request_channel: payload.scope,
-        request_observed_at: occurredAt,
+        /* Conservative event-time boundary, NOT a claim that this is the
+           consumer's exact request timestamp. The attestation carries the
+           human's statement of what was observed and when. */
+        request_observed_at: clearanceCutoff,
+        capability_issued_at: clearanceCutoff,
         prior_blocked_lanes: laneNames(before),
         twilio_reconciled: false,
         ...(reason === UNSUPPRESSION_REASON.RECORDED_IN_ERROR
