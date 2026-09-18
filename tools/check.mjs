@@ -236,6 +236,7 @@ const SECRET_NAMES = [
      that records a permanent, un-undoable opt-out against any number they
      can name — so it must never appear in anything a browser receives. */
   "OPERATOR_ACTION_SECRET",
+  "OPERATOR_UNSUPPRESS_SECRET", "CONSENT_LEDGER_OPERATOR_URL",
   /* The Turnstile secret key. It is the ONLY thing that makes the
      verification gate mean anything: whoever holds it can redeem tokens
      against Cloudflare on this site's behalf, and its exposure would
@@ -1962,6 +1963,86 @@ for (const file of pages) {
       if (/\b(?:events|rowsAffected)\s*:\s*events\.length/.test(append))
         fail(ledgerRel, "appendSuppressionEvents reports events.length - the INPUT count, which is identical on a genuine append and on a replay that inserted nothing (§9.1)");
     }
+  }
+}
+
+/* =====================================================================
+   OPERATOR UNSUPPRESSION — opposite-risk boundary
+   ===================================================================== */
+{
+  const rel = "api/operator-unsuppress.js";
+  const path = join(API, "operator-unsuppress.js");
+  const tokenRel = "api/_lib/operator-unsuppress-token.mjs";
+  const tokenPath = join(API, "_lib/operator-unsuppress-token.mjs");
+  const statePath = join(API, "_lib/hubspot-consent-state.mjs");
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
+  if (!existsSync(path)) fail(rel, "missing - approved unsuppression workflow is not implemented");
+  else {
+    const code = strip(readFileSync(path, "utf8"));
+    if (!/EVENT_TYPE\.UNSUPPRESSED/.test(code))
+      fail(rel, "does not build EVENT_TYPE.UNSUPPRESSED");
+    for (const forbidden of ["EVENT_TYPE.SUPPRESSED", "EVENT_TYPE.REVOKED",
+                             "EVENT_TYPE.CONSENT_SELECTED", "EVENT_TYPE.CONSENT_NOT_SELECTED"])
+      if (code.includes(forbidden))
+        fail(rel, `names ${forbidden} - this endpoint may only emit UNSUPPRESSED`);
+
+    const getAt = code.indexOf("async function handleGet");
+    const postAt = code.indexOf("async function handlePost");
+    if (getAt === -1 || postAt === -1 || postAt <= getAt)
+      fail(rel, "GET/POST split is missing or reordered");
+    else {
+      const getBody = code.slice(getAt, postAt);
+      for (const writeName of ["appendOperatorUnsuppression", "writeUnsuppressionProperties"])
+        if (getBody.includes(writeName + "("))
+          fail(rel, `GET calls ${writeName} - a scanner could change suppression state`);
+    }
+
+    const preAt = code.indexOf("beforeBlocks = await getActiveBlocks(");
+    const appendAt = code.indexOf("await appendOperatorUnsuppression(");
+    const postReadAt = code.indexOf("afterRows = await getSuppressionLanes(");
+    const projectAt = code.indexOf("await projectToHubSpot(");
+    if (preAt === -1 || appendAt === -1 || postReadAt === -1)
+      fail(rel, "required pre-read -> append -> post-read sequence is missing");
+    else if (!(preAt < appendAt && appendAt < postReadAt))
+      fail(rel, "durable-state ordering is wrong");
+    if (!/rowsAffected\s*===\s*1/.test(code))
+      fail(rel, "does not require rowsAffected === 1 before a new clearance may project");
+    if (projectAt !== -1 && postReadAt !== -1 && projectAt < postReadAt)
+      fail(rel, "projects HubSpot before post-append durable readback");
+
+    for (const forbidden of ["messages.create", "TWILIO_AUTH_TOKEN"])
+      if (code.includes(forbidden))
+        fail(rel, `contains ${forbidden} - Twilio reconciliation is a separate phase`);
+  }
+
+  if (!existsSync(tokenPath)) fail(tokenRel, "missing");
+  else {
+    const token = strip(readFileSync(tokenPath, "utf8"));
+    if (!token.includes('"OPERATOR_UNSUPPRESS_SECRET"'))
+      fail(tokenRel, "does not use separate OPERATOR_UNSUPPRESS_SECRET");
+    if (!/24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(token))
+      fail(tokenRel, "token TTL is not 24 hours");
+    if (!/operator-unsuppress-token/.test(token))
+      fail(tokenRel, "HKDF namespace is not distinct");
+  }
+
+  const state = strip(readFileSync(statePath, "utf8"));
+  const fnAt = state.indexOf("export function toHubSpotUnsuppressionProperties(");
+  const nextAt = state.indexOf("export function toHubSpotReoptinProperties(", fnAt);
+  if (fnAt === -1 || nextAt === -1)
+    fail("api/_lib/hubspot-consent-state.mjs", "unsuppression projection writer is missing");
+  else {
+    const fn = state.slice(fnAt, nextAt);
+    if (/\bGRANTED\b/.test(fn))
+      fail("api/_lib/hubspot-consent-state.mjs", "unsuppression projection names GRANTED");
+    for (const field of ["map.at", "map.phone", "map.source", "map.page", "map.version"])
+      if (!fn.includes(field))
+        fail("api/_lib/hubspot-consent-state.mjs", `does not clear ${field}`);
+    if (!fn.includes("NEVER_GRANTED"))
+      fail("api/_lib/hubspot-consent-state.mjs", "does not reset permission to NEVER_GRANTED");
+    if (/REOPTIN_PROPERTIES/.test(fn))
+      fail("api/_lib/hubspot-consent-state.mjs", "touches re-opt-in context");
   }
 }
 

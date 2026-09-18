@@ -633,6 +633,51 @@ export function toHubSpotSuppressionProperties({
 }
 
 /**
+ * Project a DURABLE unsuppression into HubSpot current state.
+ * Only durable blocked->unblocked transitions are cleared. A clearance
+ * never restores an old grant: the permission becomes NEVER_GRANTED and
+ * all five consent artefacts are cleared. Re-opt-in context is untouched.
+ */
+export function toHubSpotUnsuppressionProperties({ current, before, after } = {}) {
+  if (!current || typeof current !== "object" || !before || !after)
+    throw new ConsentStateError(MALFORMED_RESPONSE, "UNSUPPRESSION_PROJECT");
+
+  const props = {};
+  const S = SUPPRESSION_PROPERTIES;
+  const clearText = (property, value) => { if (str(value)) props[property] = ""; };
+
+  const globalCleared = before.lanes?.all === true && after.lanes?.all !== true;
+  if (globalCleared) {
+    const held = current.suppression?.global;
+    if (held) props[S.doNotContact] = "false";
+    clearText(S.doNotContactAt, held?.at);
+    clearText(S.doNotContactReason, held?.reason);
+  }
+
+  const clearChannel = (name, map, heldKey, flag, atProp, reasonProp) => {
+    if (before.effective?.[name] !== true || after.effective?.[name] === true) return;
+    const state = current[name] || {};
+    const held = current.suppression?.[heldKey];
+    if (held || state.status === SUPPRESSED) props[flag] = "false";
+    clearText(atProp, held?.at);
+    clearText(reasonProp, held?.reason);
+    if (state.status !== NEVER_GRANTED)
+      props[map.status] = assertConsentEnum(map.status, NEVER_GRANTED, PERMISSION_STATUS_VALUES);
+    clearText(map.at, state.consent_at);
+    clearText(map.phone, state.consent_phone);
+    clearText(map.source, state.consent_source);
+    clearText(map.page, state.consent_page);
+    clearText(map.version, state.consent_version);
+  };
+
+  clearChannel("sms", SMS_STATE_PROPERTIES, "sms",
+    S.smsSuppressed, S.smsSuppressedAt, S.smsSuppressionReason);
+  clearChannel("ai_voice", AI_VOICE_STATE_PROPERTIES, "voice",
+    S.doNotCall, S.doNotCallAt, S.doNotCallReason);
+  return props;
+}
+
+/**
  * The re-opt-in patch. Records that someone asked to come back and grants
  * NOTHING: no status, no consent timestamp, no version. A START from the
  * handset is stronger evidence than a ticked web box and is still not a
