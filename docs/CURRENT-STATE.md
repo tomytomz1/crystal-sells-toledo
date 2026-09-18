@@ -1107,7 +1107,7 @@ is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
 caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
 decides nothing in production.
 
-## Bot verification on the lead path — CODE AVAILABLE; PRODUCTION ACTIVATION NOT ESTABLISHED
+## Bot verification on the lead path — LIVE IN PRODUCTION; POSITIVE PATH VERIFIED 18 SEPTEMBER 2026
 
 Production received fake seller submissions that every pre-existing request-shape
 guard could legitimately pass: same-origin POST, the instance-local rate limit,
@@ -1171,24 +1171,41 @@ Cloudflare timeout/network/malformed-response conditions fail closed while the
 gate is enabled. Token faults and service/configuration faults use separate,
 bounded, PII-free reason vocabulary; public error copy remains generic.
 
-### Production status — evidence boundary
+### Production status — LIVE; positive path verified
 
-**The repository proves the code path, not Vercel or Cloudflare account state.**
-This work creates no Cloudflare widget, sets no Vercel variable, submits no
-Production form, and changes no HubSpot/Twilio/Neon/Retell setting. Production
-Turnstile activation and live behavior therefore remain **not established** by
-repository evidence.
+**Evidence boundary:** repository source proves the code path; the Cloudflare and
+Vercel account state below comes from the operator's direct actions in those
+external dashboards. No Site Key or Secret Key value is recorded here.
 
-Do not describe Turnstile as enabled or live in Production until an operator has
-completed the external activation and observed the live checks. The required
-sequence is recorded in
-`docs/updates/2026-09-18-turnstile-explicit-activation.md`: create a Managed
-widget for `crystalsellstoledo.com` and `www.crystalsellstoledo.com`; stage the
-site/secret keys while `TURNSTILE_ENABLED=false`; redeploy and confirm keys alone
-do not activate the gate; set `TURNSTILE_ENABLED=true`; redeploy; verify one
-controlled legitimate submission reaches HubSpot; verify a failed/absent
-challenge creates no HubSpot activity; and confirm SMS/AI-voice consent remains
-NOT GRANTED unless the respective box was actually selected.
+On 18 September 2026 the operator created the **Crystal Sells Toledo** Cloudflare
+Turnstile widget in **Managed** mode for `crystalsellstoledo.com`, with
+**pre-clearance OFF**. `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` were then
+staged in Vercel Production while `TURNSTILE_ENABLED=false`, Production was
+redeployed, and the live lead pages continued rendering normally. The operator
+then changed `TURNSTILE_ENABLED` to exact `true` and redeployed Production again.
+The protected pages continued rendering normally. The frontend uses
+`appearance: "interaction-only"`, so a low-risk visitor is expected to see no
+visible challenge.
+
+The operator then submitted one controlled `/home-value` lead with both SMS and
+AI-voice consent boxes left unchecked. The submission succeeded and reached
+HubSpot as **Turnstile QA**. The connected HubSpot tool independently read that
+contact and found `cst_sms_permission_status = never_granted`. The AI-voice
+permission field was blank/unset; `api/_lib/hubspot-consent-state.mjs` defines a
+blank permission status as `never_granted`. **Turnstile therefore did not create
+or imply communications permission.**
+
+That establishes the legitimate positive Production path through the enabled
+Turnstile deployment to HubSpot. **One limitation remains explicit:** no
+deliberate Production submission with a missing, invalid, expired, replayed,
+wrong-host, or wrong-action challenge has been executed after activation. The
+fail-closed rejection behavior and the invariant that a refused verification
+produces no submission ID, consent-ledger append, HubSpot activity,
+acknowledgement email, SMS, or AI call are established by the merged automated
+tests and code review, not by intentionally generating a Production failure.
+
+The detailed activation record and rollback instruction are in
+`docs/updates/2026-09-18-turnstile-explicit-activation.md`.
 
 ## The lead path's body read — bounded in size AND in time
 
