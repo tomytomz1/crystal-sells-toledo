@@ -118,6 +118,23 @@
 
           {{consentBlock}}
 
+
+          <!-- Cloudflare Turnstile mounts here. The container is UNCONDITIONAL
+               and unparameterised on purpose: it carries no sitekey and no
+               action, so it is inert - and invisible, having no content - on any
+               build where Turnstile is not configured. assets/js/main.js renders
+               the widget into it and derives the action from this form's
+               data-form-type, so there is one implementation for every form
+               rather than a build variable per form type.
+
+               POSITION IS DELIBERATE: immediately before the submit control. In
+               the ordinary case the widget is never seen at all (appearance is
+               interaction-only), but when Cloudflare does ask for a click it
+               must appear where the visitor is already looking and next in the
+               tab order, not somewhere further up a form they have finished
+               reading. -->
+          <div class="turnstile" data-turnstile></div>
+
           <div class="form-status" aria-live="polite"></div>
 
           <button class="btn btn--primary btn--block btn--lg" type="submit">Send Message</button>

@@ -28,7 +28,7 @@
 <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
 <link rel="manifest" href="/site.webmanifest">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">{{turnstilePreconnect}}
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Inter is a variable font: 400;500;600 and 400..700 resolve to the SAME
      15 woff2 files, so asking for the range costs nothing to download and
@@ -48,7 +48,7 @@
 {{> footer}}
 {{> sticky-cta}}
 <script src="/assets/js/main.js?v={{js_v}}" defer></script>
-{{mapsLoader}}
+{{mapsLoader}}{{turnstileLoader}}
 <!-- Vercel Web Analytics. Cookieless, no personal data, no cross-site
      tracking. Served from Vercel's edge, so it 404s harmlessly when the
      site is run locally. -->

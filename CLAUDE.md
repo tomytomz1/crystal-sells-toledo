@@ -110,13 +110,6 @@ relevant entry when working in the area it describes — not otherwise.**
     the outcome in the handoff — *including* "nothing promoted, because …" — so
     the judgement is reviewable rather than silent. See `docs/WORKFLOW.md`
     § Lesson promotion.
-21. **A test seam production code can reach is not a test seam.** A module that
-    can cause an external side effect must not hold a boundary in mutable state
-    an importer can rewrite. **Inject by construction and close over it**: build
-    the production instance once over the real boundary, and let tests build
-    their own. A guard proving a mutable seam's *default* proves nothing about
-    what the seam can be set to — the question is never what it is bound to, but
-    who can rebind it.
 
 ## Testing — risk-based
 
@@ -288,6 +281,7 @@ npm run seo:report       # Search Console + GA4 snapshot -> docs/seo/; needs cre
 npm run seo:diff         # what moved between the two newest snapshots; no credentials
 npm run test:unit        # api/ endpoint and validation
 npm run test:browser     # browser behaviour
+npm run test:turnstile   # the Turnstile verification gate on /api/lead
 npm run test:hubspot     # HubSpot delivery
 npm run test:mail        # Zoho Mail acknowledgement
 npm run test:consent     # consent model

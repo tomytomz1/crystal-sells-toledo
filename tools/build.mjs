@@ -279,6 +279,105 @@ if (mapsLoaderTag) console.log("  i Google Places autocomplete enabled");
 else console.log("  i no GOOGLE_MAPS_API_KEY - address field stays a plain text input");
 
 /* ---------------------------------------------------------------------
+   CLOUDFLARE TURNSTILE — the build-time half
+   ---------------------------------------------------------------------
+   ONE FEATURE, TWO VARIABLES, AND THEY ARE NOT INTERCHANGEABLE:
+
+     TURNSTILE_SITE_KEY    PUBLIC. Printed into every page, exactly as
+                           the Google Maps browser key is. It identifies
+                           the widget and protects nothing by itself.
+     TURNSTILE_SECRET_KEY  SECRET. Read only by the Vercel function, in
+                           api/_lib/turnstile.mjs. It is what actually
+                           enforces anything, and it must never appear
+                           in anything delivered to a browser.
+
+   WHY THE BUILD REFUSES ONE WITHOUT THE OTHER. The secret is the
+   runtime switch: with it set, api/lead.js rejects every submission
+   that does not carry a verified token. If the SITE key were missing in
+   the same deployment, no page would render a widget, no submission
+   would carry a token, and the endpoint would refuse EVERY LEAD while
+   every test still passed and every page still looked right. That is
+   total, silent lead loss - the outcome this project treats as worst -
+   and it is a configuration mistake, not a code one, so the only place
+   it can be caught is here.
+
+   Vercel exposes the same environment variables to the build and to the
+   function within one deployment, which is what makes this check
+   possible at all; it is the same property the communications-consent
+   gate below relies on. Failing the build fails the DEPLOYMENT, so the
+   previously deployed revision keeps serving and no visitor ever meets
+   the broken state.
+
+   THE REVERSE ORDER IS SAFE AND IS ONLY A WARNING. A site key with no
+   secret renders the widget and mints tokens that nothing redeems: no
+   enforcement, but no lead is lost either. That is a legitimate
+   intermediate state while a rollout is staged, so it is reported
+   loudly and allowed. CLAUDE.md rule 19 - it is announced as "NOT
+   enforcing", because that is what it is.
+   --------------------------------------------------------------------- */
+const TURNSTILE_SITE_KEY = (process.env.TURNSTILE_SITE_KEY || "").trim();
+const TURNSTILE_SECRET_SET = Boolean((process.env.TURNSTILE_SECRET_KEY || "").trim());
+
+/* Turnstile sitekeys are short URL-safe alphanumerics (Cloudflare's own
+   testing keys, e.g. 1x00000000000000000000AA, are 24 characters).
+   Anything else is a paste error or an injection attempt, and either way
+   must not reach a script tag or an attribute. Same rule, same reason as
+   MAPS_KEY_OK above. */
+const TURNSTILE_KEY_OK = /^[A-Za-z0-9_-]{8,64}$/.test(TURNSTILE_SITE_KEY);
+if (TURNSTILE_SITE_KEY && !TURNSTILE_KEY_OK)
+  throw new Error("TURNSTILE_SITE_KEY is not a plausible Turnstile sitekey - refusing to emit it");
+
+if (TURNSTILE_SECRET_SET && !TURNSTILE_KEY_OK)
+  throw new Error(
+    "TURNSTILE_SECRET_KEY is set but TURNSTILE_SITE_KEY is missing or implausible. " +
+    "That deployment would enforce verification while rendering no widget, so every " +
+    "lead would be refused. Refusing to build."
+  );
+
+/* The loader. api.js MUST be fetched from this exact URL - Cloudflare
+   documents that proxying or caching it breaks the widget on their next
+   update - so it is written out literally and tools/check.mjs pins it.
+
+   EXPLICIT RENDERING, not the implicit `cf-turnstile` class scan. Each
+   form needs its own `action` (its form_type), and assets/js/main.js is
+   already the single place that knows which form is which; deriving the
+   action there keeps ONE implementation for any present or future form
+   instead of a build variable per form type.
+
+   The promise handshake is the same shape the Maps loader above uses,
+   for the same reason: main.js is `defer`red and api.js is `async`, so
+   neither can assume the other has run. Either the onload callback
+   resolves it or the timeout rejects it, and main.js decides what to do
+   with a rejection. */
+const turnstileLoaderTag = TURNSTILE_KEY_OK
+  ? `
+<!-- Cloudflare Turnstile. Public sitekey, injected at build time. The
+     SECRET key is never here - it is read only by the Vercel function. -->
+<script>
+window.__csvTurnstile = { sitekey: ${JSON.stringify(TURNSTILE_SITE_KEY)} };
+window.__csvTurnstileReady = new Promise(function (resolve, reject) {
+  window.__csvTurnstileResolve = resolve;
+  window.__csvTurnstileReject = reject;
+  setTimeout(reject, 12000);
+});
+function csvTurnstileReady() { window.__csvTurnstileResolve(window.turnstile); }
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=csvTurnstileReady"
+        async defer onerror="window.__csvTurnstileReject()"></script>`
+  : "";
+
+const turnstilePreconnect = TURNSTILE_KEY_OK
+  ? '\n<link rel="preconnect" href="https://challenges.cloudflare.com">'
+  : "";
+
+if (TURNSTILE_KEY_OK && TURNSTILE_SECRET_SET)
+  console.log("  i Cloudflare Turnstile enabled - widget renders AND the endpoint enforces");
+else if (TURNSTILE_KEY_OK)
+  console.log("  ! Cloudflare Turnstile widget renders but TURNSTILE_SECRET_KEY is unset - NOT enforcing");
+else
+  console.log("  i no TURNSTILE_SITE_KEY - no Turnstile widget, and no verification is claimed");
+
+/* ---------------------------------------------------------------------
    Google Analytics 4
    ---------------------------------------------------------------------
    A GA4 measurement ID is not a credential - it is public by design and
@@ -372,6 +471,26 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     js_v: ASSET_VERSIONS.js_v,
     heroImage: heroImageTag,
     mapsLoader: mapsLoaderTag,
+    turnstileLoader: turnstileLoaderTag,
+    turnstilePreconnect,
+    /* Empty when no sitekey is configured, so a build that never
+       contacts Cloudflare never says it does. Same gating rule the
+       consent messaging section follows, two entries below. */
+    turnstileProcessorSection: TURNSTILE_KEY_OK ? PARTIALS["privacy-turnstile"] : "",
+    /* GATED ON THE SECRET, NOT ON THE SITE KEY, AND THE TWO ARE NOT THE
+       SAME CONDITION. The section above renders whenever the widget
+       loads, because that is when Cloudflare starts receiving the
+       visitor's connection information and the disclosure is owed. This
+       ONE SENTENCE claims that a submission can be REFUSED, which is
+       only true once TURNSTILE_SECRET_KEY makes api/lead.js enforce.
+       The site-key-without-secret build is a deliberate staged-rollout
+       state, and in it this string is empty - describing inactivity as
+       enforcement on the privacy page is CLAUDE.md rule 19 in the worst
+       possible place. */
+    turnstileEnforcementNote: TURNSTILE_KEY_OK && TURNSTILE_SECRET_SET
+      ? " If the check does not pass, the submission is refused before it reaches any of the " +
+        "systems described on this page, and you can still call or email Crystal instead."
+      : "",
     analytics: analyticsTag,
     jsonld: meta.jsonld ? `\n<script type="application/ld+json">\n${JSON.stringify(meta.jsonld, null, 2)}\n</script>` : "",
     robots: meta.noindex ? '<meta name="robots" content="noindex, follow">' : "",

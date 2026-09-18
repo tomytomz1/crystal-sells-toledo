@@ -1,0 +1,24 @@
+<!-- =====================================================================
+     CLOUDFLARE TURNSTILE — the processor disclosure.
+     =====================================================================
+     Rendered only in a TURNSTILE_ENABLED=true build. The standard build
+     entry point also limits Cloudflare's loader to pages that actually carry
+     a lead form, so this policy describes the site-wide processing without
+     claiming that every route contacts Cloudflare.
+
+     Written to be true of what this repository controls and no more. It does
+     not make promises about Cloudflare's own cookie/storage behaviour. The
+     server-side redemption deliberately does NOT send remoteip.
+     ===================================================================== -->
+<h3>Cloudflare Turnstile &mdash; checking that a person filled the form</h3>
+<p>The forms on this site use <strong>Cloudflare Turnstile</strong>, which helps tell a person
+  filling in a form apart from an automated script. When you open a page containing one of these
+  forms, Cloudflare&rsquo;s script loads and receives normal connection information, such as your IP
+  address and browser details, together with signals about how the browser behaves. It does not
+  receive anything you type into the form.</p>
+<p>When you submit, the site sends the resulting verification token to Cloudflare to confirm it is
+  genuine. That check sends the token only &mdash; not your name, email address, phone number,
+  property address, message or IP address &mdash; and the token itself is never stored, never added
+  to Crystal&rsquo;s contact records and never included in any email. Most visitors are verified
+  without doing anything; occasionally Cloudflare asks you to confirm with a single
+  click.{{turnstileEnforcementNote}}</p>

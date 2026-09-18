@@ -296,7 +296,16 @@
     var subject = form.dataset.subject || "Website inquiry - Crystal Sells Toledo";
     var lines = [];
     Object.keys(data).forEach(function (k) {
+      /* The honeypot, the attribution object, and anything Turnstile
+         may have put into the form are never written into an email the
+         visitor is about to send from their own mail client. The
+         widget is rendered with response-field:false precisely so no
+         such field exists, and this is the second lock on that door:
+         a bearer token in a mailto body would leave the browser, the
+         visitor's Sent folder and Crystal's inbox carrying a
+         credential that exists to be redeemed once. */
       if (k === "_gotcha" || k === "attribution" || !data[k]) return;
+      if (k.lastIndexOf("cf-turnstile", 0) === 0 || k === "turnstile_token") return;
       lines.push(k.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }) +
         ": " + data[k]);
     });
@@ -318,12 +327,222 @@
     return box ? box.checked === true : false;
   }
 
+  /* =============================================================
+     4a. Cloudflare Turnstile - the browser half
+     =============================================================
+     THIS IS NOT THE SECURITY CONTROL. It only obtains a token and
+     puts it in the request. The control is api/_lib/turnstile.mjs,
+     which redeems that token with Cloudflare server-side before any
+     lead is stored; nothing here can be trusted, and nothing here is.
+
+     It is inert unless tools/build.mjs injected window.__csvTurnstile,
+     which happens only when TURNSTILE_SITE_KEY is configured. With no
+     sitekey there is no widget, no token, and the submission is exactly
+     the one this file has always sent.
+
+     WHY EXPLICIT RENDERING RATHER THAN THE `cf-turnstile` CLASS SCAN.
+     Each form's challenge must be minted for its own `action`, which is
+     its data-form-type, and this file is already the only place that
+     knows which form is which. One implementation here covers every
+     form on the site - including a future buyer_inquiry form - instead
+     of a build variable per form type.
+
+     WHY appearance:"interaction-only". The overwhelming majority of
+     visitors are homeowners, and they must never meet a puzzle. In this
+     mode the widget has no visual footprint at all until Cloudflare
+     itself decides a human interaction is needed; there is no checkbox
+     to find, nothing to read, and nothing extra to click.
+
+     WHY response-field:false. The default is a hidden <input> named
+     cf-turnstile-response inside the form. This file serialises the
+     form with FormData for both the request AND the mailto fallback, so
+     a hidden field would put a single-use bearer token into an email
+     the visitor sends from their own mail client. The token is kept in
+     a closure and read at submit time instead; it never enters the DOM
+     as form data and never reaches FormData at all.
+     ============================================================= */
+  var botcheck = (function () {
+    var cfg = window.__csvTurnstile;
+    var configured = !!(cfg && cfg.sitekey);
+    /* How long a submit will wait for a token that is not ready yet.
+       With execution left at its default the challenge starts when the
+       widget renders, so by the time anyone has filled a form the token
+       is normally long since in hand and this bound is never reached.
+       It exists for the visitor who submits within a moment of the page
+       settling, and it is deliberately short: a person watching a
+       disabled button has no idea anything is being waited for. An
+       INTERACTIVE challenge is not covered by it - see below. */
+    var WAIT_MS = 6000;
+
+    var api = null;
+    var loading = null;
+
+    /** Resolve once Cloudflare's script is ready, or null if it never is. */
+    function ready() {
+      if (!configured) return Promise.resolve(null);
+      if (loading) return loading;
+      /* tools/build.mjs creates this promise inline, before the async
+         api.js tag, and resolves it from the documented `onload`
+         callback. Either the script arrives or the promise rejects -
+         on its own 12 s timer, or from the tag's onerror. */
+      var p = window.__csvTurnstileReady;
+      loading = (p && typeof p.then === "function" ? p : Promise.reject())
+        .then(function (t) { api = t || window.turnstile || null; return api; })
+        .catch(function () { api = null; return null; });
+      return loading;
+    }
+
+    /**
+     * Render one widget for one form and keep its state.
+     *
+     * The container is rendered even while it sits inside a hidden step
+     * of the two-step valuation form. WHICH OF TWO THINGS CLOUDFLARE
+     * THEN DOES IS NOT SOMETHING THIS COMMENT CLAIMS TO KNOW: it may
+     * run the challenge immediately, or it may wait until the element
+     * is actually displayed. Both are handled, because the submit
+     * button lives in that same step - so by the time anyone can
+     * submit, the widget is on screen, and the wait below covers a
+     * challenge that only starts then.
+     */
+    function mount(form, action) {
+      var box = form.querySelector("[data-turnstile]");
+      if (!box) return null;
+
+      var h = {
+        id: null,
+        token: "",
+        interactive: false,
+        waiters: []
+      };
+
+      function settle(value) {
+        var list = h.waiters;
+        h.waiters = [];
+        list.forEach(function (fn) { fn(value); });
+      }
+
+      ready().then(function (t) {
+        if (!t || typeof t.render !== "function") {
+          /* Cloudflare's script never arrived. Nothing is minted, the
+             submission carries no token, and the SERVER decides what
+             that means - which is the only correct place for it to be
+             decided. The visitor is not told anything yet, because
+             nothing has failed from their point of view. */
+          return settle("");
+        }
+        try {
+          h.id = t.render(box, {
+            sitekey: cfg.sitekey,
+            action: action,
+            appearance: "interaction-only",
+            size: "flexible",
+            /* The token lives in this closure, never in the form. */
+            "response-field": false,
+            callback: function (token) {
+              h.token = typeof token === "string" ? token : "";
+              settle(h.token);
+            },
+            /* A token is good for five minutes. `refresh-expired` is
+               left at its default of "auto" so a slowly-filled form
+               silently gets a fresh one; this only clears the stale
+               value so nothing submits an expired token in the gap. */
+            "expired-callback": function () { h.token = ""; },
+            "error-callback": function () {
+              h.token = "";
+              /* Deliberately does NOT settle waiters. `retry` is left
+                 at its default of "auto", so a transient failure is
+                 retried by Cloudflare and may still succeed inside the
+                 wait window. A waiter that resolved here would throw
+                 away a recovery that was already under way. */
+            },
+            "before-interactive-callback": function () { h.interactive = true; },
+            "after-interactive-callback": function () { h.interactive = false; }
+          });
+        } catch (e) {
+          settle("");
+        }
+      });
+
+      return h;
+    }
+
+    return {
+      /** Is a widget configured for this build at all? */
+      configured: configured,
+      mount: mount,
+
+      /**
+       * The token for this form, if one can be had promptly.
+       *
+       * Resolves with "" rather than rejecting: an absent token is not
+       * an error the browser gets to rule on. The request is sent
+       * either way and the server decides, which is what keeps this
+       * file incapable of granting itself a pass.
+       *
+       * Resolves with the string "interactive" when Cloudflare has put
+       * an interactive challenge on screen. The caller stops and asks
+       * the visitor to complete it rather than holding a disabled
+       * submit button for an unbounded time - the person can see the
+       * challenge, and telling them what it wants is better than a
+       * spinner that eventually gives up.
+       */
+      token: function (h) {
+        if (!configured || !h) return Promise.resolve("");
+        if (h.token) return Promise.resolve(h.token);
+        if (h.interactive) return Promise.resolve("interactive");
+        return new Promise(function (resolve) {
+          var done = false;
+          var finish = function (v) {
+            if (done) return;
+            done = true;
+            window.clearTimeout(timer);
+            window.clearInterval(poll);
+            resolve(v || "");
+          };
+          h.waiters.push(finish);
+          /* An interactive challenge can begin AFTER the wait started,
+             which is the common case for the two-step form: the widget
+             only reaches the screen when step 2 opens. Polling the flag
+             is how that is noticed without a second callback contract. */
+          var poll = window.setInterval(function () {
+            if (h.interactive) finish("interactive");
+          }, 250);
+          var timer = window.setTimeout(function () { finish(""); }, WAIT_MS);
+        });
+      },
+
+      /**
+       * Discard the spent token and mint a fresh one.
+       *
+       * REQUIRED AFTER EVERY FAILED SUBMISSION, and not a nicety. A
+       * Turnstile token is SINGLE-USE: once the server has redeemed it,
+       * Cloudflare answers `timeout-or-duplicate` for the same string
+       * forever. Without this, a visitor whose submission failed for
+       * any reason downstream - a HubSpot outage, a 502 - would be
+       * refused on every retry by the verification gate instead, and
+       * the form would look permanently broken to exactly the person
+       * whose lead was already at risk.
+       */
+      reset: function (h) {
+        if (!configured || !h || !api || typeof api.reset !== "function") return;
+        h.token = "";
+        h.interactive = false;
+        try { if (h.id !== null) api.reset(h.id); } catch (e) { /* widget gone */ }
+      }
+    };
+  })();
+
   function initForms() {
     document.querySelectorAll("form[data-form]").forEach(function (form) {
       var status = form.querySelector(".form-status");
       var submit = form.querySelector("[type=submit]");
       var formType = form.dataset.formType || "contact";
       var startedTracked = false;
+      /* The action is the form's own type, which is what the server
+         requires the redeemed token to have been minted for. A token
+         solved on /contact therefore cannot be replayed into a
+         home_value submission. */
+      var check = botcheck.mount(form, formType);
 
       form.addEventListener("input", function () {
         if (startedTracked) return;
@@ -370,7 +589,34 @@
         if (submit) { submit.disabled = true; submit.textContent = "Sending..."; }
         setStatus(status, "warn", "Sending your request...");
 
-        fetch(CONFIG.leadEndpoint, {
+        /* THE TOKEN IS FETCHED HERE, NOT BUILT INTO `payload` ABOVE,
+           because obtaining it may have to wait. It is attached to the
+           request body and to nothing else: `data` (which feeds the
+           mailto fallback) never sees it, and neither does anything
+           this file sends to analytics. */
+        botcheck.token(check).then(function (token) {
+          if (token === "interactive") {
+            /* Cloudflare wants a click. The widget is on screen, just
+               above this button. Hand the visitor back their form with
+               an instruction they can act on rather than holding a
+               dead button until a timer gives up. Everything they
+               typed is untouched. */
+            if (submit) { submit.disabled = false; submit.textContent = original; }
+            setStatus(status, "warn",
+              "Please complete the quick verification check just above, then press " +
+              "<strong>" + original + "</strong> again.");
+            analytics.track("lead_submit_error", {
+              form_type: formType,
+              error_code: "VERIFICATION_INTERACTIVE"
+            });
+            return null;
+          }
+          if (token) payload.turnstile_token = token;
+          return send();
+        });
+
+        function send() {
+        return fetch(CONFIG.leadEndpoint, {
           method: "POST",
           headers: { "Accept": "application/json", "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -410,6 +656,14 @@
           }
         }).catch(function (err) {
           /* Everything the visitor typed is still in the form. */
+          /* A SPENT TOKEN CANNOT BE RESUBMITTED. Whatever went wrong -
+             a validation rejection, a verification refusal, a HubSpot
+             outage - the next attempt needs a token the server has not
+             already redeemed, or the retry is refused by the gate
+             rather than by whatever actually failed. Reset covers every
+             failure path because the cheapest correct rule is "a failed
+             submission always mints a fresh token". */
+          botcheck.reset(check);
           var extra = "";
           if (CONFIG.mailtoFallbackEnabled) {
             extra = " If you would rather send it by email instead, " +
@@ -427,6 +681,7 @@
         }).finally(function () {
           if (submit) { submit.disabled = false; submit.textContent = original; }
         });
+        }
       });
     });
   }

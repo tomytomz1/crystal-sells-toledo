@@ -1695,6 +1695,223 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.close();
   });
 
+  /* =============================================================
+     Cloudflare Turnstile — the browser half, at a real browser
+     =============================================================
+     CLAUDE.md rule 14: the claims below are about what a BROWSER does
+     with the shipped bundle — which widget options it asks for, what
+     ends up in the request body, what ends up in the DOM and in the
+     mailto fallback, and what happens to a spent token after a failed
+     submission. None of that can be observed from Node, so it is
+     observed here.
+
+     CLOUDFLARE'S SCRIPT IS NEVER LOADED, and could not be: the page
+     harness aborts every request that is not same-origin, and CI has
+     no egress. A stub stands in for `window.turnstile`, which is the
+     RIGHT boundary for these claims — every one of them is about
+     this repository's own code, not about Cloudflare's. What the stub
+     cannot carry, and what is claimed nowhere: that a real widget
+     accepts these options, or that a real challenge ever completes.
+
+     The production build in `public/` carries no sitekey (CI sets
+     none), so `window.__csvTurnstile` is injected here exactly as
+     tools/build.mjs would inject it. That is what makes this test
+     possible without a second build, and it is honest: the bundle
+     under test is the shipped one, and only the build-time global it
+     reads is supplied.
+     ============================================================= */
+  describe("Cloudflare Turnstile — browser half", () => {
+    const SITEKEY = "1x00000000000000000000AA";
+    const STUB_TOKEN = "stub.turnstile.token.value";
+
+    /** A page with a stubbed Turnstile API installed before any script runs. */
+    async function turnstilePage(opts = {}) {
+      const p = await page(opts);
+      await p.addInitScript(({ sitekey, token }) => {
+        window.__csvTurnstileCalls = [];
+        window.__csvTurnstileResets = [];
+        window.turnstile = {
+          render: function (container, options) {
+            var id = "w" + window.__csvTurnstileCalls.length;
+            window.__csvTurnstileCalls.push({ id: id, options: options });
+            window.__csvHandles = window.__csvHandles || {};
+            window.__csvHandles[id] = options;
+            /* Mint a token immediately, as a widget whose execution is
+               left at the default does once it has rendered. */
+            if (!window.__csvHoldToken) {
+              window.setTimeout(function () { options.callback(token); }, 0);
+            }
+            return id;
+          },
+          reset: function (id) {
+            window.__csvTurnstileResets.push(id);
+          }
+        };
+        window.__csvTurnstile = { sitekey: sitekey };
+        window.__csvTurnstileReady = Promise.resolve(window.turnstile);
+      }, { sitekey: SITEKEY, token: STUB_TOKEN });
+      return p;
+    }
+
+    test("each form asks for a widget bound to its own form_type", async () => {
+      for (const [route, action] of [["/contact", "contact"], ["/home-value", "home_value"]]) {
+        const p = await turnstilePage();
+        await p.goto(base + route, { waitUntil: "load" });
+        await p.waitForTimeout(200);
+        const calls = await p.evaluate(() => window.__csvTurnstileCalls);
+        assert.equal(calls.length, 1, `${route}: expected exactly one widget`);
+
+        const o = calls[0].options;
+        assert.equal(o.sitekey, SITEKEY, `${route}: wrong sitekey`);
+        assert.equal(o.action, action,
+          `${route}: the action must be the form_type, or a token from another form could be replayed`);
+        /* The low-friction requirement is a property of these two
+           options, so they are asserted rather than trusted to a
+           comment: the widget stays out of the visitor's way until
+           Cloudflare itself decides otherwise. */
+        assert.equal(o.appearance, "interaction-only",
+          `${route}: an always-visible widget is friction a homeowner did not ask for`);
+        /* The token must never become form data — see the mailto
+           assertion below for why that matters. */
+        assert.equal(o["response-field"], false, `${route}: the hidden token field must be off`);
+        await p.close();
+      }
+    });
+
+    test("the token rides in the request body and nowhere else", async () => {
+      const p = await turnstilePage();
+      let sent = null;
+      p.on("request", (r) => { if (r.url().includes("/api/lead")) sent = JSON.parse(r.postData() || "{}"); });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await p.waitForTimeout(200);
+      await fillContact(p);
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(600);
+
+      assert.ok(sent, "no request was sent");
+      assert.equal(sent.turnstile_token, STUB_TOKEN);
+
+      /* NOT IN THE DOM. A hidden input would be picked up by FormData,
+         and from there by the mailto fallback. */
+      const inForm = await p.evaluate(() =>
+        document.querySelectorAll('form[data-form] input[name*="turnstile"]').length);
+      assert.equal(inForm, 0, "the token must not exist as a form field");
+      await p.close();
+    });
+
+    test("a failed submission keeps the token out of the mailto fallback", async () => {
+      const p = await turnstilePage({ apiStatus: 502, apiBody: { ok: false, code: "DELIVERY_FAILED" } });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await p.waitForTimeout(200);
+      await fillContact(p);
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(600);
+
+      const href = await p.evaluate(() => {
+        var a = document.querySelector(".form-status a[href^='mailto:']");
+        return a ? a.getAttribute("href") : null;
+      });
+      assert.ok(href, "the recovery mailto link should be offered");
+      assert.equal(href.includes(STUB_TOKEN), false,
+        "a single-use bearer token must never leave in an email the visitor sends");
+      assert.equal(/turnstile/i.test(href), false);
+      await p.close();
+    });
+
+    /* THE SINGLE-USE PROPERTY, AND WHY THIS TEST EXISTS. A Turnstile
+       token can be redeemed once. Without a reset, a visitor whose
+       submission failed downstream — a HubSpot outage, a 502 — would be
+       refused by the VERIFICATION gate on every retry, and the form
+       would look permanently broken to exactly the person whose lead
+       was already at risk. */
+    test("a failed submission mints a fresh token for the retry", async () => {
+      const p = await turnstilePage({ apiStatus: 502, apiBody: { ok: false, code: "DELIVERY_FAILED" } });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await p.waitForTimeout(200);
+      await fillContact(p);
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(600);
+      const resets = await p.evaluate(() => window.__csvTurnstileResets);
+      assert.equal(resets.length, 1, "the spent token was not reset");
+      await p.close();
+    });
+
+    test("a successful submission does not reset the widget", async () => {
+      const p = await turnstilePage({ apiBody: { ok: true, submission_id: "csv_ok" } });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await p.waitForTimeout(200);
+      await fillContact(p);
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(600);
+      assert.deepEqual(await p.evaluate(() => window.__csvTurnstileResets), []);
+      await p.close();
+    });
+
+    /* When Cloudflare puts an interactive challenge on screen, holding
+       a disabled submit button until a timer gives up tells the visitor
+       nothing. The submission stops, the button comes back, and the
+       status names the thing they can now see and act on. */
+    test("an interactive challenge returns the form to the visitor with an instruction", async () => {
+      const p = await turnstilePage();
+      let sent = false;
+      p.on("request", (r) => { if (r.url().includes("/api/lead")) sent = true; });
+      await p.addInitScript(() => { window.__csvHoldToken = true; });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await p.waitForTimeout(200);
+      await fillContact(p);
+      /* Cloudflare's documented before-interactive-callback. */
+      await p.evaluate(() => window.__csvHandles.w0["before-interactive-callback"]());
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(700);
+
+      assert.equal(sent, false, "no request should be sent without a token in hand");
+      const status = await p.locator("form[data-form] .form-status").innerText();
+      assert.match(status, /verification check/i);
+      const disabled = await p.locator("form[data-form] button[type=submit]").isDisabled();
+      assert.equal(disabled, false, "the visitor must be able to press send again");
+      await p.close();
+    });
+
+    /* The production build in CI has no sitekey. The bundle must then
+       behave exactly as it did before this feature existed — no widget,
+       no token, no change to the request. */
+    test("with no sitekey configured nothing is rendered and no token is sent", async () => {
+      const p = await page();
+      let sent = null;
+      p.on("request", (r) => { if (r.url().includes("/api/lead")) sent = JSON.parse(r.postData() || "{}"); });
+      await p.goto(`${base}/contact`, { waitUntil: "load" });
+      await fillContact(p);
+      await p.locator("form[data-form] button[type=submit]").click();
+      await p.waitForTimeout(600);
+      assert.ok(sent, "no request was sent");
+      assert.equal("turnstile_token" in sent, false);
+      assert.equal(await p.locator("[data-turnstile]").count(), 1,
+        "the mount point still ships; it is simply never rendered into");
+      await p.close();
+    });
+
+    /* Accessibility: the mount point must sit immediately before the
+       submit control, so a challenge that does appear is the next thing
+       in the tab order rather than something further up a form the
+       visitor has finished reading. */
+    test("the mount point is the last thing before the submit button", async () => {
+      for (const route of ["/contact", "/home-value"]) {
+        const p = await page();
+        await p.goto(base + route, { waitUntil: "load" });
+        const ok = await p.evaluate(() => {
+          var form = document.querySelector("form[data-form]");
+          var box = form.querySelector("[data-turnstile]");
+          var submit = form.querySelector("[type=submit]");
+          if (!box || !submit) return "missing";
+          var pos = box.compareDocumentPosition(submit);
+          return (pos & Node.DOCUMENT_POSITION_FOLLOWING) ? "before" : "after";
+        });
+        assert.equal(ok, "before", `${route}: the widget must precede the submit button`);
+        await p.close();
+      }
+    });
+  });
+
   test("without JavaScript the form cannot put details in the URL (F05)", async () => {
     /* The form had no method, so a no-JS submit was a GET of the same page:
        no lead, no confirmation, and the name, email and address in the

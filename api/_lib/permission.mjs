@@ -165,6 +165,29 @@ export function canPlaceAutomatedVoiceCall(state, target, opts) {
 }
 
 /* ---------------------------------------------------------------------
+   DURABLE SUPPRESSION FOLD FOR OPERATOR STATE
+   --------------------------------------------------------------------- */
+export function suppressionFromLedgerRows(rows) {
+  if (!Array.isArray(rows)) throw new Error("SUPPRESSION_ROWS_MALFORMED");
+  const lanes = { sms: false, ai_voice: false, all: false };
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row))
+      throw new Error("SUPPRESSION_ROWS_MALFORMED");
+    const channel = String(row.channel == null ? "" : row.channel).trim();
+    if (!Object.prototype.hasOwnProperty.call(lanes, channel))
+      throw new Error("SUPPRESSION_ROWS_MALFORMED");
+    lanes[channel] = true;
+  }
+  return Object.freeze({
+    lanes: Object.freeze({ ...lanes }),
+    effective: Object.freeze({
+      sms: lanes.all || lanes.sms,
+      ai_voice: lanes.all || lanes.ai_voice,
+    }),
+  });
+}
+
+/* ---------------------------------------------------------------------
    SUPPRESSION
    ---------------------------------------------------------------------
    Recorded by an inbound webhook (a STOP reply, a spoken "do not call me
