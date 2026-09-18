@@ -1,0 +1,33 @@
+name: one-shot-unsuppression-fixes
+
+on:
+  push:
+    branches:
+      - feature/operator-unsuppression-workflow
+    paths:
+      - .github/workflows/one-shot-unsuppression-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/operator-unsuppression-workflow
+          fetch-depth: 0
+      - name: Apply fixes
+        run: |
+          python tools/.one-shot-unsuppression-fixes.py
+          git diff --check
+          node --check api/operator-unsuppress.js
+      - name: Commit and self-delete
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/operator-unsuppress.js tests/operator-unsuppress-state.test.mjs tests/operator-unsuppress-token.test.mjs
+          git rm .github/workflows/one-shot-unsuppression-fixes.yml tools/.one-shot-unsuppression-fixes.py
+          git commit -m 'fix: keep unsuppression selections in the review form'
+          git push origin HEAD:feature/operator-unsuppression-workflow
