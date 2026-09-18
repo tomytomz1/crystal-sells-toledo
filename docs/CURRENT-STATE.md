@@ -1107,6 +1107,89 @@ is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
 caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
 decides nothing in production.
 
+## Bot verification on the lead path — CODE AVAILABLE; PRODUCTION ACTIVATION NOT ESTABLISHED
+
+Production received fake seller submissions that every pre-existing request-shape
+guard could legitimately pass: same-origin POST, the instance-local rate limit,
+the `_gotcha` honeypot, bounded body/schema validation, syntactically valid
+contact data, and both communications-consent boxes left unticked. The consent
+model was not at fault — it correctly granted neither SMS nor AI-voice permission.
+The missing control was a reliable human/bot verification boundary before any
+lead side effect.
+
+Cloudflare Turnstile is now implemented on the lead path. In `api/lead.js` it
+runs after the cheap local refusals — method, origin, rate limit, bounded body
+read, JSON parse, schema validation and honeypot — and before the submission ID,
+consent evidence, durable ledger append, HubSpot write and acknowledgement email.
+A Turnstile refusal therefore returns before a lead event exists downstream.
+
+`api/_lib/turnstile.mjs` redeems the token against Cloudflare Siteverify and,
+when protection is enabled, requires `success === true`, a Cloudflare-reported
+hostname in the site's existing allowed-host set, and an `action` equal to the
+submitted `form_type`. The raw token is never attached to normalized lead data,
+never persisted, never sent to HubSpot/the ledger/mail, and is structurally
+redacted from logs. A verified human may still submit with SMS consent false and
+AI-voice consent false; Turnstile verification is not communications consent.
+
+The shared valuation form (`home_value`, including `/`, `/home-value` and
+`/43551-seller-review`) and the contact form (`contact`, `/contact`) are covered.
+`buyer_inquiry` is an accepted `form_type` but no public page currently renders
+that form; the gate keys off the form's `data-form-type`, so a future form using
+the shared lead path is covered by the same integration. The standard build also
+removes the Turnstile loader/preconnect from generated pages with no protected
+lead-form mount point.
+
+`home_value` additionally rejects clear P.O.-Box values in the physical-property
+address field (`PO Box`, `P.O. Box`, `P O Box`, `Post Office Box`). The rule is
+intentionally narrow: it does not use phone area code, IP geolocation, email
+geography, unusual names or subjective gibberish scoring.
+
+### Configuration — explicit three-state contract
+
+| Variable | Secret? | Meaning |
+|---|---|---|
+| `TURNSTILE_ENABLED` | No | authoritative feature switch; only exact `true` enables |
+| `TURNSTILE_SITE_KEY` | No | public widget key used by protected form pages |
+| `TURNSTILE_SECRET_KEY` | **Yes** | server-side Siteverify redemption key |
+
+The states are explicit and keys alone never activate protection:
+
+- **Disabled** — `TURNSTILE_ENABLED` is absent, empty, or exact `false`.
+  `/api/lead` makes no Siteverify request, and the standard build emits no
+  Turnstile widget/loader even if keys remain stored.
+- **Enabled** — `TURNSTILE_ENABLED=true` and both keys are present. Every
+  protected lead submission must pass server-side verification before any
+  downstream lead side effect.
+- **Misconfigured** — `TURNSTILE_ENABLED=true` with a missing key, or any invalid
+  nonempty flag value. Runtime fails closed. The standard build also refuses an
+  enabled deployment with missing required configuration, preventing a form from
+  shipping with no way to satisfy the gate.
+
+`tools/build-entry.mjs` is the standard build entry used by `npm run build`,
+`npm run dev` and `npm test`, and therefore by Vercel's existing build command.
+Cloudflare timeout/network/malformed-response conditions fail closed while the
+gate is enabled. Token faults and service/configuration faults use separate,
+bounded, PII-free reason vocabulary; public error copy remains generic.
+
+### Production status — evidence boundary
+
+**The repository proves the code path, not Vercel or Cloudflare account state.**
+This work creates no Cloudflare widget, sets no Vercel variable, submits no
+Production form, and changes no HubSpot/Twilio/Neon/Retell setting. Production
+Turnstile activation and live behavior therefore remain **not established** by
+repository evidence.
+
+Do not describe Turnstile as enabled or live in Production until an operator has
+completed the external activation and observed the live checks. The required
+sequence is recorded in
+`docs/updates/2026-09-18-turnstile-explicit-activation.md`: create a Managed
+widget for `crystalsellstoledo.com` and `www.crystalsellstoledo.com`; stage the
+site/secret keys while `TURNSTILE_ENABLED=false`; redeploy and confirm keys alone
+do not activate the gate; set `TURNSTILE_ENABLED=true`; redeploy; verify one
+controlled legitimate submission reaches HubSpot; verify a failed/absent
+challenge creates no HubSpot activity; and confirm SMS/AI-voice consent remains
+NOT GRANTED unless the respective box was actually selected.
+
 ## The lead path's body read — bounded in size AND in time
 
 `api/lead.js` reads its body through `readBody()` in `api/_lib/security.mjs`.
@@ -1995,6 +2078,7 @@ Open one of these only when the task actually needs it.
 
 | Topic | Document |
 |---|---|
+| **Bot verification / Cloudflare Turnstile** — why the existing guards could not catch it, the three checks, the fault split, the fail-closed trade-off, the build refusal, the operator checklist, what is unproven | `docs/updates/2026-09-18-turnstile-lead-verification.md` |
 | **The lead body read** — the two defects, the 5 s arithmetic, the 408, the mutation proofs, the five follow-ups | `docs/updates/2026-09-11-lead-body-read-bounds.md` |
 | **The gate 7 connection lifecycle** — the shared predicate, both response boundaries, the static guard rewrite, the raw-socket matrix | `docs/updates/2026-09-11-gate-7-connection-lifecycle.md` |
 | **Unsuppression / re-opt-in** — the two-key rule, lane folding, the future `db/003` contract, the operator security model, Twilio reconciliation | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |

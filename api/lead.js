@@ -17,6 +17,9 @@ import { sendAcknowledgement, classifyMailError } from "./_lib/mail.mjs";
 import { buildConsentEvidence, consentFeatureEnabled, consentLogShape } from "./_lib/consent.mjs";
 import { appendConsentEvents, ledgerLogShape } from "./_lib/consent-ledger.mjs";
 import { readBody, bodyErrorReason, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
+import {
+  turnstileEnabled, verifyTurnstile, turnstileLogShape, isTokenFault,
+} from "./_lib/turnstile.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
 /** 96 bits of CSPRNG entropy, prefixed so it is recognisable in a CRM record. */
@@ -144,6 +147,23 @@ const TRANSPORT_FAILURE =
   "We could not process this request. Please refresh the page and try again, " +
   "or contact Crystal directly.";
 
+/* A refused verification and an unavailable one are DIFFERENT CLAIMS and get
+   different words. The first says the check ran and this submission did not
+   pass it; the second says the check could not run at all. Telling a homeowner
+   they failed a bot check because Cloudflare was unreachable - or because this
+   deployment's secret key is wrong - would be a statement about them that the
+   endpoint cannot support. Neither message mentions a robot, a bot or a score:
+   the person reading it is overwhelmingly likely to be a human whose browser
+   extension, corporate proxy or ad blocker got in the way. */
+const VERIFICATION_REFUSED =
+  "We could not verify this submission came from a person. Please refresh the " +
+  "page and try again, or contact Crystal directly.";
+
+const VERIFICATION_UNAVAILABLE =
+  "Our verification check is temporarily unavailable, so we could not confirm " +
+  "your submission. Your details are still in the form. Please try again in a " +
+  "moment, call, or email.";
+
 export default async function handler(req, res) {
   const started = Date.now();
 
@@ -267,6 +287,82 @@ export default async function handler(req, res) {
     }
     logError("lead.validate_error", err);
     return fail(req, res, 400, "BAD_REQUEST", "Could not process that submission.");
+  }
+
+  /* =====================================================================
+     TURNSTILE — THE HUMAN/BOT BOUNDARY, AND THE LAST GUARD THAT COSTS
+     NOTHING DOWNSTREAM TO FAIL
+     =====================================================================
+     POSITION IS THE DESIGN. Everything above this point is local and
+     cheap - method, origin, the rate limiter, the bounded body read, the
+     JSON parse, the honeypot and the whole field schema - so a malformed
+     or obviously hostile request is still refused without a single
+     outbound packet. This is the first guard that costs a network round
+     trip, so it is the last one to run.
+
+     Everything BELOW this point is a side effect that cannot be taken
+     back. The submission id is minted below, not above, so a refused
+     request never produces one; and after it come the consent evidence,
+     the append to the durable consent ledger, the HubSpot contact, the
+     HubSpot form-submission activity that notifies Crystal, and the
+     acknowledgement email to the address in the form. A `return` here
+     reaches NONE of them.
+
+     THE BROWSER'S TOKEN IS NOT EVIDENCE OF ANYTHING UNTIL CLOUDFLARE
+     SAYS SO. verifyTurnstile() redeems it server-side and additionally
+     requires that Cloudflare's own record of WHERE the challenge was
+     served is one of this site's hosts, and that the action it was
+     minted for is the form_type actually being submitted.
+
+     THE TOKEN IS READ FROM THE RAW BODY AND GOES NOWHERE ELSE. It is
+     never attached to `payload`, so it cannot ride into the enquiry
+     block, the consent evidence, the ledger row, the HubSpot write or
+     the acknowledgement mail - all of which are built from `payload`
+     alone. It is never passed to log(); turnstileLogShape() returns the
+     outcome and Cloudflare's closed-vocabulary codes and nothing else.
+
+     FAIL CLOSED, INCLUDING WHEN CLOUDFLARE IS THE ONE FAILING, and the
+     cost of that choice is stated rather than hidden: while the
+     verification endpoint is unreachable this endpoint stops accepting
+     leads, and a genuine homeowner is asked to try again or call. The
+     alternative - accepting unverified submissions whenever the verifier
+     is unavailable - is a bypass that anyone able to disrupt the check
+     inherits, and it would make this gate unfalsifiable. The visitor
+     keeps every field they typed and is given the phone number, the
+     email address and the mailto fallback, which is the same recovery
+     the 502 and 503 paths below already rely on.
+
+     WHILE NO SECRET IS CONFIGURED THIS BLOCK DOES NOT RUN AT ALL, and
+     that state is ABSENCE OF ENFORCEMENT, not lenient enforcement
+     (CLAUDE.md rule 19). It is logged on every submission so that a
+     deployment which believes it is protected and is not shows up in the
+     ordinary log stream rather than in an incident. */
+  if (turnstileEnabled()) {
+    const verdict = await verifyTurnstile({
+      token: body.turnstile_token,
+      expectedAction: payload.lead.form_type,
+    });
+
+    if (!verdict.ok) {
+      log("lead.turnstile.refused", {
+        form_type: payload.lead.form_type,
+        ...turnstileLogShape(verdict),
+      });
+      /* 403 when the check RAN and this submission did not pass it;
+         503 when the check could not run. The status code carries the
+         same distinction the two messages do, so a future log reader,
+         an uptime monitor and the visitor are all told the same thing. */
+      return isTokenFault(verdict.reason)
+        ? fail(req, res, 403, "VERIFICATION_FAILED", VERIFICATION_REFUSED)
+        : fail(req, res, 503, "VERIFICATION_UNAVAILABLE", VERIFICATION_UNAVAILABLE);
+    }
+
+    log("lead.turnstile.verified", { form_type: payload.lead.form_type });
+  } else {
+    /* NOT "disabled" and not "skipped" - both would read as a decision.
+       Nothing is configured, so nothing is verified, and the line says
+       exactly that. */
+    log("lead.turnstile.not_configured", { form_type: payload.lead.form_type });
   }
 
   payload.meta.submission_id = submissionId();

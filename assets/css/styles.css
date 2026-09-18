@@ -863,6 +863,18 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   margin: 0 0 1.25rem;
 }
 
+/* Cloudflare Turnstile's mount point.
+   The widget is rendered with appearance:"interaction-only", so in the
+   ordinary case Cloudflare puts NOTHING visible here and this element
+   must occupy no space at all - hence `:empty` collapsing the margin
+   rather than a fixed reserved height. On the rare submission where an
+   interactive challenge is required, the iframe appears directly above
+   the submit button and gets the same rhythm as a form field.
+   The container is present on every build; when Turnstile is not
+   configured nothing ever renders into it and it stays empty. */
+.turnstile:not(:empty) { margin: 0 0 1.25rem; }
+.turnstile iframe { max-width: 100%; }
+
 .form-status {
   padding: 1rem 1.2rem; border-radius: var(--radius); font-size: .93rem; line-height: 1.55;
   border: 1px solid; display: none;

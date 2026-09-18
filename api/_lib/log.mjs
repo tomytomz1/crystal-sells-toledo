@@ -6,6 +6,17 @@
 const PII = new Set([
   "first_name", "last_name", "email", "phone", "property_address",
   "message", "notes", "topic",
+  /* NOT personal data - a bearer credential, and here for the same
+     reason. A Turnstile token is redeemable exactly once against
+     Cloudflare, and api/_lib/turnstile.mjs is written so that it never
+     reaches a log line in the first place. This entry is the structural
+     backstop for that promise rather than a restatement of it: if a
+     future caller ever passes a body or a payload carrying one of these
+     keys to log() or safeShape(), the value is reduced to its length
+     instead of being printed into a retained Vercel log. Both spellings
+     are listed - the field name this site's client sends, and the
+     default name Cloudflare's own widget would use. */
+  "turnstile_token", "cf-turnstile-response",
 ]);
 
 /** Redact a payload down to something safe to log. */

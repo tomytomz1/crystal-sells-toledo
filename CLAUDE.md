@@ -281,6 +281,7 @@ npm run seo:report       # Search Console + GA4 snapshot -> docs/seo/; needs cre
 npm run seo:diff         # what moved between the two newest snapshots; no credentials
 npm run test:unit        # api/ endpoint and validation
 npm run test:browser     # browser behaviour
+npm run test:turnstile   # the Turnstile verification gate on /api/lead
 npm run test:hubspot     # HubSpot delivery
 npm run test:mail        # Zoho Mail acknowledgement
 npm run test:consent     # consent model
