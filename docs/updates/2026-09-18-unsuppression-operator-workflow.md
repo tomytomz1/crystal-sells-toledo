@@ -97,9 +97,9 @@ It does **not** establish fresh SMS consent and does **not** establish Twilio ca
 
 ## Relationship to the messaging gates
 
-- Gate 6: the A2P Campaign has been corrected and resubmitted; Twilio reports `PENDING_REVIEW` (submission count 2).
+- Gate 6: **closed**. Twilio approved the corrected A2P 10DLC campaign on 18 Sep 2026 and reports it registered with carriers.
 - Gate 7: a real STOP round trip has now proven Twilio `OptOutType=STOP` -> signed Production webhook -> durable Neon suppression -> HubSpot suppression projection. Missing Twilio-generated STOP/HELP/START handset confirmations remain a separate provider-delivery incident.
 - Gate 8: the hardened authorization and dark SMS transport remain merged. `CONSENT_LEDGER_SENDER_URL` is configured on the dedicated sender role, and a temporary fixed-target Production probe returned HTTP 204 after executing the deployed application lookup. The temporary probe was then removed. The application sender remains dark.
-- Gate 9 remains open until A2P readiness and deliberate outbound activation.
+- Gate 9 remains open pending deliberate outbound activation and the controlled consent -> send -> STOP/DNC exercise.
 
 No SMS or AI call was sent by this operator unsuppression workflow or by the Gate 8 read-only verification.
