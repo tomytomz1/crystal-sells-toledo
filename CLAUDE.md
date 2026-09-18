@@ -295,14 +295,22 @@ Do not add one-off scripts for individual test names.
 
 ## Project facts
 
+These are stable architecture facts only. **Activation state does not belong in
+this table**; it changes too often and is authoritative only in
+`docs/CURRENT-STATE.md`.
+
 | | |
 |---|---|
 | Site | crystalsellstoledo.com — lead generation for a Toledo REALTOR® |
 | Agent | Crystal Saylor, Key Realty LTD, Ohio licence 2025003655 |
 | Contact | (419) 245-4655 · crystal@crystalsellstoledo.com |
-| Stack | Static HTML built by `tools/build.mjs`, and three Vercel functions: `api/lead.js` (the lead), `api/twilio-inbound.js` (inbound SMS — inert), `api/operator-action.js` (the operator's suppression entry — inert) |
+| Frontend | Static HTML generated from `src/` by `tools/build-entry.mjs`; `public/` is generated output |
+| Server endpoints | Four Vercel functions: `api/lead.js`, `api/twilio-inbound.js`, `api/operator-action.js`, `api/operator-unsuppress.js` |
+| Messaging boundary | `api/_lib/send-permission.mjs` is Gate 8; `api/_lib/sms-sender.mjs` is the designated outbound SMS transport module |
+| Evidence store | Neon Postgres append-only consent/suppression ledger with separate website, sender and operator roles |
 | Deploy | Vercel, production branch `main` |
-| CRM | **HubSpot** — Contacts API + authenticated Forms Submission API. Service Key scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `forms`. Zoho code is a dormant rollback path, imported by nothing. |
+| CRM | **HubSpot** — Contacts API + authenticated Forms Submission API. Service Key scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `forms`. Zoho CRM code is a dormant rollback path, imported by nothing. |
+| Mail | Zoho Mail SMTP is the acknowledgement/operator-email transport; it is separate from dormant Zoho CRM code |
 
 Current status, feature flags and what is still gated: `docs/CURRENT-STATE.md`.
 Execution procedure, the PULSE HANDOFF template and the final-report template:
