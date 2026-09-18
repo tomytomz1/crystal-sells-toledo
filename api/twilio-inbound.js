@@ -33,12 +33,13 @@
  *
  * WHAT THAT DOES NOT YET MEAN. Gate 8 — `api/_lib/send-permission.mjs` —
  * is MERGED, and it does call `get_suppression_state()` as the last read
- * before it answers. But the EXECUTE-only sender credential
- * `CONSENT_LEDGER_SENDER_URL` is in NO environment, so a real resolution
- * would fail closed rather than succeed, and nothing on a live path
- * reaches gate 8 to attempt one. The ledger row is durable, authoritative
- * EVIDENCE today. Calling it an active enforcement lookup would be
- * describing an unconfigured capability as though it were running.
+ * before it answers. The EXECUTE-only sender credential
+ * `CONSENT_LEDGER_SENDER_URL` IS configured in Production on the dedicated
+ * sender role. But nothing on a live path reaches gate 8 yet: the outbound
+ * SMS sender remains dark and unimported, and its Twilio credentials and
+ * activation flag are absent. The ledger therefore has a configured
+ * send-time lookup capability, but it is not yet an active messaging
+ * enforcement path.
  *
  * WHY THIS IS NOT A LIVE MESSAGING EXPOSURE. An outbound SMS sender now
  * exists — `api/_lib/sms-sender.mjs` — and it is DARK. No endpoint and no
@@ -52,9 +53,9 @@
  *
  * GATE 8 MUST BE CONFIGURED AND IN THE SEND PATH BEFORE OUTBOUND
  * AUTOMATED COMMUNICATIONS ARE ACTIVATED. Merged code is not enforcement.
- * Until the sender credential exists and a real send actually goes
- * through it, the guarantee this endpoint offers is the durable record
- * and nothing beyond it.
+ * Until a real outbound path is activated through gate 8 and verified end to
+ * end, the guarantee this endpoint offers is the durable record and nothing
+ * beyond it.
  *
  * That is why this endpoint may answer 200 when HubSpot fails — the
  * evidence is durable and the CRM copy is not the evidence — and why it
