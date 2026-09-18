@@ -68,16 +68,23 @@ export function addressOutsideOhio(value) {
 /* Keyboard-adjacent runs observed in automated junk submissions. Five-letter
    runs make this much narrower than a general "gibberish" classifier and keep
    ordinary unusual names valid. Nonletters are ignored so "a-s-d-f-g" cannot
-   evade the same deterministic rule. */
+   evade the same deterministic rule.
+
+   Repeated-key junk is deliberately narrower still: the entire compact value
+   must be one repeated letter, and it must look like a short keyboard mash.
+   The previous unbounded substring rule treated legitimate elongated words
+   and synthetic max-length contract fixtures as spam, which made the guard
+   broader than the evidence justified. */
 const KEYBOARD_RUNS = [
   "qwert", "werty", "ertyu", "rtyui", "tyuio", "yuiop",
   "asdfg", "sdfgh", "dfghj", "fghjk", "ghjkl",
   "zxcvb", "xcvbn", "cvbnm",
 ];
+const MAX_SINGLE_KEY_SMASH = 24;
 
 export function looksLikeKeyboardSmash(value) {
   const compact = String(value || "").toLowerCase().replace(/[^a-z]/g, "");
   if (!compact) return false;
   if (KEYBOARD_RUNS.some((run) => compact.includes(run))) return true;
-  return /([a-z])\1{5,}/.test(compact);
+  return compact.length <= MAX_SINGLE_KEY_SMASH && /^([a-z])\1{5,}$/.test(compact);
 }

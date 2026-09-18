@@ -60,9 +60,16 @@ test("observed keyboard-smash names and notes are rejected", () => {
     { ...validHomeValue, last_name: "SDFGHJKL" },
     { ...validHomeValue, notes: "zasdfgn" },
     { ...validContact, message: "qwerty qwerty" },
+    { ...validHomeValue, first_name: "aaaaaaaa" },
   ]) {
     assert.equal(codeFor(body), "SUSPECT_INPUT");
   }
+});
+
+test("single-key detection stays narrow enough to avoid ordinary text", () => {
+  assert.equal(looksLikeKeyboardSmash("aaaaaaaa"), true);
+  assert.equal(looksLikeKeyboardSmash("soooooo motivated"), false);
+  assert.equal(looksLikeKeyboardSmash("A".repeat(40)), false);
 });
 
 test("ordinary uncommon-looking human input is not treated as keyboard smash", () => {
