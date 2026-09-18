@@ -22,11 +22,11 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import base64
           from pathlib import Path
 
           path = Path('docs/CURRENT-STATE.md')
           text = path.read_text(encoding='utf-8')
-
           start_marker = '## Bot verification on the lead path — MERGED, NOT CONFIGURED, NOT ENFORCING'
           end_marker = "## The lead path's body read — bounded in size AND in time"
 
@@ -35,96 +35,11 @@ jobs:
           if text.count(end_marker) != 1:
               raise SystemExit(f'expected exactly one next-section header, found {text.count(end_marker)}')
 
+          replacement = base64.b64decode('IyMgQm90IHZlcmlmaWNhdGlvbiBvbiB0aGUgbGVhZCBwYXRoIOKAlCBDT0RFIEFWQUlMQUJMRTsgUFJPRFVDVElPTiBBQ1RJVkFUSU9OIE5PVCBFU1RBQkxJU0hFRAoKUHJvZHVjdGlvbiByZWNlaXZlZCBmYWtlIHNlbGxlciBzdWJtaXNzaW9ucyB0aGF0IGV2ZXJ5IHByZS1leGlzdGluZyByZXF1ZXN0LXNoYXBlCmd1YXJkIGNvdWxkIGxlZ2l0aW1hdGVseSBwYXNzOiBzYW1lLW9yaWdpbiBQT1NULCB0aGUgaW5zdGFuY2UtbG9jYWwgcmF0ZSBsaW1pdCwKdGhlIGBfZ290Y2hhYCBob25leXBvdCwgYm91bmRlZCBib2R5L3NjaGVtYSB2YWxpZGF0aW9uLCBzeW50YWN0aWNhbGx5IHZhbGlkCmNvbnRhY3QgZGF0YSwgYW5kIGJvdGggY29tbXVuaWNhdGlvbnMtY29uc2VudCBib3hlcyBsZWZ0IHVudGlja2VkLiBUaGUgY29uc2VudAptb2RlbCB3YXMgbm90IGF0IGZhdWx0IOKAlCBpdCBjb3JyZWN0bHkgZ3JhbnRlZCBuZWl0aGVyIFNNUyBub3IgQUktdm9pY2UgcGVybWlzc2lvbi4KVGhlIG1pc3NpbmcgY29udHJvbCB3YXMgYSByZWxpYWJsZSBodW1hbi9ib3QgdmVyaWZpY2F0aW9uIGJvdW5kYXJ5IGJlZm9yZSBhbnkKbGVhZCBzaWRlIGVmZmVjdC4KCkNsb3VkZmxhcmUgVHVybnN0aWxlIGlzIG5vdyBpbXBsZW1lbnRlZCBvbiB0aGUgbGVhZCBwYXRoLiBJbiBgYXBpL2xlYWQuanNgIGl0CnJ1bnMgYWZ0ZXIgdGhlIGNoZWFwIGxvY2FsIHJlZnVzYWxzIOKAlCBtZXRob2QsIG9yaWdpbiwgcmF0ZSBsaW1pdCwgYm91bmRlZCBib2R5CnJlYWQsIEpTT04gcGFyc2UsIHNjaGVtYSB2YWxpZGF0aW9uIGFuZCBob25leXBvdCDigJQgYW5kIGJlZm9yZSB0aGUgc3VibWlzc2lvbiBJRCwKY29uc2VudCBldmlkZW5jZSwgZHVyYWJsZSBsZWRnZXIgYXBwZW5kLCBIdWJTcG90IHdyaXRlIGFuZCBhY2tub3dsZWRnZW1lbnQgZW1haWwuCkEgVHVybnN0aWxlIHJlZnVzYWwgdGhlcmVmb3JlIHJldHVybnMgYmVmb3JlIGEgbGVhZCBldmVudCBleGlzdHMgZG93bnN0cmVhbS4KCmBhcGkvX2xpYi90dXJuc3RpbGUubWpzYCByZWRlZW1zIHRoZSB0b2tlbiBhZ2FpbnN0IENsb3VkZmxhcmUgU2l0ZXZlcmlmeSBhbmQsCndoZW4gcHJvdGVjdGlvbiBpcyBlbmFibGVkLCByZXF1aXJlcyBgc3VjY2VzcyA9PT0gdHJ1ZWAsIGEgQ2xvdWRmbGFyZS1yZXBvcnRlZApob3N0bmFtZSBpbiB0aGUgc2l0ZSdzIGV4aXN0aW5nIGFsbG93ZWQtaG9zdCBzZXQsIGFuZCBhbiBgYWN0aW9uYCBlcXVhbCB0byB0aGUKc3VibWl0dGVkIGBmb3JtX3R5cGVgLiBUaGUgcmF3IHRva2VuIGlzIG5ldmVyIGF0dGFjaGVkIHRvIG5vcm1hbGl6ZWQgbGVhZCBkYXRhLApuZXZlciBwZXJzaXN0ZWQsIG5ldmVyIHNlbnQgdG8gSHViU3BvdC90aGUgbGVkZ2VyL21haWwsIGFuZCBpcyBzdHJ1Y3R1cmFsbHkKcmVkYWN0ZWQgZnJvbSBsb2dzLiBBIHZlcmlmaWVkIGh1bWFuIG1heSBzdGlsbCBzdWJtaXQgd2l0aCBTTVMgY29uc2VudCBmYWxzZSBhbmQKQUktdm9pY2UgY29uc2VudCBmYWxzZTsgVHVybnN0aWxlIHZlcmlmaWNhdGlvbiBpcyBub3QgY29tbXVuaWNhdGlvbnMgY29uc2VudC4KClRoZSBzaGFyZWQgdmFsdWF0aW9uIGZvcm0gKGBob21lX3ZhbHVlYCwgaW5jbHVkaW5nIGAvYCwgYC9ob21lLXZhbHVlYCBhbmQKYC80MzU1MS1zZWxsZXItcmV2aWV3YCkgYW5kIHRoZSBjb250YWN0IGZvcm0gKGBjb250YWN0YCwgYC9jb250YWN0YCkgYXJlIGNvdmVyZWQuCmBidXllcl9pbnF1aXJ5YCBpcyBhbiBhY2NlcHRlZCBgZm9ybV90eXBlYCBidXQgbm8gcHVibGljIHBhZ2UgY3VycmVudGx5IHJlbmRlcnMKdGhhdCBmb3JtOyB0aGUgZ2F0ZSBrZXlzIG9mZiB0aGUgZm9ybSdzIGBkYXRhLWZvcm0tdHlwZWAsIHNvIGEgZnV0dXJlIGZvcm0gdXNpbmcKdGhlIHNoYXJlZCBsZWFkIHBhdGggaXMgY292ZXJlZCBieSB0aGUgc2FtZSBpbnRlZ3JhdGlvbi4gVGhlIHN0YW5kYXJkIGJ1aWxkIGFsc28KcmVtb3ZlcyB0aGUgVHVybnN0aWxlIGxvYWRlci9wcmVjb25uZWN0IGZyb20gZ2VuZXJhdGVkIHBhZ2VzIHdpdGggbm8gcHJvdGVjdGVkCmxlYWQtZm9ybSBtb3VudCBwb2ludC4KCmBob21lX3ZhbHVlYCBhZGRpdGlvbmFsbHkgcmVqZWN0cyBjbGVhciBQLk8uLUJveCB2YWx1ZXMgaW4gdGhlIHBoeXNpY2FsLXByb3BlcnR5CmFkZHJlc3MgZmllbGQgKGBQTyBCb3hgLCBgUC5PLiBCb3hgLCBgUCBPIEJveGAsIGBQb3N0IE9mZmljZSBCb3hgKS4gVGhlIHJ1bGUgaXMKaW50ZW50aW9uYWxseSBuYXJyb3c6IGl0IGRvZXMgbm90IHVzZSBwaG9uZSBhcmVhIGNvZGUsIElQIGdlb2xvY2F0aW9uLCBlbWFpbApnZW9ncmFwaHksIHVudXN1YWwgbmFtZXMgb3Igc3ViamVjdGl2ZSBnaWJiZXJpc2ggc2NvcmluZy4KCiMjIyBDb25maWd1cmF0aW9uIOKAlCBleHBsaWNpdCB0aHJlZS1zdGF0ZSBjb250cmFjdAoKfCBWYXJpYWJsZSB8IFNlY3JldD8gfCBNZWFuaW5nIHwKfC0tLXwtLS18LS0tfAp8IGBUVVJOU1RJTEVfRU5BQkxFRGAgfCBObyB8IGF1dGhvcml0YXRpdmUgZmVhdHVyZSBzd2l0Y2g7IG9ubHkgZXhhY3QgYHRydWVgIGVuYWJsZXMgfAp8IGBUVVJOU1RJTEVfU0lURV9LRVlgIHwgTm8gfCBwdWJsaWMgd2lkZ2V0IGtleSB1c2VkIGJ5IHByb3RlY3RlZCBmb3JtIHBhZ2VzIHwKfCBgVFVSTlNUSUxFX1NFQ1JFVF9LRVlgIHwgKipZZXMqKiB8IHNlcnZlci1zaWRlIFNpdGV2ZXJpZnkgcmVkZW1wdGlvbiBrZXkgfAoKVGhlIHN0YXRlcyBhcmUgZXhwbGljaXQgYW5kIGtleXMgYWxvbmUgbmV2ZXIgYWN0aXZhdGUgcHJvdGVjdGlvbjoKCi0gKipEaXNhYmxlZCoqIOKAlCBgVFVSTlNUSUxFX0VOQUJMRURgIGlzIGFic2VudCwgZW1wdHksIG9yIGV4YWN0IGBmYWxzZWAuCiAgYC9hcGkvbGVhZGAgbWFrZXMgbm8gU2l0ZXZlcmlmeSByZXF1ZXN0LCBhbmQgdGhlIHN0YW5kYXJkIGJ1aWxkIGVtaXRzIG5vCiAgVHVybnN0aWxlIHdpZGdldC9sb2FkZXIgZXZlbiBpZiBrZXlzIHJlbWFpbiBzdG9yZWQuCi0gKipFbmFibGVkKiog4oCUIGBUVVJOU1RJTEVfRU5BQkxFRD10cnVlYCBhbmQgYm90aCBrZXlzIGFyZSBwcmVzZW50LiBFdmVyeQogIHByb3RlY3RlZCBsZWFkIHN1Ym1pc3Npb24gbXVzdCBwYXNzIHNlcnZlci1zaWRlIHZlcmlmaWNhdGlvbiBiZWZvcmUgYW55CiAgZG93bnN0cmVhbSBsZWFkIHNpZGUgZWZmZWN0LgotICoqTWlzY29uZmlndXJlZCoqIOKAlCBgVFVSTlNUSUxFX0VOQUJMRUQ9dHJ1ZWAgd2l0aCBhIG1pc3Npbmcga2V5LCBvciBhbnkgaW52YWxpZAogIG5vbmVtcHR5IGZsYWcgdmFsdWUuIFJ1bnRpbWUgZmFpbHMgY2xvc2VkLiBUaGUgc3RhbmRhcmQgYnVpbGQgYWxzbyByZWZ1c2VzIGFuCiAgZW5hYmxlZCBkZXBsb3ltZW50IHdpdGggbWlzc2luZyByZXF1aXJlZCBjb25maWd1cmF0aW9uLCBwcmV2ZW50aW5nIGEgZm9ybSBmcm9tCiAgc2hpcHBpbmcgd2l0aCBubyB3YXkgdG8gc2F0aXNmeSB0aGUgZ2F0ZS4KCmB0b29scy9idWlsZC1lbnRyeS5tanNgIGlzIHRoZSBzdGFuZGFyZCBidWlsZCBlbnRyeSB1c2VkIGJ5IGBucG0gcnVuIGJ1aWxkYCwKYG5wbSBydW4gZGV2YCBhbmQgYG5wbSB0ZXN0YCwgYW5kIHRoZXJlZm9yZSBieSBWZXJjZWwncyBleGlzdGluZyBidWlsZCBjb21tYW5kLgpDbG91ZGZsYXJlIHRpbWVvdXQvbmV0d29yay9tYWxmb3JtZWQtcmVzcG9uc2UgY29uZGl0aW9ucyBmYWlsIGNsb3NlZCB3aGlsZSB0aGUKZ2F0ZSBpcyBlbmFibGVkLiBUb2tlbiBmYXVsdHMgYW5kIHNlcnZpY2UvY29uZmlndXJhdGlvbiBmYXVsdHMgdXNlIHNlcGFyYXRlLApib3VuZGVkLCBQSUktZnJlZSByZWFzb24gdm9jYWJ1bGFyeTsgcHVibGljIGVycm9yIGNvcHkgcmVtYWlucyBnZW5lcmljLgoKIyMjIFByb2R1Y3Rpb24gc3RhdHVzIOKAlCBldmlkZW5jZSBib3VuZGFyeQoKKipUaGUgcmVwb3NpdG9yeSBwcm92ZXMgdGhlIGNvZGUgcGF0aCwgbm90IFZlcmNlbCBvciBDbG91ZGZsYXJlIGFjY291bnQgc3RhdGUuKioKVGhpcyB3b3JrIGNyZWF0ZXMgbm8gQ2xvdWRmbGFyZSB3aWRnZXQsIHNldHMgbm8gVmVyY2VsIHZhcmlhYmxlLCBzdWJtaXRzIG5vClByb2R1Y3Rpb24gZm9ybSwgYW5kIGNoYW5nZXMgbm8gSHViU3BvdC9Ud2lsaW8vTmVvbi9SZXRlbGwgc2V0dGluZy4gUHJvZHVjdGlvbgpUdXJuc3RpbGUgYWN0aXZhdGlvbiBhbmQgbGl2ZSBiZWhhdmlvciB0aGVyZWZvcmUgcmVtYWluICoqbm90IGVzdGFibGlzaGVkKiogYnkKcmVwb3NpdG9yeSBldmlkZW5jZS4KCkRvIG5vdCBkZXNjcmliZSBUdXJuc3RpbGUgYXMgZW5hYmxlZCBvciBsaXZlIGluIFByb2R1Y3Rpb24gdW50aWwgYW4gb3BlcmF0b3IgaGFzCmNvbXBsZXRlZCB0aGUgZXh0ZXJuYWwgYWN0aXZhdGlvbiBhbmQgb2JzZXJ2ZWQgdGhlIGxpdmUgY2hlY2tzLiBUaGUgcmVxdWlyZWQKc2VxdWVuY2UgaXMgcmVjb3JkZWQgaW4KYGRvY3MvdXBkYXRlcy8yMDI2LTA5LTE4LXR1cm5zdGlsZS1leHBsaWNpdC1hY3RpdmF0aW9uLm1kYDogY3JlYXRlIGEgTWFuYWdlZAp3aWRnZXQgZm9yIGBjcnlzdGFsc2VsbHN0b2xlZG8uY29tYCBhbmQgYHd3dy5jcnlzdGFsc2VsbHN0b2xlZG8uY29tYDsgc3RhZ2UgdGhlCnNpdGUvc2VjcmV0IGtleXMgd2hpbGUgYFRVUk5TVElMRV9FTkFCTEVEPWZhbHNlYDsgcmVkZXBsb3kgYW5kIGNvbmZpcm0ga2V5cyBhbG9uZQpkbyBub3QgYWN0aXZhdGUgdGhlIGdhdGU7IHNldCBgVFVSTlNUSUxFX0VOQUJMRUQ9dHJ1ZWA7IHJlZGVwbG95OyB2ZXJpZnkgb25lCmNvbnRyb2xsZWQgbGVnaXRpbWF0ZSBzdWJtaXNzaW9uIHJlYWNoZXMgSHViU3BvdDsgdmVyaWZ5IGEgZmFpbGVkL2Fic2VudApjaGFsbGVuZ2UgY3JlYXRlcyBubyBIdWJTcG90IGFjdGl2aXR5OyBhbmQgY29uZmlybSBTTVMvQUktdm9pY2UgY29uc2VudCByZW1haW5zCk5PVCBHUkFOVEVEIHVubGVzcyB0aGUgcmVzcGVjdGl2ZSBib3ggd2FzIGFjdHVhbGx5IHNlbGVjdGVkLgoK').decode('utf-8')
+
           start = text.index(start_marker)
           end = text.index(end_marker, start)
-
-          replacement = '''## Bot verification on the lead path — CODE AVAILABLE; PRODUCTION ACTIVATION NOT ESTABLISHED
-
-Production received fake seller submissions that every pre-existing request-shape
-guard could legitimately pass: same-origin POST, the instance-local rate limit,
-the `_gotcha` honeypot, bounded body/schema validation, syntactically valid
-contact data, and both communications-consent boxes left unticked. The consent
-model was not at fault — it correctly granted neither SMS nor AI-voice permission.
-The missing control was a reliable human/bot verification boundary before any
-lead side effect.
-
-Cloudflare Turnstile is now implemented on the lead path. In `api/lead.js` it
-runs after the cheap local refusals — method, origin, rate limit, bounded body
-read, JSON parse, schema validation and honeypot — and before the submission ID,
-consent evidence, durable ledger append, HubSpot write and acknowledgement email.
-A Turnstile refusal therefore returns before a lead event exists downstream.
-
-`api/_lib/turnstile.mjs` redeems the token against Cloudflare Siteverify and,
-when protection is enabled, requires `success === true`, a Cloudflare-reported
-hostname in the site's existing allowed-host set, and an `action` equal to the
-submitted `form_type`. The raw token is never attached to normalized lead data,
-never persisted, never sent to HubSpot/the ledger/mail, and is structurally
-redacted from logs. A verified human may still submit with SMS consent false and
-AI-voice consent false; Turnstile verification is not communications consent.
-
-The shared valuation form (`home_value`, including `/`, `/home-value` and
-`/43551-seller-review`) and the contact form (`contact`, `/contact`) are covered.
-`buyer_inquiry` is an accepted `form_type` but no public page currently renders
-that form; the gate keys off the form's `data-form-type`, so a future form using
-the shared lead path is covered by the same integration. The standard build also
-removes the Turnstile loader/preconnect from generated pages with no protected
-lead-form mount point.
-
-`home_value` additionally rejects clear P.O.-Box values in the physical-property
-address field (`PO Box`, `P.O. Box`, `P O Box`, `Post Office Box`). The rule is
-intentionally narrow: it does not use phone area code, IP geolocation, email
-geography, unusual names or subjective gibberish scoring.
-
-### Configuration — explicit three-state contract
-
-| Variable | Secret? | Meaning |
-|---|---|---|
-| `TURNSTILE_ENABLED` | No | authoritative feature switch; only exact `true` enables |
-| `TURNSTILE_SITE_KEY` | No | public widget key used by protected form pages |
-| `TURNSTILE_SECRET_KEY` | **Yes** | server-side Siteverify redemption key |
-
-The states are explicit and keys alone never activate protection:
-
-- **Disabled** — `TURNSTILE_ENABLED` is absent, empty, or exact `false`.
-  `/api/lead` makes no Siteverify request, and the standard build emits no
-  Turnstile widget/loader even if keys remain stored.
-- **Enabled** — `TURNSTILE_ENABLED=true` and both keys are present. Every
-  protected lead submission must pass server-side verification before any
-  downstream lead side effect.
-- **Misconfigured** — `TURNSTILE_ENABLED=true` with a missing key, or any invalid
-  nonempty flag value. Runtime fails closed. The standard build also refuses an
-  enabled deployment with missing required configuration, preventing a form from
-  shipping with no way to satisfy the gate.
-
-`tools/build-entry.mjs` is the standard build entry used by `npm run build`,
-`npm run dev` and `npm test`, and therefore by Vercel's existing build command.
-Cloudflare timeout/network/malformed-response conditions fail closed while the
-gate is enabled. Token faults and service/configuration faults use separate,
-bounded, PII-free reason vocabulary; public error copy remains generic.
-
-### Production status — evidence boundary
-
-**The repository proves the code path, not Vercel or Cloudflare account state.**
-This work creates no Cloudflare widget, sets no Vercel variable, submits no
-Production form, and changes no HubSpot/Twilio/Neon/Retell setting. Production
-Turnstile activation and live behavior therefore remain **not established** by
-repository evidence.
-
-Do not describe Turnstile as enabled or live in Production until an operator has
-completed the external activation and observed the live checks. The required
-sequence is recorded in
-`docs/updates/2026-09-18-turnstile-explicit-activation.md`: create a Managed
-widget for `crystalsellstoledo.com` and `www.crystalsellstoledo.com`; stage the
-site/secret keys while `TURNSTILE_ENABLED=false`; redeploy and confirm keys alone
-do not activate the gate; set `TURNSTILE_ENABLED=true`; redeploy; verify one
-controlled legitimate submission reaches HubSpot; verify a failed/absent
-challenge creates no HubSpot activity; and confirm SMS/AI-voice consent remains
-NOT GRANTED unless the respective box was actually selected.
-
-'''
-
-          updated = text[:start] + replacement + text[end:]
-          path.write_text(updated, encoding='utf-8')
+          path.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
           PY
 
       - name: Remove one-shot workflow and commit fix
