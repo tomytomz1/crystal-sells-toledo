@@ -43,6 +43,13 @@ const EMAIL = /^[^\s@.][^\s@]*@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-
    upper bound is the existing LIMITS.phone cap of 30, applied before this. */
 const MIN_PHONE_DIGITS = 10;
 
+/* /home-value asks for the physical property, not a mailing address. This is
+   intentionally a narrow deterministic rule: it catches common spellings of
+   P.O. Box but does not try to decide whether an unusual street name "looks
+   real". It is therefore appropriate as a hard server-side rejection without
+   creating the false-positive risk of a subjective spam classifier. */
+const PO_BOX = /(?:^|[\s,;])(?:P\s*\.?\s*O\s*\.?\s*|POST\s+OFFICE\s+)BOX\b/i;
+
 /* Control characters, stripped from every field before storage. */
 const CTRL = new RegExp("[\\u0000-\\u001F\\u007F]", "g");
 
@@ -155,6 +162,11 @@ export function validateLead(raw) {
   if (form_type === "home_value") {
     if (!property_address)
       throw new FieldError("MISSING_ADDRESS", "Property address is required");
+    if (PO_BOX.test(property_address))
+      throw new FieldError(
+        "INVALID_PROPERTY_ADDRESS",
+        "Please enter the property's physical street address rather than a P.O. Box."
+      );
     if (!timeline)
       throw new FieldError("MISSING_TIMELINE", "Please choose when you might sell.");
     if (!condition)
