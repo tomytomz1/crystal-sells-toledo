@@ -1107,6 +1107,101 @@ is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
 caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
 decides nothing in production.
 
+## Bot verification on the lead path — MERGED, NOT CONFIGURED, NOT ENFORCING
+
+Production received fake seller submissions that **every existing guard
+correctly passed**: the origin was the site's own page, the rate limit was
+nowhere near, the `_gotcha` honeypot was empty, every required field was
+present and well formed, and both consent boxes were left unticked. The consent
+model was not at fault and did its job — no SMS or AI-voice permission was
+created. A CRM contact, a HubSpot timeline activity, a notification to Crystal,
+an acknowledgement email to a stranger's address and a consent-evidence row
+happened anyway.
+
+Those guards all ask *"is this request well formed?"*, which a scripted
+submission answers correctly. None of them can ask *"was there a person at the
+other end?"*. **Cloudflare Turnstile is now the gate that asks it.**
+
+### Where it sits
+
+`api/lead.js`, **after** the method check, the origin check, the rate limiter,
+the bounded body read, the JSON parse, the honeypot and the full field schema —
+so every cheap local refusal still costs no network call — and **before** the
+submission id, the consent evidence, the ledger append, the HubSpot write and
+the acknowledgement email. A refusal returns before the submission id exists,
+which is the machine-checkable form of "no downstream effect happened".
+
+### What is verified
+
+`api/_lib/turnstile.mjs` redeems the token against Cloudflare's siteverify API
+and requires three things, not one: `success === true` read as the boolean and
+nothing else; the `hostname` Cloudflare reports is in `allowedHosts()` — the
+same set the origin check uses, so the two cannot drift; and the `action` the
+token was minted for equals the `form_type` being submitted, so a token solved
+on `/contact` cannot be replayed into a `home_value` submission.
+
+Failures are split by **whose fault they name**. A token fault
+(`invalid-input-response`, `timeout-or-duplicate`, `missing-input-response`) is
+403 `VERIFICATION_FAILED`. Our fault, an unrecognised code, a non-JSON body, a
+network failure or a timeout is 503 `VERIFICATION_UNAVAILABLE` — a homeowner is
+never told they failed a bot check because this deployment's key is wrong.
+
+**It fails closed, including when Cloudflare is the one failing.** While
+siteverify is unreachable the endpoint stops accepting leads. That is a
+deliberate trade of availability for integrity on the lead path, and it is
+flagged for the operator to confirm.
+
+### The token is never persisted
+
+It is read from the raw body and never attached to `payload`, so the enquiry
+block, the consent evidence, the ledger row, the HubSpot write and the
+acknowledgement mail — all built from `payload` — cannot carry it.
+`verifyTurnstile()` never returns it. The widget is rendered with
+`response-field: false`, so it never enters the DOM, `FormData` or the mailto
+fallback. `api/_lib/log.mjs` redacts both spellings as a structural backstop.
+
+### Coverage
+
+**Both** public lead forms, not only `/home-value`: the shared valuation
+partial (`home_value`, on `/`, `/home-value`, `/43551-seller-review`) and the
+contact form (`contact`, on `/contact`). `buyer_inquiry` is an accepted
+`form_type` but **no page renders such a form today**; the gate keys off
+`data-form-type`, so a future buyer form is covered the moment it exists.
+`tools/check.mjs` fails the build if a page's Turnstile mount points do not
+equal its count of forms that post to `/api/lead`.
+
+### Configuration — and why the build can refuse to ship
+
+| Variable | Secret? | Read at | Decides |
+|---|---|---|---|
+| `TURNSTILE_SITE_KEY` | **No** — public, printed into every page like the Maps key | build | whether a widget renders |
+| `TURNSTILE_SECRET_KEY` | **Yes** — server-side only | runtime | whether anything is **enforced** |
+
+The secret alone is the enforcement switch; a whitespace-only value counts as
+absent. **Setting the secret without the site key fails the build on purpose**
+— that deployment would enforce verification while rendering no widget, so
+every lead would be refused silently with all tests passing. A site key without
+a secret is safe, is a legitimate staged rollout, and prints `NOT enforcing`.
+
+### Status — CLAUDE.md rule 19
+
+**This change sets no environment variable anywhere, and no Cloudflare widget
+has been created.** Whether Vercel currently holds either variable is not
+something this repository can observe, so it is not asserted here — the two
+places that answer it are the **build log line** (`Cloudflare Turnstile
+enabled …` / `NOT enforcing` / `no TURNSTILE_SITE_KEY …`) and
+`lead.turnstile.not_configured`, which `api/lead.js` logs on every submission
+precisely so an unprotected deployment is visible in the ordinary log stream.
+
+With the secret unset `api/lead.js` behaves exactly as it did before this
+feature existed. That is *absence of enforcement*, not a lenient mode, and
+**this file must not say the gate is live until a real submission has been
+verified against Cloudflare on the live host** — which has not happened.
+
+**Nothing has been verified against Cloudflare.** No live siteverify call has
+been made from this repository. Detail, the operator checklist and the full
+unproven list: `docs/updates/2026-09-18-turnstile-lead-verification.md`.
+
 ## The lead path's body read — bounded in size AND in time
 
 `api/lead.js` reads its body through `readBody()` in `api/_lib/security.mjs`.
@@ -1995,6 +2090,7 @@ Open one of these only when the task actually needs it.
 
 | Topic | Document |
 |---|---|
+| **Bot verification / Cloudflare Turnstile** — why the existing guards could not catch it, the three checks, the fault split, the fail-closed trade-off, the build refusal, the operator checklist, what is unproven | `docs/updates/2026-09-18-turnstile-lead-verification.md` |
 | **The lead body read** — the two defects, the 5 s arithmetic, the 408, the mutation proofs, the five follow-ups | `docs/updates/2026-09-11-lead-body-read-bounds.md` |
 | **The gate 7 connection lifecycle** — the shared predicate, both response boundaries, the static guard rewrite, the raw-socket matrix | `docs/updates/2026-09-11-gate-7-connection-lifecycle.md` |
 | **Unsuppression / re-opt-in** — the two-key rule, lane folding, the future `db/003` contract, the operator security model, Twilio reconciliation | `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` |

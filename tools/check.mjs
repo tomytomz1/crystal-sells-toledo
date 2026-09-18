@@ -106,12 +106,28 @@ for (const file of pages) {
       fail(file, `licensed name in a display heading — equal prominence risk: "${m[1].trim().slice(0, 60)}"`);
 
   /* --- every lead form carries a stable identifier ----------------- */
-  for (const tag of html.match(/<form\b[^>]*data-form\b[^>]*>/g) || []) {
+  const leadForms = html.match(/<form\b[^>]*data-form\b[^>]*>/g) || [];
+  for (const tag of leadForms) {
     const type = tag.match(/data-form-type="([a-z_]+)"/);
     if (!type) fail(file, "a data-form form has no data-form-type");
     else if (!["home_value", "contact", "buyer_inquiry"].includes(type[1]))
       fail(file, `unknown data-form-type: ${type[1]}`);
     if (!/novalidate/.test(tag)) warn(file, "form is missing novalidate");
+  }
+
+  /* --- every lead form can mount the bot-verification widget -------
+     EVERY form that can create a lead, not just the valuation funnel.
+     A form that posts to /api/lead with no mount point gets no token,
+     and once TURNSTILE_SECRET_KEY is set the endpoint refuses it - so a
+     missing container is not a weaker form, it is a form whose every
+     submission is rejected. Counted rather than merely detected,
+     because a page carrying two forms and one container is the same
+     defect wearing a passing test. */
+  {
+    const mounts = (html.match(/\bdata-turnstile\b/g) || []).length;
+    if (mounts !== leadForms.length)
+      fail(file, `${leadForms.length} lead form(s) but ${mounts} Turnstile mount point(s) — ` +
+        "every form that reaches /api/lead must be able to mount the widget");
   }
 
   /* --- lang + viewport -------------------------------------------- */
@@ -157,6 +173,35 @@ for (const needle of ["csv_attr_v1", "lead_submit_success", "lead_submit_error",
                       "cta_home_value_click", "cta_sell_click", "phone_click", "email_click"])
   if (!js.includes(needle)) fail("site", `main.js is missing analytics/attribution hook: ${needle}`);
 
+/* --- bot verification, browser half ------------------------------------
+   The token must be obtained and attached by the shipped bundle, and it
+   must be attached to the REQUEST BODY only. These are cheap structural
+   guards on the three properties that are easiest to lose in a later
+   refactor and hardest to notice: the field name the server reads, the
+   single-use reset, and response-field:false (whose absence would put a
+   bearer token into FormData, and from there into the mailto fallback). */
+if (!js.includes("turnstile_token"))
+  fail("site", "main.js does not attach turnstile_token to the lead request");
+if (!/"response-field":\s*false/.test(js))
+  fail("site", "main.js does not disable Turnstile's hidden response field — " +
+    "the token would enter FormData and the mailto fallback");
+if (!/botcheck\.reset\(/.test(js))
+  fail("site", "main.js never resets the Turnstile widget — a single-use token " +
+    "would be replayed on every retry after a failed submission");
+
+/* The widget script must be fetched from Cloudflare's exact documented
+   URL. Cloudflare states that proxying or caching api.js breaks the
+   widget when they next update it, so a well-meaning self-host or a CDN
+   rewrite is a silent future outage of the whole gate. Only pages that
+   actually carry the loader are checked: a build with no sitekey emits
+   none, which is the CI case. */
+for (const file of pages) {
+  const text = readFileSync(join(ROOT, file), "utf8");
+  if (!text.includes("challenges.cloudflare.com")) continue;
+  if (!text.includes('src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=csvTurnstileReady"'))
+    fail(file, "the Turnstile loader is not Cloudflare's exact api.js URL");
+}
+
 /* Contact points must not drift. */
 if (!js.includes("+14192454655")) fail("site", "main.js lost the +14192454655 phone number");
 if (!js.includes("crystal@crystalsellstoledo.com"))
@@ -191,6 +236,13 @@ const SECRET_NAMES = [
      that records a permanent, un-undoable opt-out against any number they
      can name — so it must never appear in anything a browser receives. */
   "OPERATOR_ACTION_SECRET",
+  /* The Turnstile secret key. It is the ONLY thing that makes the
+     verification gate mean anything: whoever holds it can redeem tokens
+     against Cloudflare on this site's behalf, and its exposure would
+     turn the gate back into a decoration. The SITE key is public by
+     design and is deliberately NOT listed here - it is printed into
+     every page, exactly as the Google Maps browser key is. */
+  "TURNSTILE_SECRET_KEY",
 ];
 for (const file of [...pages.map((p) => p), "assets/js/main.js", "assets/css/styles.css"]) {
   const text = readFileSync(join(ROOT, file), "utf8");

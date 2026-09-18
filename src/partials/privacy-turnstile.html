@@ -1,0 +1,48 @@
+<!-- =====================================================================
+     CLOUDFLARE TURNSTILE — the processor disclosure.
+     =====================================================================
+     Rendered ONLY when TURNSTILE_SITE_KEY is set at build time, which is
+     the same condition under which any page actually loads Cloudflare's
+     script. The privacy page's whole discipline is that it describes the
+     runtime that ships: naming Cloudflare as a processor on a build that
+     never contacts Cloudflare would be exactly the kind of claim this
+     page has already had to be corrected for once.
+
+     NB: never write a build variable's own template token inside this
+     comment. tools/build.mjs substitutes variables anywhere in the file,
+     comments included, so naming one here would paste its value into
+     this comment on every build.
+
+     Written to be true of what the code does and no more. It does not
+     promise that no cookie or storage is used, because that is
+     Cloudflare's behaviour and not something this repository has
+     measured; it says what the site sends, which it does know. The
+     server-side redemption deliberately does NOT send the visitor's IP
+     address (api/_lib/turnstile.mjs), and that is stated positively
+     because a reader would otherwise reasonably assume it does.
+
+     THE ENFORCEMENT SENTENCE IS GATED SEPARATELY FROM THIS SECTION, AND
+     THAT IS THE POINT. Cloudflare's script loads whenever the SITE key
+     is set, so everything below belongs to the site key. But a
+     submission is only actually refused when the SECRET key is also
+     set, and tools/build.mjs deliberately permits the in-between state
+     as a staged rollout. A page asserting that submissions are refused
+     while nothing was enforcing would be CLAUDE.md rule 19 — inactivity
+     described as enforcement — on the page a compliance reviewer is
+     most likely to open. So the wording below describes only what loads
+     and what is sent, and the sentence that claims a submission can be
+     REFUSED is injected from tools/build.mjs and is empty unless the
+     secret is configured for the same build.
+     ===================================================================== -->
+<h3>Cloudflare Turnstile &mdash; checking that a person filled the form</h3>
+<p>The forms on this site use <strong>Cloudflare Turnstile</strong>, which helps tell a person
+  filling in a form apart from an automated script. Cloudflare&rsquo;s script loads with the page
+  and receives normal connection information, such as your IP address and browser details, together
+  with signals about how the browser behaves. It does not receive anything you type into the
+  form.</p>
+<p>When you submit, the site sends the resulting verification token to Cloudflare to confirm it is
+  genuine. That check sends the token only &mdash; not your name, email address, phone number,
+  property address, message or IP address &mdash; and the token itself is never stored, never added
+  to Crystal&rsquo;s contact records and never included in any email. Most visitors are verified
+  without doing anything; occasionally Cloudflare asks you to confirm with a single
+  click.{{turnstileEnforcementNote}}</p>
