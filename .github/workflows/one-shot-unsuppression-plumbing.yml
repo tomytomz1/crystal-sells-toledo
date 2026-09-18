@@ -1,0 +1,202 @@
+name: one-shot unsuppression plumbing
+
+on:
+  push:
+    branches:
+      - feature/operator-unsuppression-workflow
+    paths:
+      - .github/workflows/one-shot-unsuppression-plumbing.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/operator-unsuppression-workflow
+          fetch-depth: 0
+
+      - name: Apply narrow plumbing changes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one anchor, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          # consent-ledger: keep one INSERT implementation while letting the
+          # operator endpoint select its dedicated db/003 credential.
+          replace_once(
+              "api/_lib/consent-ledger.mjs",
+              '''export async function appendSuppressionEvents(events, {\n  env = process.env, timeoutMs = LEDGER_TIMEOUT_MS,\n} = {}) {\n  if (!Array.isArray(events) || !events.length)\n    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "events");\n\n  const url = String(env[LEDGER_URL_VAR] || "").trim();\n  if (!url) throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, LEDGER_URL_VAR);''',
+              '''export async function appendSuppressionEvents(events, {\n  env = process.env, timeoutMs = LEDGER_TIMEOUT_MS, urlVar = LEDGER_URL_VAR,\n} = {}) {\n  if (!Array.isArray(events) || !events.length)\n    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "events");\n\n  /* The SQL and column contract stay here, in ONE module. A privileged\n     operator workflow may choose its own dedicated INSERT-capable role by\n     naming that role's environment variable; the website and webhook callers\n     omit this option and therefore remain on CONSENT_LEDGER_URL exactly as\n     before. The variable NAME is server-owned code, never request input. */\n  const credentialVar = String(urlVar || "").trim();\n  if (!credentialVar)\n    throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, "ledger_url_var");\n  const url = String(env[credentialVar] || "").trim();\n  if (!url) throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, credentialVar);''')
+
+          # permission: one pure fold for db/003 LANES -> effective channels.
+          marker = '''/* ---------------------------------------------------------------------\n   SUPPRESSION\n   ---------------------------------------------------------------------'''
+          helper = '''/* ---------------------------------------------------------------------\n   DURABLE SUPPRESSION FOLD FOR OPERATOR STATE\n   ---------------------------------------------------------------------\n   db/003 returns LANES. `all` dominates both communication channels, and\n   this pure helper is the one application-language fold used by the\n   unsuppression workflow before and after an append. It grants nothing and\n   performs no I/O. Unknown rows throw rather than becoming "not blocked".\n   --------------------------------------------------------------------- */\nexport function suppressionFromLedgerRows(rows) {\n  if (!Array.isArray(rows)) throw new Error("SUPPRESSION_ROWS_MALFORMED");\n  const lanes = { sms: false, ai_voice: false, all: false };\n  for (const row of rows) {\n    if (!row || typeof row !== "object" || Array.isArray(row))\n      throw new Error("SUPPRESSION_ROWS_MALFORMED");\n    const channel = String(row.channel == null ? "" : row.channel).trim();\n    if (!Object.prototype.hasOwnProperty.call(lanes, channel))\n      throw new Error("SUPPRESSION_ROWS_MALFORMED");\n    lanes[channel] = true;\n  }\n  return Object.freeze({\n    lanes: Object.freeze({ ...lanes }),\n    effective: Object.freeze({\n      sms: lanes.all || lanes.sms,\n      ai_voice: lanes.all || lanes.ai_voice,\n    }),\n  });\n}\n\n'''
+          replace_once("api/_lib/permission.mjs", marker, helper + marker)
+
+          # HubSpot projection: only clear channels that actually transitioned
+          # blocked -> unblocked in the durable fold. Never write GRANTED.
+          hs_marker = '''/**\n * The re-opt-in patch. Records that someone asked to come back and grants\n * NOTHING: no status, no consent timestamp, no version. A START from the\n * handset is stronger evidence than a ticked web box and is still not a\n * grant, because it carries no disclosure to have agreed to.\n */'''
+          hs_helper = '''/**\n * Project a DURABLE unsuppression into HubSpot current state.\n *\n * `before` and `after` are suppressionFromLedgerRows() results from the\n * durable ledger. The requested scope is intentionally absent: CRM state is\n * cleared only for a channel the fold says actually transitioned from\n * blocked to unblocked. A surviving `all` or channel-specific block therefore\n * prevents a false clearance.\n *\n * A channel that becomes unblocked is reset to NEVER_GRANTED and its five\n * consent artefacts are cleared. This is deliberately conservative: lifting\n * a block NEVER resurrects an old grant. reoptin fields are untouched.\n */\nexport function toHubSpotUnsuppressionProperties({ current, before, after } = {}) {\n  if (!current || typeof current !== "object" || !before || !after)\n    throw new ConsentStateError(MALFORMED_RESPONSE, "UNSUPPRESSION_PROJECT");\n\n  const props = {};\n  const S = SUPPRESSION_PROPERTIES;\n  const clearText = (property, value) => { if (str(value)) props[property] = ""; };\n\n  const globalCleared = before.lanes?.all === true && after.lanes?.all !== true;\n  if (globalCleared) {\n    const held = current.suppression?.global;\n    if (held) props[S.doNotContact] = "false";\n    clearText(S.doNotContactAt, held?.at);\n    clearText(S.doNotContactReason, held?.reason);\n  }\n\n  const clearChannel = (name, map, heldKey, flag, atProp, reasonProp) => {\n    if (before.effective?.[name] !== true || after.effective?.[name] === true) return;\n    const state = current[name] || {};\n    const held = current.suppression?.[heldKey];\n    if (held || state.status === SUPPRESSED) props[flag] = "false";\n    clearText(atProp, held?.at);\n    clearText(reasonProp, held?.reason);\n    if (state.status !== NEVER_GRANTED)\n      props[map.status] = assertConsentEnum(map.status, NEVER_GRANTED, PERMISSION_STATUS_VALUES);\n    clearText(map.at, state.consent_at);\n    clearText(map.phone, state.consent_phone);\n    clearText(map.source, state.consent_source);\n    clearText(map.page, state.consent_page);\n    clearText(map.version, state.consent_version);\n  };\n\n  clearChannel("sms", SMS_STATE_PROPERTIES, "sms",\n    S.smsSuppressed, S.smsSuppressedAt, S.smsSuppressionReason);\n  clearChannel("ai_voice", AI_VOICE_STATE_PROPERTIES, "voice",\n    S.doNotCall, S.doNotCallAt, S.doNotCallReason);\n\n  return props;\n}\n\n'''
+          replace_once("api/_lib/hubspot-consent-state.mjs", hs_marker, hs_helper + hs_marker)
+
+          # HubSpot HTTP wrapper: same PATCH boundary, semantically named for
+          # the opposite-risk current-state projection.
+          hs_http_marker = '''export async function writeSuppressionProperties(contactId, props, { timeoutMs } = {}) {\n  /* Nothing to write is not a request: an already-suppressed contact\n     produces an empty patch and costs no network time and no budget. */\n  if (!props || !Object.keys(props).length) return { written: false };\n  await updateContact(contactId, props, false, timeoutMs);\n  return { written: true };\n}\n'''
+          hs_http_new = hs_http_marker + '''\n/**\n * Write the already-computed unsuppression projection. The caller must build\n * `props` through toHubSpotUnsuppressionProperties(); this function owns only\n * the HTTP PATCH, just as writeSuppressionProperties() does for Gate 7.\n */\nexport async function writeUnsuppressionProperties(contactId, props, { timeoutMs } = {}) {\n  if (!props || !Object.keys(props).length) return { written: false };\n  await updateContact(contactId, props, false, timeoutMs);\n  return { written: true };\n}\n'''
+          replace_once("api/_lib/hubspot.mjs", hs_http_marker, hs_http_new)
+
+          # Vercel function budget.
+          p = Path("vercel.json")
+          cfg = json.loads(p.read_text())
+          cfg.setdefault("functions", {})["api/operator-unsuppress.js"] = {
+              "maxDuration": 30,
+              "memory": 256,
+          }
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+
+          # Off-platform mint convenience script.
+          p = Path("package.json")
+          pkg = json.loads(p.read_text())
+          pkg["scripts"]["mint:unsuppress"] = "node tools/mint-unsuppress-token.mjs"
+          p.write_text(json.dumps(pkg, indent=2, ensure_ascii=False) + "\n")
+
+          # Document new variables as INERT prerequisites, never real values.
+          env_marker = '''CONSENT_LEDGER_URL=\n\n# Twilio and Retell credentials are deliberately NOT documented here yet.'''
+          env_insert = '''CONSENT_LEDGER_URL=\n\n# ===========================================================================\n# OPERATOR UNSUPPRESSION - BUILT CAPABILITY, INERT UNTIL EXPLICITLY ACTIVATED\n# ===========================================================================\n# These TWO secrets belong only to /api/operator-unsuppress. Leave both blank\n# until the operator workflow has been merged, reviewed, and explicitly\n# activated. Nothing here sends a message or changes Twilio.\n#\n# Separate AES-GCM token key. Must be randomly generated with at least 32 bytes\n# of entropy. Never reuse OPERATOR_ACTION_SECRET.\nOPERATOR_UNSUPPRESS_SECRET=\n\n# db/003 operator-role connection string. This role has INSERT plus EXECUTE on\n# get_suppression_state(text) and get_active_blocks(text), and NO table SELECT,\n# UPDATE, DELETE, TRUNCATE or DDL. Never use the Neon owner credential here.\nCONSENT_LEDGER_OPERATOR_URL=\n\n# Twilio and Retell credentials are deliberately NOT documented here yet.'''
+          replace_once(".env.example", env_marker, env_insert)
+
+          # Browser secret containment: both new values are server-only.
+          secret_anchor = '''  "OPERATOR_ACTION_SECRET",\n  /* The Turnstile secret key.'''
+          secret_new = '''  "OPERATOR_ACTION_SECRET",\n  /* The unsuppression token key and its dedicated db/003 operator-role\n     connection string. The endpoint has opposite risk direction from the\n     suppression action, so neither credential may ever enter browser output. */\n  "OPERATOR_UNSUPPRESS_SECRET", "CONSENT_LEDGER_OPERATOR_URL",\n  /* The Turnstile secret key.'''
+          replace_once("tools/check.mjs", secret_anchor, secret_new)
+
+          # New static guards, inserted immediately before the report.
+          report_anchor = '''/* --- report ---------------------------------------------------------- */'''
+          guards = r'''/* =====================================================================
+   OPERATOR UNSUPPRESSION — opposite-risk boundary
+   ===================================================================== */
+{
+  const rel = "api/operator-unsuppress.js";
+  const path = join(API, "operator-unsuppress.js");
+  const tokenRel = "api/_lib/operator-unsuppress-token.mjs";
+  const tokenPath = join(API, "_lib/operator-unsuppress-token.mjs");
+  const statePath = join(API, "_lib/hubspot-consent-state.mjs");
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
+  if (!existsSync(path)) fail(rel, "missing - the approved unsuppression workflow is not implemented");
+  else {
+    const code = strip(readFileSync(path, "utf8"));
+
+    /* Separate endpoint, separate capability. The existing operator-action
+       guard remains untouched; this file is the ONLY operator surface that may
+       name UNSUPPRESSED. */
+    if (!/EVENT_TYPE\.UNSUPPRESSED/.test(code))
+      fail(rel, "does not build EVENT_TYPE.UNSUPPRESSED");
+    for (const forbidden of ["EVENT_TYPE.SUPPRESSED", "EVENT_TYPE.REVOKED",
+                             "EVENT_TYPE.CONSENT_SELECTED", "EVENT_TYPE.CONSENT_NOT_SELECTED"])
+      if (code.includes(forbidden))
+        fail(rel, `names ${forbidden} - the unsuppression endpoint may only emit UNSUPPRESSED`);
+
+    /* GET may read but never write. Extracted to its own body so a POST write
+       cannot satisfy or obscure the scanner-safety invariant. */
+    const getAt = code.indexOf("async function handleGet");
+    const postAt = code.indexOf("async function handlePost");
+    if (getAt === -1 || postAt === -1 || postAt <= getAt)
+      fail(rel, "GET/POST split is missing or reordered");
+    else {
+      const getBody = code.slice(getAt, postAt);
+      for (const writeName of ["appendOperatorUnsuppression", "writeUnsuppressionProperties"])
+        if (getBody.includes(writeName + "("))
+          fail(rel, `GET calls ${writeName} - a link scanner could change suppression state`);
+    }
+
+    /* The two reads and the append are an ordering contract, not decoration. */
+    const preAt = code.indexOf("beforeBlocks = await getActiveBlocks(");
+    const appendAt = code.indexOf("await appendOperatorUnsuppression(");
+    const postReadAt = code.indexOf("afterRows = await getSuppressionLanes(");
+    const projectAt = code.indexOf("await projectToHubSpot(");
+    if (preAt === -1 || appendAt === -1 || postReadAt === -1)
+      fail(rel, "does not contain the required pre-read -> append -> post-read sequence");
+    else if (!(preAt < appendAt && appendAt < postReadAt))
+      fail(rel, "durable-state ordering is wrong - must pre-read, append, then post-read");
+    if (!/rowsAffected\s*===\s*1/.test(code))
+      fail(rel, "does not require rowsAffected === 1 before treating a clearance as new");
+    if (projectAt !== -1 && postReadAt !== -1 && projectAt < postReadAt)
+      fail(rel, "projects HubSpot before reading the post-append durable state");
+
+    /* First implementation deliberately does NOT reconcile Twilio. */
+    for (const forbidden of ["messages.create", "optOut", "OptOut", "TWILIO_AUTH_TOKEN"])
+      if (code.includes(forbidden))
+        fail(rel, `contains ${forbidden} - Twilio reconciliation is a separate approved phase`);
+  }
+
+  if (!existsSync(tokenPath)) fail(tokenRel, "missing");
+  else {
+    const token = strip(readFileSync(tokenPath, "utf8"));
+    if (!token.includes('"OPERATOR_UNSUPPRESS_SECRET"'))
+      fail(tokenRel, "does not use the separate OPERATOR_UNSUPPRESS_SECRET");
+    if (!/24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(token))
+      fail(tokenRel, "token TTL is not pinned to 24 hours");
+    if (!/operator-unsuppress-token/.test(token))
+      fail(tokenRel, "HKDF namespace is not distinct from the suppression-token family");
+  }
+
+  /* The CRM writer is allowed to write NEVER_GRANTED but never GRANTED, and
+     clearing a channel must include all five consent artefact fields. */
+  const state = strip(readFileSync(statePath, "utf8"));
+  const fnAt = state.indexOf("export function toHubSpotUnsuppressionProperties(");
+  const nextAt = state.indexOf("export function toHubSpotReoptinProperties(", fnAt);
+  if (fnAt === -1 || nextAt === -1) fail("api/_lib/hubspot-consent-state.mjs", "unsuppression projection writer is missing");
+  else {
+    const fn = state.slice(fnAt, nextAt);
+    if (/\bGRANTED\b/.test(fn))
+      fail("api/_lib/hubspot-consent-state.mjs", "unsuppression projection can name GRANTED - lifting a block must never restore consent");
+    for (const field of ["map.at", "map.phone", "map.source", "map.page", "map.version"])
+      if (!fn.includes(field))
+        fail("api/_lib/hubspot-consent-state.mjs", `unsuppression projection does not clear ${field} - dead grant artefacts would remain in current state`);
+    if (!fn.includes("NEVER_GRANTED"))
+      fail("api/_lib/hubspot-consent-state.mjs", "unsuppression projection does not reset permission to NEVER_GRANTED");
+    if (/REOPTIN_PROPERTIES/.test(fn))
+      fail("api/_lib/hubspot-consent-state.mjs", "unsuppression projection touches re-opt-in context, which must be retained");
+  }
+}
+
+'''
+          replace_once("tools/check.mjs", report_anchor, guards + report_anchor)
+          PY
+
+          git diff --check
+          node --check api/operator-unsuppress.js
+          node --check api/_lib/operator-unsuppress-token.mjs
+          node --check api/_lib/operator-ledger.mjs
+          node --check api/_lib/consent-ledger.mjs
+          node --check api/_lib/permission.mjs
+          node --check api/_lib/hubspot-consent-state.mjs
+          node --check api/_lib/hubspot.mjs
+          node --check tools/check.mjs
+          node --check tools/mint-unsuppress-token.mjs
+
+      - name: Commit plumbing and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/_lib/consent-ledger.mjs api/_lib/permission.mjs \
+            api/_lib/hubspot-consent-state.mjs api/_lib/hubspot.mjs \
+            vercel.json package.json .env.example tools/check.mjs
+          git rm .github/workflows/one-shot-unsuppression-plumbing.yml
+          git commit -m "feat: wire operator unsuppression plumbing"
+          git push origin HEAD:feature/operator-unsuppression-workflow
