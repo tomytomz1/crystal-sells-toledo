@@ -1107,100 +1107,88 @@ is tested. Gate 8 (`api/_lib/send-permission.mjs`, merged) is now its only
 caller inside `api/`, and **nothing calls Gate 8**, so the resolver still
 decides nothing in production.
 
-## Bot verification on the lead path — MERGED, NOT CONFIGURED, NOT ENFORCING
+## Bot verification on the lead path — CODE AVAILABLE; PRODUCTION ACTIVATION NOT ESTABLISHED
 
-Production received fake seller submissions that **every existing guard
-correctly passed**: the origin was the site's own page, the rate limit was
-nowhere near, the `_gotcha` honeypot was empty, every required field was
-present and well formed, and both consent boxes were left unticked. The consent
-model was not at fault and did its job — no SMS or AI-voice permission was
-created. A CRM contact, a HubSpot timeline activity, a notification to Crystal,
-an acknowledgement email to a stranger's address and a consent-evidence row
-happened anyway.
+Production received fake seller submissions that every pre-existing request-shape
+guard could legitimately pass: same-origin POST, the instance-local rate limit,
+the `_gotcha` honeypot, bounded body/schema validation, syntactically valid
+contact data, and both communications-consent boxes left unticked. The consent
+model was not at fault — it correctly granted neither SMS nor AI-voice permission.
+The missing control was a reliable human/bot verification boundary before any
+lead side effect.
 
-Those guards all ask *"is this request well formed?"*, which a scripted
-submission answers correctly. None of them can ask *"was there a person at the
-other end?"*. **Cloudflare Turnstile is now the gate that asks it.**
+Cloudflare Turnstile is now implemented on the lead path. In `api/lead.js` it
+runs after the cheap local refusals — method, origin, rate limit, bounded body
+read, JSON parse, schema validation and honeypot — and before the submission ID,
+consent evidence, durable ledger append, HubSpot write and acknowledgement email.
+A Turnstile refusal therefore returns before a lead event exists downstream.
 
-### Where it sits
+`api/_lib/turnstile.mjs` redeems the token against Cloudflare Siteverify and,
+when protection is enabled, requires `success === true`, a Cloudflare-reported
+hostname in the site's existing allowed-host set, and an `action` equal to the
+submitted `form_type`. The raw token is never attached to normalized lead data,
+never persisted, never sent to HubSpot/the ledger/mail, and is structurally
+redacted from logs. A verified human may still submit with SMS consent false and
+AI-voice consent false; Turnstile verification is not communications consent.
 
-`api/lead.js`, **after** the method check, the origin check, the rate limiter,
-the bounded body read, the JSON parse, the honeypot and the full field schema —
-so every cheap local refusal still costs no network call — and **before** the
-submission id, the consent evidence, the ledger append, the HubSpot write and
-the acknowledgement email. A refusal returns before the submission id exists,
-which is the machine-checkable form of "no downstream effect happened".
+The shared valuation form (`home_value`, including `/`, `/home-value` and
+`/43551-seller-review`) and the contact form (`contact`, `/contact`) are covered.
+`buyer_inquiry` is an accepted `form_type` but no public page currently renders
+that form; the gate keys off the form's `data-form-type`, so a future form using
+the shared lead path is covered by the same integration. The standard build also
+removes the Turnstile loader/preconnect from generated pages with no protected
+lead-form mount point.
 
-### What is verified
+`home_value` additionally rejects clear P.O.-Box values in the physical-property
+address field (`PO Box`, `P.O. Box`, `P O Box`, `Post Office Box`). The rule is
+intentionally narrow: it does not use phone area code, IP geolocation, email
+geography, unusual names or subjective gibberish scoring.
 
-`api/_lib/turnstile.mjs` redeems the token against Cloudflare's siteverify API
-and requires three things, not one: `success === true` read as the boolean and
-nothing else; the `hostname` Cloudflare reports is in `allowedHosts()` — the
-same set the origin check uses, so the two cannot drift; and the `action` the
-token was minted for equals the `form_type` being submitted, so a token solved
-on `/contact` cannot be replayed into a `home_value` submission.
+### Configuration — explicit three-state contract
 
-Failures are split by **whose fault they name**. A token fault
-(`invalid-input-response`, `timeout-or-duplicate`, `missing-input-response`) is
-403 `VERIFICATION_FAILED`. Our fault, an unrecognised code, a non-JSON body, a
-network failure or a timeout is 503 `VERIFICATION_UNAVAILABLE` — a homeowner is
-never told they failed a bot check because this deployment's key is wrong.
+| Variable | Secret? | Meaning |
+|---|---|---|
+| `TURNSTILE_ENABLED` | No | authoritative feature switch; only exact `true` enables |
+| `TURNSTILE_SITE_KEY` | No | public widget key used by protected form pages |
+| `TURNSTILE_SECRET_KEY` | **Yes** | server-side Siteverify redemption key |
 
-**It fails closed, including when Cloudflare is the one failing.** While
-siteverify is unreachable the endpoint stops accepting leads. That is a
-deliberate trade of availability for integrity on the lead path, and it is
-flagged for the operator to confirm.
+The states are explicit and keys alone never activate protection:
 
-### The token is never persisted
+- **Disabled** — `TURNSTILE_ENABLED` is absent, empty, or exact `false`.
+  `/api/lead` makes no Siteverify request, and the standard build emits no
+  Turnstile widget/loader even if keys remain stored.
+- **Enabled** — `TURNSTILE_ENABLED=true` and both keys are present. Every
+  protected lead submission must pass server-side verification before any
+  downstream lead side effect.
+- **Misconfigured** — `TURNSTILE_ENABLED=true` with a missing key, or any invalid
+  nonempty flag value. Runtime fails closed. The standard build also refuses an
+  enabled deployment with missing required configuration, preventing a form from
+  shipping with no way to satisfy the gate.
 
-It is read from the raw body and never attached to `payload`, so the enquiry
-block, the consent evidence, the ledger row, the HubSpot write and the
-acknowledgement mail — all built from `payload` — cannot carry it.
-`verifyTurnstile()` never returns it. The widget is rendered with
-`response-field: false`, so it never enters the DOM, `FormData` or the mailto
-fallback. `api/_lib/log.mjs` redacts both spellings as a structural backstop.
+`tools/build-entry.mjs` is the standard build entry used by `npm run build`,
+`npm run dev` and `npm test`, and therefore by Vercel's existing build command.
+Cloudflare timeout/network/malformed-response conditions fail closed while the
+gate is enabled. Token faults and service/configuration faults use separate,
+bounded, PII-free reason vocabulary; public error copy remains generic.
 
-### Coverage
+### Production status — evidence boundary
 
-**Both** public lead forms, not only `/home-value`: the shared valuation
-partial (`home_value`, on `/`, `/home-value`, `/43551-seller-review`) and the
-contact form (`contact`, on `/contact`). `buyer_inquiry` is an accepted
-`form_type` but **no page renders such a form today**; the gate keys off
-`data-form-type`, so a future buyer form is covered the moment it exists.
-`tools/check.mjs` fails the build if a page's Turnstile mount points do not
-equal its count of forms that post to `/api/lead`.
+**The repository proves the code path, not Vercel or Cloudflare account state.**
+This work creates no Cloudflare widget, sets no Vercel variable, submits no
+Production form, and changes no HubSpot/Twilio/Neon/Retell setting. Production
+Turnstile activation and live behavior therefore remain **not established** by
+repository evidence.
 
-### Configuration — and why the build can refuse to ship
-
-| Variable | Secret? | Read at | Decides |
-|---|---|---|---|
-| `TURNSTILE_SITE_KEY` | **No** — public, printed into every page like the Maps key | build | whether a widget renders |
-| `TURNSTILE_SECRET_KEY` | **Yes** — server-side only | runtime | whether anything is **enforced** |
-
-The secret alone is the enforcement switch; a whitespace-only value counts as
-absent. **Setting the secret without the site key fails the build on purpose**
-— that deployment would enforce verification while rendering no widget, so
-every lead would be refused silently with all tests passing. A site key without
-a secret is safe, is a legitimate staged rollout, and prints `NOT enforcing`.
-
-### Status — CLAUDE.md rule 19
-
-**This change sets no environment variable anywhere, and no Cloudflare widget
-has been created.** Whether Vercel currently holds either variable is not
-something this repository can observe, so it is not asserted here — the two
-places that answer it are the **build log line** (`Cloudflare Turnstile
-enabled …` / `NOT enforcing` / `no TURNSTILE_SITE_KEY …`) and
-`lead.turnstile.not_configured`, which `api/lead.js` logs on every submission
-precisely so an unprotected deployment is visible in the ordinary log stream.
-
-With the secret unset `api/lead.js` behaves exactly as it did before this
-feature existed. That is *absence of enforcement*, not a lenient mode, and
-**this file must not say the gate is live until a real submission has been
-verified against Cloudflare on the live host** — which has not happened.
-
-**Nothing has been verified against Cloudflare.** No live siteverify call has
-been made from this repository. Detail, the operator checklist and the full
-unproven list: `docs/updates/2026-09-18-turnstile-lead-verification.md`.
+Do not describe Turnstile as enabled or live in Production until an operator has
+completed the external activation and observed the live checks. The required
+sequence is recorded in
+`docs/updates/2026-09-18-turnstile-explicit-activation.md`: create a Managed
+widget for `crystalsellstoledo.com` and `www.crystalsellstoledo.com`; stage the
+site/secret keys while `TURNSTILE_ENABLED=false`; redeploy and confirm keys alone
+do not activate the gate; set `TURNSTILE_ENABLED=true`; redeploy; verify one
+controlled legitimate submission reaches HubSpot; verify a failed/absent
+challenge creates no HubSpot activity; and confirm SMS/AI-voice consent remains
+NOT GRANTED unless the respective box was actually selected.
 
 ## The lead path's body read — bounded in size AND in time
 
