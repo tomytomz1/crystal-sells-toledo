@@ -65,6 +65,10 @@
     "api/operator-action.js": {
       "maxDuration": 30,
       "memory": 256
+    },
+    "api/operator-unsuppress.js": {
+      "maxDuration": 30,
+      "memory": 256
     }
   }
 }

@@ -926,13 +926,21 @@ export function buildSuppressionEvent({
  * It is idempotency, not a guarantee that a retry happens.
  */
 export async function appendSuppressionEvents(events, {
-  env = process.env, timeoutMs = LEDGER_TIMEOUT_MS,
+  env = process.env, timeoutMs = LEDGER_TIMEOUT_MS, urlVar = LEDGER_URL_VAR,
 } = {}) {
   if (!Array.isArray(events) || !events.length)
     throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "events");
 
-  const url = String(env[LEDGER_URL_VAR] || "").trim();
-  if (!url) throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, LEDGER_URL_VAR);
+  /* The SQL and column contract stay here, in ONE module. A privileged
+     operator workflow may choose its own dedicated INSERT-capable role by
+     naming that role's environment variable; the website and webhook callers
+     omit this option and therefore remain on CONSENT_LEDGER_URL exactly as
+     before. The variable NAME is server-owned code, never request input. */
+  const credentialVar = String(urlVar || "").trim();
+  if (!credentialVar)
+    throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, "ledger_url_var");
+  const url = String(env[credentialVar] || "").trim();
+  if (!url) throw new ConsentLedgerError(LEDGER_NOT_CONFIGURED, credentialVar);
 
   const { text, params } = buildInsert(events, { columns: SUPPRESSION_COLUMNS });
   const result = await runStatement(text, params, { url, timeoutMs });

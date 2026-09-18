@@ -724,3 +724,10 @@ export async function writeSuppressionProperties(contactId, props, { timeoutMs }
   await updateContact(contactId, props, false, timeoutMs);
   return { written: true };
 }
+
+/** Write the already-computed unsuppression current-state projection. */
+export async function writeUnsuppressionProperties(contactId, props, { timeoutMs } = {}) {
+  if (!props || !Object.keys(props).length) return { written: false };
+  await updateContact(contactId, props, false, timeoutMs);
+  return { written: true };
+}

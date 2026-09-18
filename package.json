@@ -19,7 +19,8 @@
     "test:mail": "node --test tests/mail.test.mjs",
     "test:consent": "node --test tests/consent.test.mjs",
     "test:consent-state": "node --test tests/consent-state.test.mjs",
-    "zoho:verify": "node tools/zoho-verify.mjs"
+    "zoho:verify": "node tools/zoho-verify.mjs",
+    "mint:unsuppress": "node tools/mint-unsuppress-token.mjs"
   },
   "engines": {
     "node": ">=18"
