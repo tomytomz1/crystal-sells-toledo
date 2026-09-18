@@ -1,7 +1,7 @@
-# Operator unsuppression workflow — implementation record
+# Operator unsuppression workflow — implementation and activation record
 
 **Date:** 18 September 2026  
-**Status:** code implemented and tested; **not activated in Production**
+**Status:** code implemented and tested; **ACTIVE AND READ-VERIFIED IN PRODUCTION**
 
 This implements the first application-layer phase of the design in
 `docs/updates/2026-09-15-unsuppression-reoptin-decision.md` on top of the already
@@ -103,25 +103,55 @@ Dedicated tests cover:
 
 The final targeted run against branch head
 `2baa93f532002642ae7160e3034f3d3808d9eccf` passed **29/29** tests, with the
-project build and `tools/check.mjs` also passing. The full repository CI remains
-the merge gate and is run by the pull request workflow.
+project build and `tools/check.mjs` also passing. The full repository CI was the
+merge gate for PR #54 and passed before merge.
 
 Static guards additionally enforce the separate unsuppression boundary, secret
 containment, read -> append -> read ordering, `rowsAffected === 1` gating, and
 that the first implementation contains no Twilio reconciliation.
 
-## Production activation state
+## Production activation — 18 September 2026
 
-**INERT after merge unless explicitly configured.** The endpoint requires both:
+The operator explicitly activated the workflow after PR #54 merged.
 
-- `OPERATOR_UNSUPPRESS_SECRET` — a separate randomly-generated secret with at
-  least 32 bytes of entropy; and
-- `CONSENT_LEDGER_OPERATOR_URL` — the connection string for the already-created
-  `consent_ledger_operator` role from `db/003`.
+Production Vercel was configured with both required server-side values:
 
-Neither value should be committed. The database role already exists in
-Production Neon, but this implementation does not claim that its connection
-string is currently stored in Vercel.
+- `OPERATOR_UNSUPPRESS_SECRET` — a separately generated random secret; and
+- `CONSENT_LEDGER_OPERATOR_URL` — the pooled Neon connection string for the
+  existing `consent_ledger_operator` role on the Production branch/database.
 
-Do not activate the endpoint merely because the code is merged. Activation is a
-separate operator action followed by a controlled test against synthetic state.
+The values themselves were never placed in chat, source control, logs, or this
+document. The Neon screenshot used for setup showed the password masked.
+
+### Controlled live verification
+
+Two live Production checks were performed without clearing any suppression:
+
+1. `GET /api/operator-unsuppress` with no capability returned **HTTP 400**, not
+   the endpoint's configuration-failure **503**. Because configuration is checked
+   before token parsing, this established that the deployed function recognized
+   both required Production values and then failed closed on the missing token.
+2. The operator used `tools/mint-unsuppress-token.mjs` off-platform with the same
+   `OPERATOR_UNSUPPRESS_SECRET`, sealed to the controlled QA number and the
+   `sms` lane. Opening that Production approval URL successfully decrypted the
+   capability and read the durable Neon state through `consent_ledger_operator`.
+   The page rendered **"Nothing to clear"** and stated that there was no active
+   SMS blocking event for that number.
+
+The second check is the real provider-boundary proof for the read path: the
+Production token key matched the off-platform minting key, the operator database
+credential connected, and the one-number active-block lookup completed.
+
+### What remains deliberately unproven
+
+- No `POST` unsuppression was executed in Production because the controlled QA
+  number had no active suppression and there was no legitimate block to clear.
+- Therefore no live Production evidence yet exists for an actual
+  blocked -> unblocked append, post-read, or HubSpot clearance projection.
+- This is intentional. A real clearance should only be exercised when there is
+  a legitimate suppression case with an operator justification that satisfies
+  the confirmation contract.
+
+**Operational state:** the workflow is available in Production and the read path
+is live-verified. It remains human-gated, cannot grant consent, and has not been
+used to clear a Production suppression.
