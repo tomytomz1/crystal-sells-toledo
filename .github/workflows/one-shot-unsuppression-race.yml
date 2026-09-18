@@ -1,0 +1,34 @@
+name: one-shot-unsuppression-race
+
+on:
+  push:
+    branches:
+      - feature/operator-unsuppression-workflow
+    paths:
+      - .github/workflows/one-shot-unsuppression-race.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/operator-unsuppression-workflow
+          fetch-depth: 0
+      - name: Apply race fix
+        run: |
+          python tools/.one-shot-unsuppression-race.py
+          git diff --check
+          node --check api/operator-unsuppress.js
+          node --check tools/check.mjs
+      - name: Commit and self-delete
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/operator-unsuppress.js tools/check.mjs tests/operator-unsuppress-endpoint.test.mjs
+          git rm .github/workflows/one-shot-unsuppression-race.yml tools/.one-shot-unsuppression-race.py
+          git commit -m 'fix: preserve later blocks across unsuppression'
+          git push origin HEAD:feature/operator-unsuppression-workflow
