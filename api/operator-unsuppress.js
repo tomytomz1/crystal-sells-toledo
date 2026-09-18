@@ -178,12 +178,12 @@ function confirmationPage(payload, token, allBlocks) {
        approval ${escapeHtml(payload.approvalId)}</p>
     <p>Number: <strong>${escapeHtml(payload.phone)}</strong></p>
 
-    <h2>Active blocking events in the sealed lane</h2>
-    ${renderBlocks(scopeBlocks, { selectable: true })}
-
     <form method="POST" action="${escapeHtml(UNSUPPRESS_ACTION_PATH)}">
       <input type="hidden" name="t" value="${escapeHtml(token)}">
       <input type="hidden" name="confirm" value="${escapeHtml(UNSUPPRESS_CONFIRM_LITERAL)}">
+
+      <h2>Active blocking events in the sealed lane</h2>
+      ${renderBlocks(scopeBlocks, { selectable: true })}
 
       <fieldset>
         <legend>Why is this being cleared?</legend>

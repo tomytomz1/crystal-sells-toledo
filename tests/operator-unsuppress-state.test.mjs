@@ -176,7 +176,7 @@ describe("HubSpot unsuppression current-state projection", () => {
     assert.equal(roundTrip.sms.status, PERMISSION_STATE.NEVER_GRANTED);
     assert.equal(roundTrip.sms.consent_at, "");
     assert.equal(roundTrip.sms.consent_phone, "");
-    assert.equal(canSendSms(roundTrip, PHONE).reason, "NO_CONSENT");
+    assert.equal(canSendSms(roundTrip, PHONE, { env: { COMMUNICATIONS_CONSENT_ENABLED: "true" } }).reason, "NO_CONSENT");
   });
 
   test("clearing an SMS row while a global durable block survives writes nothing for SMS", () => {
@@ -207,8 +207,8 @@ describe("HubSpot unsuppression current-state projection", () => {
     assert.equal(Object.hasOwn(patch, S.smsSuppressed), false);
 
     const roundTrip = fromHubSpotConsentProperties(applyPatch(p, patch), "ROUNDTRIP");
-    assert.equal(canSendSms(roundTrip, PHONE).reason, "SUPPRESSED");
-    assert.equal(canPlaceAutomatedVoiceCall(roundTrip, PHONE).reason, "NO_CONSENT");
+    assert.equal(canSendSms(roundTrip, PHONE, { env: { COMMUNICATIONS_CONSENT_ENABLED: "true" } }).reason, "SMS_SUPPRESSED_STOP");
+    assert.equal(canPlaceAutomatedVoiceCall(roundTrip, PHONE, { env: { COMMUNICATIONS_CONSENT_ENABLED: "true" } }).reason, "NO_CONSENT");
   });
 
   test("projection never emits a granted value", () => {

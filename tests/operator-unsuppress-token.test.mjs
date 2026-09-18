@@ -7,7 +7,7 @@ import {
   unsuppressActionUrl, UnsuppressTokenError,
 } from "../api/_lib/operator-unsuppress-token.mjs";
 import {
-  OPERATOR_SECRET_VAR, sealOperatorToken,
+  OPERATOR_SECRET_VAR, sealOperatorToken, unsealOperatorToken,
 } from "../api/_lib/operator-token.mjs";
 
 const SECRET = "unsuppress_test_secret_0123456789_not_real";
@@ -82,16 +82,9 @@ describe("operator unsuppression token", () => {
     }, { env: { [OPERATOR_SECRET_VAR]: SUPPRESS_SECRET }, now: NOW });
 
     assert.throws(() => unsealUnsuppressToken(suppress, { now: NOW }), UnsuppressTokenError);
-    assert.throws(() => {
-      /* operator-token has its own error type; the assertion here is simply
-         that an unsuppression capability cannot be opened as a suppression one. */
-      const env = { [OPERATOR_SECRET_VAR]: SUPPRESS_SECRET };
-      // dynamic import is unnecessary; the existing module's public opener is
-      // exercised in its own suite. A different first byte/payload namespace is
-      // sufficient for the reverse-family property here.
-      if (unsuppress === suppress || !env[OPERATOR_SECRET_VAR]) return;
-      throw new Error("families_separate");
-    }, /families_separate/);
+    assert.throws(() => unsealOperatorToken(unsuppress, {
+      env: { [OPERATOR_SECRET_VAR]: SUPPRESS_SECRET }, now: NOW,
+    }));
   });
 
   test("URL carries neither the phone nor its ten digits in plaintext", () => {
