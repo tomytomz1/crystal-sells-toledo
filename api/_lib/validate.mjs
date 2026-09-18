@@ -149,10 +149,10 @@ export function validateLead(raw) {
   const message = cap("message", squashMultiline(raw.message));
   const notes = cap("notes", squashMultiline(raw.notes));
 
-  /* A second deterministic spam layer behind Turnstile's token gate. This is
-     deliberately NOT a general-language classifier. It only catches long
-     adjacent-key runs (qwert..., asdfg..., zxcvb...) and extreme single-key
-     repeats, the exact shape observed in successful junk submissions. */
+  /* A second deterministic spam layer inside authoritative server validation.
+     It deliberately is NOT a general-language classifier: it catches only the
+     observed keyboard-adjacent runs plus short whole-field single-key junk.
+     This executes before Turnstile verification and any downstream side effect. */
   if ([first_name, last_name, message, notes].some(looksLikeKeyboardSmash))
     throw new FieldError(
       "SUSPECT_INPUT",
