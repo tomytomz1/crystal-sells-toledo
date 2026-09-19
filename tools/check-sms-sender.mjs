@@ -118,7 +118,7 @@ if (!existsSync(senderPath)) {
       if (re.test(code))
         fail(rel, `${what} - only ${SENDER_REL} may cause an outbound Twilio side effect`);
     if (/\bsms-sender\b/.test(code) && rel !== ACK_REL)
-      fail(rel, `imports ${SENDER_REL} - only ${ACK_REL} may reach the outbound transport`);
+      fail(rel, `imports ${SENDER_REL} - deliberately unreachable from this module; only ${ACK_REL} may reach the outbound transport`);
     if (/\blead-sms-ack\b/.test(code) && rel !== LEAD_REL)
       fail(rel, `imports ${ACK_REL} - only ${LEAD_REL} may invoke the automatic acknowledgement`);
   }
