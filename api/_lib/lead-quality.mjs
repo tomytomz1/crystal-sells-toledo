@@ -41,14 +41,27 @@ function explicitState(value) {
   /* Remove only trailing country and ZIP syntax so the final comma-delimited
      component can be evaluated without mistaking a street suffix for a state. */
   s = s.replace(/\s*,?\s*(?:USA|United States)\s*$/i, "").trim();
+  const hadZip = /\s+\d{5}(?:-\d{4})?\s*$/.test(s);
   s = s.replace(/\s+\d{5}(?:-\d{4})?\s*$/, "").trim();
 
-  const last = (s.split(",").pop() || "").trim();
+  const parts = s.split(",").map((part) => part.trim()).filter(Boolean);
+  const last = parts.at(-1) || "";
   if (!last) return null;
+
+  /* Two-letter postal abbreviations are unambiguous enough to act on by
+     themselves. Full state names are different: values such as
+     "123 Main St, Delaware" or "123 Main St, Oregon" can be a street plus
+     locality with no state supplied. In that two-component/no-ZIP shape the
+     service-area evidence is ambiguous, so fail open and let the other controls
+     continue. A ZIP or a separate city component makes a trailing state name
+     affirmative evidence. */
   const upper = last.toUpperCase();
   if (STATE_CODES.has(upper)) return upper;
+
   const lower = last.toLowerCase();
-  if (STATE_NAMES.has(lower)) return lower === "ohio" ? "OH" : "OTHER";
+  if (!STATE_NAMES.has(lower)) return null;
+  if (lower === "ohio") return "OH";
+  if (hadZip || parts.length >= 3) return "OTHER";
   return null;
 }
 
