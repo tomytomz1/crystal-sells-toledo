@@ -13,6 +13,10 @@
    The acknowledgement is a courtesy after HubSpot has already captured the
    lead. This module therefore never throws: malformed input, ineligibility and
    an unexpected sender exception all become a PII-free NOT_SENT result.
+
+   The SMS body is fixed. No browser-supplied field is interpolated into it;
+   doing so would turn this otherwise narrow acknowledgement path into a
+   user-controlled SMS-content relay.
    ===================================================================== */
 
 import { sendSms, SMS_STATUS, smsSendLogShape } from "./sms-sender.mjs";
@@ -29,14 +33,18 @@ export const LEAD_SMS_ACK_REASON = Object.freeze({
 const notSent = (reason) => ({ status: SMS_STATUS.NOT_SENT, reason });
 
 /**
- * The first message sample submitted with the approved A2P campaign, with the
- * validated seller address substituted for the campaign placeholder.
+ * Fixed, use-case-aligned variant of the first message sample submitted with
+ * the approved A2P campaign. The campaign sample used a property placeholder,
+ * but the website address field is still visitor-controlled text. Keeping the
+ * body fixed prevents the lead form from becoming an arbitrary SMS relay.
  */
-export function buildLeadSmsAcknowledgement(propertyAddress) {
-  return "Crystal Sells Toledo: Thanks for your real estate inquiry about " +
-    String(propertyAddress || "").trim() +
-    ". I'll follow up with the information you requested and help with the next step. " +
-    "Reply STOP to opt out.";
+const LEAD_SMS_ACK_BODY =
+  "Crystal Sells Toledo: Thanks for your real estate inquiry about your property. " +
+  "I'll follow up with the information you requested and help with the next step. " +
+  "Reply STOP to opt out.";
+
+export function buildLeadSmsAcknowledgement() {
+  return LEAD_SMS_ACK_BODY;
 }
 
 function makeLeadSmsAcknowledgement(sender) {
@@ -63,13 +71,15 @@ function makeLeadSmsAcknowledgement(sender) {
 
       /* Bind the evidence to this exact validated submission before handing
          anything to Gate 8. These values are server-owned when the payload is
-         built by api/lead.js; a mismatch is a programming error and fails shut. */
+         built by api/lead.js; a mismatch is a programming error and fails shut.
+         property_address is required here only as a completeness invariant; it
+         is deliberately never inserted into the outbound message body. */
       if (!meta.submission_id || consent.submission_id !== meta.submission_id ||
           consent.form_type !== lead.form_type || consent.sms.phone !== lead.phone ||
           !lead.email || !lead.phone || !lead.property_address)
         return notSent(LEAD_SMS_ACK_REASON.EVIDENCE_MISMATCH);
 
-      const body = buildLeadSmsAcknowledgement(lead.property_address);
+      const body = buildLeadSmsAcknowledgement();
       return await sender({ email: lead.email, phone: lead.phone, body }, { env });
     } catch {
       /* Never expose a provider/request exception. The lead is already safe in

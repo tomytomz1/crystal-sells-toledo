@@ -7,7 +7,7 @@
 
 Gate 9 connects the existing website-lead pipeline to the already-built outbound
 SMS sender so a seller who **freshly opts in to SMS on the current `/home-value`
-submission** can receive the first A2P-approved acknowledgement after the lead is
+submission** can receive the first A2P-aligned acknowledgement after the lead is
 safely stored.
 
 This change does **not** create a generic text-message endpoint, a campaign
@@ -33,12 +33,23 @@ suppressed or otherwise no longer sendable, Gate 8 denies the provider call.
 
 ## Message copy
 
-The acknowledgement uses the first message sample submitted with the approved A2P
-campaign, substituting the validated seller address for the placeholder:
+The acknowledgement stays inside the approved A2P use case and keeps the same
+identity, transactional purpose, follow-up promise, and STOP instruction as the
+first submitted campaign sample. The staged application uses this fixed body:
 
-> Crystal Sells Toledo: Thanks for your real estate inquiry about [Property Address]. I'll follow up with the information you requested and help with the next step. Reply STOP to opt out.
+> Crystal Sells Toledo: Thanks for your real estate inquiry about your property. I'll follow up with the information you requested and help with the next step. Reply STOP to opt out.
 
-No free-form visitor text is inserted into the message.
+The approved sample used `[Property Address]` as a personalization placeholder.
+The application deliberately does **not** interpolate the website's
+`property_address` field into the SMS body. That field is normalized and capped,
+but it is still browser-supplied text. Interpolating it would let a malicious
+submission turn the acknowledgement path into a user-controlled SMS-content
+relay to an arbitrary phone number.
+
+Accordingly **no browser-supplied text is inserted into the outbound SMS body**.
+The email and phone are used only to identify/authorize the recipient, and the
+property address remains part of the captured lead record but not the message
+copy.
 
 ## Send-time authorization remains the authority
 
@@ -84,6 +95,18 @@ In that SDK version the constructor timeout becomes both the HTTPS socket timeou
 and the default request timeout. This bounds the new courtesy provider call
 inside the lead function's 30-second execution budget without weakening Gate 8's
 ordering.
+
+## Adversarial review correction
+
+A pre-merge cold read found that the original implementation inserted the raw
+validated `property_address` into the SMS body while the prose simultaneously
+claimed that no free-form visitor text was inserted. Validation normalized and
+length-capped the field, but did not make the text trusted. That was both a prose
+/ code mismatch and an unnecessary abuse surface.
+
+The staged implementation now uses a fixed acknowledgement body and includes a
+regression test proving that attacker-controlled property text cannot alter the
+outbound SMS content.
 
 ## Dark activation state
 

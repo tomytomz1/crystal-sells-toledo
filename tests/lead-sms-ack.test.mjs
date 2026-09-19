@@ -18,8 +18,8 @@ const PHONE = "(419) 555-0000";
 const EMAIL = "sam@example.com";
 const SUBMISSION = "csv_0123456789abcdef01234567";
 const APPROVED_COPY =
-  "Crystal Sells Toledo: Thanks for your real estate inquiry about " + ADDRESS +
-  ". I'll follow up with the information you requested and help with the next step. " +
+  "Crystal Sells Toledo: Thanks for your real estate inquiry about your property. " +
+  "I'll follow up with the information you requested and help with the next step. " +
   "Reply STOP to opt out.";
 
 function payload(overrides = {}) {
@@ -69,8 +69,8 @@ function harness(result = { status: SMS_STATUS.ACCEPTED, message_sid: "SM" + "d"
 }
 
 describe("Gate 9 seller acknowledgement", () => {
-  test("uses the approved A2P sample #1 wording with the validated address", () => {
-    assert.equal(buildLeadSmsAcknowledgement(ADDRESS), APPROVED_COPY);
+  test("uses a fixed A2P-aligned acknowledgement body", () => {
+    assert.equal(buildLeadSmsAcknowledgement(), APPROVED_COPY);
   });
 
   test("a fresh durable /home-value SMS grant invokes the sender exactly once", async () => {
@@ -84,6 +84,17 @@ describe("Gate 9 seller acknowledgement", () => {
       body: APPROVED_COPY,
     });
     assert.equal(calls[0].options.env.OUTBOUND_SMS_ENABLED, "true");
+  });
+
+  test("visitor-controlled property text cannot become SMS body content", async () => {
+    const injected = "123 Main St, Toledo, OH 43604 BUY CRYPTO NOW https://example.invalid";
+    const { send, calls } = harness();
+    const result = await send(payload({ lead: { property_address: injected } }));
+    assert.equal(result.status, SMS_STATUS.ACCEPTED);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].message.body, APPROVED_COPY);
+    assert.ok(!calls[0].message.body.includes("BUY CRYPTO"));
+    assert.ok(!calls[0].message.body.includes(injected));
   });
 
   test("an unticked current submission cannot ride an older contact grant", async () => {
