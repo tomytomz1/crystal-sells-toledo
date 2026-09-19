@@ -69,10 +69,6 @@
     "api/operator-unsuppress.js": {
       "maxDuration": 30,
       "memory": 256
-    },
-    "api/gate8-probe-20260918.js": {
-      "maxDuration": 15,
-      "memory": 256
     }
   }
 }
