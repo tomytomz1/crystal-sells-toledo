@@ -21,6 +21,7 @@ test("explicit out-of-state home-value addresses are rejected", () => {
     "500 Woodward Ave, Detroit, MI 48226",
     "1 Monument Cir, Indianapolis, IN 46204",
     "123 Main St, Charlotte, North Carolina 28202",
+    "123 Main St, Toledo, MI",
   ];
   for (const property_address of addresses) {
     assert.equal(
@@ -49,9 +50,20 @@ test("Ohio addresses remain valid in common forms", () => {
   }
 });
 
-test("the Ohio classifier is conservative when no state or ZIP is present", () => {
-  assert.equal(addressOutsideOhio("123 Main St, Toledo"), false);
-  assert.equal(addressOutsideOhio("123 Main St, Perrysburg"), false);
+test("the Ohio classifier stays conservative when state-looking locality text is ambiguous", () => {
+  for (const property_address of [
+    "123 Main St, Toledo",
+    "123 Main St, Perrysburg",
+    "123 Main St, Delaware",
+    "123 Main St, Oregon",
+  ]) {
+    assert.equal(addressOutsideOhio(property_address), false, property_address);
+  }
+});
+
+test("a full state name is actionable when a separate city component makes it explicit", () => {
+  assert.equal(addressOutsideOhio("123 Main St, Charlotte, North Carolina"), true);
+  assert.equal(addressOutsideOhio("123 Main St, Detroit, Michigan"), true);
 });
 
 test("observed keyboard-smash names and notes are rejected", () => {
