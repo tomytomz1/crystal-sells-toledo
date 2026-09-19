@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { validateLead, FieldError } from "./_lib/validate.mjs";
 import { createLead, isConfigured } from "./_lib/hubspot.mjs";
 import { sendAcknowledgement, classifyMailError } from "./_lib/mail.mjs";
+import { sendLeadSmsAcknowledgement, leadSmsAckLogShape } from "./_lib/lead-sms-ack.mjs";
 import { buildConsentEvidence, consentFeatureEnabled, consentLogShape } from "./_lib/consent.mjs";
 import { appendConsentEvents, ledgerLogShape } from "./_lib/consent-ledger.mjs";
 import { readBody, bodyErrorReason, rateLimit, clientIp, originAllowed, MAX_BODY_BYTES } from "./_lib/security.mjs";
@@ -194,7 +195,7 @@ export default async function handler(req, res) {
   } catch (err) {
     /* EVERY BODY-READ FAILURE ENDS THE REQUEST HERE. Nothing below this
        block runs: no JSON parse, no validation, no consent evidence, no
-       ledger append, no HubSpot write, no acknowledgement mail.
+       ledger append, no HubSpot write, no visitor acknowledgement.
 
        PRECISELY WHAT IS AND IS NOT TRUE HERE, because an earlier revision
        of this comment overstated it. On the timeout path bytes usually
@@ -304,9 +305,8 @@ export default async function handler(req, res) {
      back. The submission id is minted below, not above, so a refused
      request never produces one; and after it come the consent evidence,
      the append to the durable consent ledger, the HubSpot contact, the
-     HubSpot form-submission activity that notifies Crystal, and the
-     acknowledgement email to the address in the form. A `return` here
-     reaches NONE of them.
+     HubSpot form-submission activity that notifies Crystal, and any
+     visitor acknowledgements. A `return` here reaches NONE of them.
 
      THE BROWSER'S TOKEN IS NOT EVIDENCE OF ANYTHING UNTIL CLOUDFLARE
      SAYS SO. verifyTurnstile() redeems it server-side and additionally
@@ -317,7 +317,7 @@ export default async function handler(req, res) {
      THE TOKEN IS READ FROM THE RAW BODY AND GOES NOWHERE ELSE. It is
      never attached to `payload`, so it cannot ride into the enquiry
      block, the consent evidence, the ledger row, the HubSpot write or
-     the acknowledgement mail - all of which are built from `payload`
+     either acknowledgement - all of which are built from `payload`
      alone. It is never passed to log(); turnstileLogShape() returns the
      outcome and Cloudflare's closed-vocabulary codes and nothing else.
 
@@ -470,33 +470,55 @@ export default async function handler(req, res) {
       ms: Date.now() - started,
     });
 
-    /* --- acknowledgement ----------------------------------------------
+    /* --- acknowledgements ---------------------------------------------
        Strictly after HubSpot has confirmed BOTH the contact and the
        timeline activity - createLead throws otherwise, so reaching this
        line IS the confirmation. The lead is already safe; everything
        below is a courtesy to the visitor.
 
-       Awaited, never fire-and-forget: Vercel may freeze the container the
-       moment the response is written, which would kill an in-flight SMTP
-       conversation somewhere in the middle. Awaiting costs a second or
-       two of function time and is the only way the send actually happens.
+       Both courtesies are awaited. Vercel may freeze the container the
+       moment the response is written, so fire-and-forget is not delivery.
+       They run concurrently because neither depends on the other. The SMS
+       transport has its own 5-second provider-request bound and performs
+       Gate 8 immediately before its single Twilio attempt.
 
-       Every failure is swallowed. A refused connection, a bad password, a
-       rejected recipient - none of them may turn a lead that IS in the
-       CRM into a submission the visitor is told to retry, because
-       retrying would produce a duplicate enquiry against a contact that
-       already has this one. The response contract below is unchanged and
-       carries no email status: whether Crystal's mail server answered is
-       not the browser's business. */
-    try {
-      const ack = await sendAcknowledgement(payload.lead, { submission_id: sid });
-      if (ack.sent) log("lead.ack.sent", { submission_id: sid, form_type: payload.lead.form_type });
-      else log("lead.ack.skipped", { submission_id: sid, reason: ack.reason });
-    } catch (mailErr) {
-      /* log(), not logError(): logError emits err.message, and a
-         Nodemailer error's message carries the recipient address and the
-         raw server response. Only the classification is safe. */
-      log("lead.ack.failed", { submission_id: sid, reason: classifyMailError(mailErr) });
+       Neither acknowledgement may turn a saved lead into a failed form
+       submission. Promise.allSettled is deliberate belt-and-suspenders:
+       even an unexpected rejection in either task is consumed before the
+       existing 200 response is returned, preventing a duplicate enquiry. */
+    const emailAckTask = (async () => {
+      try {
+        const ack = await sendAcknowledgement(payload.lead, { submission_id: sid });
+        if (ack.sent) log("lead.ack.sent", { submission_id: sid, form_type: payload.lead.form_type });
+        else log("lead.ack.skipped", { submission_id: sid, reason: ack.reason });
+      } catch (mailErr) {
+        /* log(), not logError(): logError emits err.message, and a
+           Nodemailer error's message carries the recipient address and the
+           raw server response. Only the classification is safe. */
+        log("lead.ack.failed", { submission_id: sid, reason: classifyMailError(mailErr) });
+      }
+    })();
+
+    const smsAckTask = (async () => {
+      const smsAck = await sendLeadSmsAcknowledgement(payload);
+      log("lead.sms_ack", {
+        submission_id: sid,
+        form_type: payload.lead.form_type,
+        ...leadSmsAckLogShape(smsAck),
+      });
+    })();
+
+    const [, smsOutcome] = await Promise.allSettled([emailAckTask, smsAckTask]);
+    if (smsOutcome.status === "rejected") {
+      /* No exception text: a thrown provider/request error could carry PII.
+         This branch is only an emergency containment path because the SMS
+         acknowledgement module itself is specified to return, not reject. */
+      log("lead.sms_ack", {
+        submission_id: sid,
+        form_type: payload.lead.form_type,
+        sms_status: "not_sent",
+        sms_reason: "SMS_ACK_UNEXPECTED_FAILURE",
+      });
     }
 
     return send(req, res, 200, { ok: true, submission_id: sid });
