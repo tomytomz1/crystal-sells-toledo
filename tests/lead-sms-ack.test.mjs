@@ -86,6 +86,18 @@ describe("Gate 9 seller acknowledgement", () => {
     assert.equal(calls[0].options.env.OUTBOUND_SMS_ENABLED, "true");
   });
 
+  test("malformed options fail shut instead of rejecting before the function body", async () => {
+    for (const options of [null, [], "bad", { env: null }, { env: [] }]) {
+      const { send, calls } = harness();
+      const result = await send(payload(), options);
+      assert.deepEqual(result, {
+        status: SMS_STATUS.NOT_SENT,
+        reason: LEAD_SMS_ACK_REASON.MALFORMED_PAYLOAD,
+      });
+      assert.equal(calls.length, 0);
+    }
+  });
+
   test("visitor-controlled property text cannot become SMS body content", async () => {
     const injected = "123 Main St, Toledo, OH 43604 BUY CRYPTO NOW https://example.invalid";
     const { send, calls } = harness();
