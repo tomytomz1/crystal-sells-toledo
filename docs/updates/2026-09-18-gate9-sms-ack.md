@@ -52,6 +52,23 @@ The email and phone are used only to identify/authorize the recipient, and the
 property address remains part of the captured lead record but not the message
 copy.
 
+## Recipient-attestation residual risk
+
+The website records **single web-form opt-in evidence**, not cryptographic proof
+that the person operating the browser possesses the entered phone. The server can
+prove that this submission supplied a phone, checked the SMS box, passed the
+site's validation/Turnstile path, and obtained durable consent evidence; it
+cannot prove that a malicious submitter did not type somebody else's number.
+
+That is a residual abuse risk rather than a hidden guarantee. The fixed message
+body, Ohio-only seller validation, Turnstile, and request rate limiting reduce
+the usefulness of the path as an abuse tool, but they do not establish phone
+ownership. This document does not claim that carriers require an OTP/double-opt-in
+flow. If the sender is later considered for broad always-on activation rather
+than the controlled Gate 9 exercise, recipient-verification/abuse posture is an
+explicit operating decision rather than something this PR silently treats as
+solved.
+
 ## Send-time authorization remains the authority
 
 Eligibility above decides only whether this current lead may *ask* for the
