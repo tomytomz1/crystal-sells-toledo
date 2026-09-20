@@ -92,6 +92,18 @@ describe("Gate 9 seller acknowledgement", () => {
       const result = await send(payload(), options);
       assert.deepEqual(result, {
         status: SMS_STATUS.NOT_SENT,
+        reason: LEAD_SMS_ACK_REASON.MALFORMED_CALL,
+      });
+      assert.equal(calls.length, 0);
+    }
+  });
+
+  test("malformed payloads fail shut without reaching the sender", async () => {
+    for (const bad of [null, [], "bad", {}, { lead: {}, meta: null }]) {
+      const { send, calls } = harness();
+      const result = await send(bad);
+      assert.deepEqual(result, {
+        status: SMS_STATUS.NOT_SENT,
         reason: LEAD_SMS_ACK_REASON.MALFORMED_PAYLOAD,
       });
       assert.equal(calls.length, 0);
