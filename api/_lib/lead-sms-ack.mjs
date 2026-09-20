@@ -11,8 +11,9 @@
    permission, phone mismatch or dependency failure still denies the send.
 
    The acknowledgement is a courtesy after HubSpot has already captured the
-   lead. This module therefore never throws: malformed input, ineligibility and
-   an unexpected sender exception all become a PII-free NOT_SENT result.
+   lead. The production acknowledgement function therefore never rejects:
+   malformed input, ineligibility and an unexpected sender exception all become
+   a PII-free NOT_SENT result.
 
    The SMS body is fixed. No browser-supplied field is interpolated into it;
    doing so would turn this otherwise narrow acknowledgement path into a
@@ -48,8 +49,25 @@ export function buildLeadSmsAcknowledgement() {
 }
 
 function makeLeadSmsAcknowledgement(sender) {
-  return async function sendLeadSmsAcknowledgement(payload, { env = process.env } = {}) {
+  return async function sendLeadSmsAcknowledgement(payload, options) {
     try {
+      /* Keep argument handling inside the try. A signature such as
+         `(payload, { env = process.env } = {})` still throws on `null` before
+         this body runs, which would contradict this boundary's never-rejects
+         contract. Malformed options fail shut and never reach the sender. */
+      let env;
+      if (options === undefined) {
+        env = process.env;
+      } else if (options === null || typeof options !== "object" || Array.isArray(options)) {
+        return notSent(LEAD_SMS_ACK_REASON.MALFORMED_PAYLOAD);
+      } else if (options.env === undefined) {
+        env = process.env;
+      } else if (options.env === null || typeof options.env !== "object" || Array.isArray(options.env)) {
+        return notSent(LEAD_SMS_ACK_REASON.MALFORMED_PAYLOAD);
+      } else {
+        env = options.env;
+      }
+
       if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
           !payload.lead || typeof payload.lead !== "object" ||
           !payload.meta || typeof payload.meta !== "object")
