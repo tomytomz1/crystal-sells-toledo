@@ -17,7 +17,7 @@ Resolve `origin/main` dynamically. Do not pin this file to a commit SHA merely b
 - Neon Postgres is the append-only consent/suppression evidence system of record.
 - Zoho Mail SMTP is live for acknowledgement/operator email. Zoho CRM is dormant rollback.
 - Cloudflare Turnstile is live on the lead path.
-- `api/_lib/sms-sender.mjs` exists, but the application outbound SMS sender is deliberately **dark/unreachable**. No live route imports it and `OUTBOUND_SMS_ENABLED` remains off/unset.
+- Gate 9's narrow internal outbound path is implemented as `api/lead.js` -> `api/_lib/lead-sms-ack.mjs` -> `api/_lib/sms-sender.mjs`, but it remains deliberately **dark** because `OUTBOUND_SMS_ENABLED` is off/unset. There is no generic/public send-SMS endpoint.
 - No automated AI-voice caller exists.
 
 ## Production controls already live
@@ -48,8 +48,8 @@ Resolve `origin/main` dynamically. Do not pin this file to a commit SHA merely b
 | **5 — HubSpot timeline display** | **CLOSED.** Full consent/enquiry block rendered untruncated. |
 | **6 — A2P Campaign approved** | **CLOSED.** Twilio approved the corrected A2P 10DLC campaign on 18 Sep 2026 and reports it registered with carriers. |
 | **7 — inbound STOP / provider opt-out confirmations** | **CLOSED.** Real STOP -> Twilio `OptOutType=STOP` -> signed Production webhook -> Neon suppression -> HubSpot projection is proven, and post-approval STOP/START/HELP confirmation messages all reached the handset. |
-| **8 — send-time authorization** | **CLOSED FOR THE DARK AUTHORIZATION BOUNDARY; SENDER STILL DARK.** Dedicated sender-role DB lookup has been executed successfully by the deployed Production app. No outbound SMS path is active. |
-| **9 — controlled consent -> send -> STOP/DNC** | **OPEN.** A2P approval is complete; remaining work is deliberate outbound activation followed by one controlled end-to-end exercise. |
+| **8 — send-time authorization** | **CLOSED FOR THE DARK AUTHORIZATION BOUNDARY; SENDER STILL DARK.** Dedicated sender-role DB lookup has been executed successfully by the deployed Production app. The internal Gate 9 call path exists, but the outbound feature flag remains off. |
+| **9 — controlled consent -> send -> STOP/DNC** | **OPEN.** The automatic acknowledgement path is implemented behind the dark sender. Remaining work is deliberate outbound activation followed by one controlled end-to-end exercise. |
 
 ## Gate 6 — Twilio A2P 10DLC
 
@@ -149,12 +149,17 @@ This closes the remaining Production application-binding evidence gap for the se
 
 ### Sender remains dark
 
-None of that activates outbound SMS:
+Gate 9 now provides exactly one internal application path to the sender, but that does **not** activate outbound SMS:
 
-- no live endpoint/orchestrator imports `api/_lib/sms-sender.mjs`;
+- `api/lead.js` may invoke only `api/_lib/lead-sms-ack.mjs`, which is the sole production importer of `api/_lib/sms-sender.mjs`;
+- the acknowledgement requires fresh current-submission SMS consent plus acknowledged durable evidence before it can ask the sender to act;
+- the sender still performs Gate 8 immediately before its one Twilio attempt;
 - `OUTBOUND_SMS_ENABLED` remains off/unset;
 - outbound Twilio API-key variables have not been configured for activation;
-- no SMS was sent by the application sender during Gate 8 verification.
+- no SMS has been sent by the application sender during Gate 8 or staged Gate 9 verification;
+- there is no generic/public endpoint for arbitrary outbound SMS.
+
+The final Gate 8 suppression read and the external Twilio acceptance are not one atomic transaction. A suppression already visible at the final read blocks the send; a STOP racing after that read cannot be serialized atomically across Neon and Twilio. The sender minimizes that interval by allowing no await or other side effect between ALLOW and `messages.create()`.
 
 Now that Gate 6 is approved, outbound credentials may be configured only as part of a deliberate Gate 9 activation plan. Do not set `OUTBOUND_SMS_ENABLED=true` until the controlled send target, fresh consent evidence, rollback/disable path, and evidence-capture steps are ready.
 
