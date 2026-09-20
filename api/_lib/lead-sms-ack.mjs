@@ -7,8 +7,10 @@
    HubSpot state. The current /home-value submission must carry a fresh SMS
    grant whose server-built evidence was acknowledged by the durable ledger.
    Only then is the existing sender invoked. The sender still performs Gate 8
-   immediately before Twilio, so an intervening STOP, suppression, revoked
-   permission, phone mismatch or dependency failure still denies the send.
+   immediately before Twilio, so a STOP, suppression, revoked permission or
+   phone mismatch already visible to Gate 8's final reads denies the send. The
+   read and Twilio are different systems, so no code can claim atomic ordering
+   against a STOP that races after that final suppression read.
 
    The acknowledgement is a courtesy after HubSpot has already captured the
    lead. The production acknowledgement function therefore never rejects:
