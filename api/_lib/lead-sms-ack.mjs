@@ -25,6 +25,7 @@
 import { sendSms, SMS_STATUS, smsSendLogShape } from "./sms-sender.mjs";
 
 export const LEAD_SMS_ACK_REASON = Object.freeze({
+  MALFORMED_CALL: "SMS_ACK_MALFORMED_CALL",
   MALFORMED_PAYLOAD: "SMS_ACK_MALFORMED_PAYLOAD",
   FORM_NOT_ELIGIBLE: "SMS_ACK_FORM_NOT_ELIGIBLE",
   NO_FRESH_CONSENT: "SMS_ACK_NO_FRESH_CONSENT",
@@ -61,11 +62,11 @@ function makeLeadSmsAcknowledgement(sender) {
       if (options === undefined) {
         env = process.env;
       } else if (options === null || typeof options !== "object" || Array.isArray(options)) {
-        return notSent(LEAD_SMS_ACK_REASON.MALFORMED_PAYLOAD);
+        return notSent(LEAD_SMS_ACK_REASON.MALFORMED_CALL);
       } else if (options.env === undefined) {
         env = process.env;
       } else if (options.env === null || typeof options.env !== "object" || Array.isArray(options.env)) {
-        return notSent(LEAD_SMS_ACK_REASON.MALFORMED_PAYLOAD);
+        return notSent(LEAD_SMS_ACK_REASON.MALFORMED_CALL);
       } else {
         env = options.env;
       }
