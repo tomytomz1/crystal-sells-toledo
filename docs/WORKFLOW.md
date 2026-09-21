@@ -4,6 +4,11 @@ The reusable procedure. `CLAUDE.md` holds the invariants; this holds the steps.
 
 ## Startup
 
+**Read narrowly.** Never read a large file whole to find one symbol: `grep -n`
+for it, then `sed -n 'A,Bp'` around the hit. Several test files and
+`tools/check-base.mjs` exceed 100 KB; a whole-file read of one costs roughly
+30k tokens and is re-sent on every subsequent turn of the session.
+
 ```bash
 git fetch origin main
 git status --short          # confirm a clean tree before starting
@@ -59,6 +64,14 @@ separate, and because its posture is different.
 re-review **the correction delta only**, once. That is the end of it. Do not
 re-read the whole diff again, do not loop, and do not keep going until nothing
 can be found. A pass that finds nothing material ends with **no commit**.
+
+**What does not earn another pass.** A round that only rewords a claim, narrows a
+phrase, re-asserts something already true, or tightens prose about behaviour that
+did not change is **not** a material finding, and it does not buy a further pass.
+Reviewing is not free: every round re-reads the diff and re-sends the whole
+session, so a pull request accumulating commits of that shape is spending budget
+and finding nothing. Stop at the cap, and carry anything genuinely unresolved
+into the handoff as a named follow-up rather than into another round.
 
 ### The pass
 
