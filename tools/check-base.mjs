@@ -237,6 +237,7 @@ const SECRET_NAMES = [
      can name — so it must never appear in anything a browser receives. */
   "OPERATOR_ACTION_SECRET",
   "OPERATOR_UNSUPPRESS_SECRET", "CONSENT_LEDGER_OPERATOR_URL",
+  "CONSENT_LEDGER_REOPTIN_URL",
   /* The Turnstile secret key. It is the ONLY thing that makes the
      verification gate mean anything: whoever holds it can redeem tokens
      against Cloudflare on this site's behalf, and its exposure would
@@ -1614,6 +1615,171 @@ for (const file of pages) {
 }
 
 /* ---------------------------------------------------------------------
+   db/004 AND THE AUTOMATIC RE-OPT-IN CLEARANCE
+   ---------------------------------------------------------------------
+   This is the first path in the repository that can lift a suppression
+   without a human. Every guard below protects an invariant that a
+   well-meaning refactor could delete while every test still passed, and
+   that a consumer would pay for.
+   --------------------------------------------------------------------- */
+{
+  const REPO = join(ROOT, "..");
+
+  /* ---- the migration -------------------------------------------------- */
+  const reoRel = "db/004_website_reoptin.sql";
+  const reoPath = join(REPO, reoRel);
+  if (!existsSync(reoPath))
+    fail(reoRel, "missing - the re-opt-in readiness lookup has no migration and the reconciliation cannot read the two facts it needs");
+  else {
+    const raw = readFileSync(reoPath, "utf8");
+    const code = raw.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+
+    /* The same hardening db/002 and db/003 require, and for the same
+       reason: without SET search_path a caller can shadow the table and
+       have it read with the owner's rights, silently. */
+    if (!/SECURITY DEFINER/.test(code))
+      fail(reoRel, "the readiness function is not SECURITY DEFINER - it would run as the caller and return nothing");
+    if (!/SET\s+search_path\s*=/.test(code))
+      fail(reoRel, "no SET search_path on a SECURITY DEFINER function - a caller could shadow the table and have it read with the owner's rights");
+    if (!/REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+get_reoptin_readiness[\s\S]{0,60}?FROM\s+PUBLIC/i.test(code))
+      fail(reoRel, "does not REVOKE EXECUTE ON get_reoptin_readiness FROM PUBLIC - PostgreSQL grants EXECUTE to PUBLIC by default, so every role including the website's would get it");
+
+    /* Append-only is a database grant. No role gains a read or a mutation
+       on the table, here or anywhere. */
+    if (/GRANT\s+(?:SELECT|UPDATE|DELETE|TRUNCATE|ALL)[\s\S]{0,80}?ON\s+(?:TABLE\s+)?communication_consent_events/i.test(code))
+      fail(reoRel, "grants a table read or mutation - append-only is a database grant, and no role may read this table");
+
+    /* THE CREDENTIAL SEPARATION db/002 states and this migration must not
+       undo: the website's INSERT-only role gets no read, ever. */
+    for (const role of ["<application_role>", "<sender_role>", "<operator_role>"])
+      if (new RegExp(`GRANT\\s+EXECUTE\\s+ON\\s+FUNCTION\\s+get_reoptin_readiness[\\s\\S]{0,80}?TO\\s+${role}`, "i").test(code))
+        fail(reoRel, `grants the readiness lookup to ${role} - it belongs to the dedicated re-opt-in credential alone, and the website role in particular must hold INSERT and no read`);
+
+    /* ---- THE SEMANTICS THAT KEEP A STOP AUTHORITATIVE ----------------
+       A consent that does not post-date the refusal is not a re-opt-in.
+       Both clocks, both STRICT: db/003 resolves its ties toward more
+       blocking and so must this, or a form filled in the same instant as a
+       STOP would step over it. */
+    if (!/occurred_at\s*>\s*bar\.occurred_bar/.test(code) || /occurred_at\s*>=\s*bar\.occurred_bar/.test(code))
+      fail(reoRel, "the consent is not required to STRICTLY post-date the refusal on event time - a tie would let a form submitted at the instant of a STOP supersede it");
+    if (!/recorded_at\s*>\s*bar\.recorded_bar/.test(code) || /recorded_at\s*>=\s*bar\.recorded_bar/.test(code))
+      fail(reoRel, "the second clock is not consulted with a strict > - a delayed or redelivered STOP could be overtaken by a consent recorded before it arrived");
+
+    /* The bar must span the dominating lane. A channel-specific consent
+       must not step over a global do-not-contact. */
+    if (!/b\.channel\s*=\s*p_channel\s+OR\s+b\.channel\s*=\s*'all'/i.test(code))
+      fail(reoRel, "the refusal high-water mark is not taken across the 'all' lane - a channel-specific consent could step over a global do-not-contact");
+
+    /* Only a ticked box on a page that displayed a disclosure. */
+    if (!/event_type\s*=\s*'consent_selected'/i.test(code))
+      fail(reoRel, "the consent branch is not scoped to consent_selected - consent_not_selected is the record of NOT ticking and must never read as a grant");
+    if (!/source\s*=\s*'website'/i.test(code))
+      fail(reoRel, "the consent branch is not scoped to source = 'website' - only a submission that displayed a disclosure can evidence agreement to one");
+
+    /* Freshness, and against the DATABASE's clock. */
+    if (!/now\(\)\s*-\s*make_interval\s*\(\s*secs\s*=>\s*p_max_age_seconds\s*\)/i.test(code))
+      fail(reoRel, "the freshness window is missing - a consent from any time in the past would stay armed forever");
+
+    /* It reuses db/003's ONE definition of an active block. A second copy
+       of that fold here would be free to drift from the one send-time
+       enforcement obeys. */
+    if (!/_active_consent_blocks\s*\(\s*p_phone\s*\)/.test(code))
+      fail(reoRel, "does not call _active_consent_blocks - a second definition of 'actively blocked' would be free to drift from the one gate 8 obeys");
+
+    /* It is a READ. An unsuppression is an APPEND made by the application
+       through the one insert statement in api/_lib/consent-ledger.mjs. */
+    if (/\bINSERT\s+INTO\b/i.test(code))
+      fail(reoRel, "writes - the readiness lookup reports two facts and clears nothing; the clearance is an append made by the application");
+  }
+
+  /* ---- the reconciliation module -------------------------------------- */
+  const reoModRel = "api/_lib/reoptin.mjs";
+  const reoModPath = join(REPO, reoModRel);
+  if (!existsSync(reoModPath))
+    fail(reoModRel, "missing - the website re-opt-in reconciliation is gone");
+  else {
+    const mod = readFileSync(reoModPath, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+
+    /* THE BOUNDARY IS BOUND ONCE. A module-scope mutable executor is a
+       bypass: an injected one answering "blocked, and a fresh consent
+       exists" manufactures a clearance for a number that never asked. The
+       same correction api/_lib/send-permission.mjs already carries, in the
+       sharper direction. */
+    if (/^\s*let\s+executor\b/m.test(mod))
+      fail(reoModRel, "holds a module-scope mutable executor - an importer could point the readiness lookup at a fabricated answer and manufacture a clearance");
+    if (!/const\s+GATE\s*=\s*makeGate\(/.test(mod))
+      fail(reoModRel, "the readiness boundary is not bound once through makeGate - nothing stops a later refactor making it reassignable");
+
+    /* Both switches, and in the one place. */
+    if (!/export function reoptinActive[\s\S]{0,240}?reoptinEnabled\(env\)\s*&&\s*reoptinConfigured\(env\)/.test(mod))
+      fail(reoModRel, "reoptinActive no longer requires BOTH the flag and the credential - 'on' could mean on for the read and off for the write");
+    if (!/env\?\.\[REOPTIN_FLAG\]\s*===\s*"true"/.test(mod))
+      fail(reoModRel, "the re-opt-in flag is not an exact \"true\" comparison - a feature that clears suppressions must not turn itself on through a typo");
+
+    /* The lane fence. An SMS re-opt-in never clears voice or global. */
+    if (!/AUTOMATIC_UNSUPPRESSION_CHANNELS\.includes\(channel\)/.test(mod))
+      fail(reoModRel, "the decision no longer fences the lane - a START could be made to clear an ai_voice or a global do-not-contact");
+    if (!/readiness\.blocked\[CHANNEL\.ALL\]/.test(mod))
+      fail(reoModRel, "the decision no longer refuses while a global do-not-contact stands - 'remove me from your list' spoke about every channel");
+  }
+
+  /* ---- the ledger contract for an automatic clearance ------------------ */
+  {
+    const ledger = readFileSync(join(REPO, "api/_lib/consent-ledger.mjs"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ");
+    /* The narrowing of "only a human may lift a block" is deliberate and
+       bounded. If the fence is deleted the rule becomes "any source may",
+       and an inbound webhook could lift the suppression a STOP had just
+       created - which is what the operator-only rule bought. */
+    if (!/AUTOMATIC_UNSUPPRESSION_SOURCES\.includes\(src\)/.test(ledger))
+      fail("api/_lib/consent-ledger.mjs", "the automatic-clearance source fence is gone - any source could write an unsuppressed row");
+    if (!/AUTOMATIC_UNSUPPRESSION_CHANNELS\.includes\(ch\)/.test(ledger))
+      fail("api/_lib/consent-ledger.mjs", "the automatic-clearance lane fence is gone - a webhook could clear a global do-not-contact or a voice lane");
+    if (!/automatic[\s\S]{0,120}?reason_code:not_automatic/.test(ledger))
+      fail("api/_lib/consent-ledger.mjs", "recorded_in_error is no longer operator-only - deciding a record was wrong is a judgement about a record, which no webhook can make");
+    /* The clearance must NAME the consent it rests on, and that name must
+       be a website consent_selected key in its own lane. Without this an
+       append-only clearance is untraceable to the agreement behind it, and
+       this table has no UPDATE with which to add the reference later. */
+    for (const [needle, why] of [
+      ["metadata.consent_dedupe_key:not_website",
+        "an automatic clearance could cite a provider or operator row as the consent it rests on"],
+      ["metadata.consent_dedupe_key:cross_channel",
+        "an automatic clearance could cite a consent from a different channel"],
+      ["metadata.consent_dedupe_key:not_a_consent",
+        "an automatic clearance could cite consent_not_selected - the record of NOT ticking - as a grant"],
+    ])
+      if (!ledger.includes(needle))
+        fail("api/_lib/consent-ledger.mjs", `no ${needle} refusal - ${why}`);
+  }
+
+  /* ---- the webhook trigger --------------------------------------------- */
+  {
+    const hook = readFileSync(join(REPO, "api/twilio-inbound.js"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ");
+    /* THE ONE LINE THAT KEEPS OUR LEDGER AND TWILIO IN AGREEMENT. Our own
+       classifier recognises opt-in words Twilio does not act on; clearing
+       on one of those would leave us believing we may text a number the
+       provider still blocks. Only Twilio's own OptOutType=START says the
+       provider lifted its block. */
+    if (!/decision\.source\s*!==\s*"twilio"\s*\|\|\s*decision\.rule\s*!==\s*"opt_out_type_start"/.test(hook))
+      fail("api/twilio-inbound.js", "the re-opt-in trigger is no longer narrowed to Twilio's own OptOutType=START - a locally classified opt-in word would clear our suppression while Twilio still blocked the number");
+    /* A replay created no transition now, and projecting on one would clear
+       a suppression a later STOP has correctly reinstated. */
+    if (!/Number\(result\?\.rowsAffected\)\s*>\s*0/.test(hook))
+      fail("api/twilio-inbound.js", "the clearance is projected without checking rowsAffected - a replayed START would clear cst_sms_suppressed for a number a later STOP has since re-suppressed");
+    /* The reconciliation must sit between the durable append and the
+       projection, so the CRM is written once from the final durable state. */
+    const reconcileAt = hook.indexOf("await reconcileReoptin(");
+    const projectAt = hook.indexOf("await projectToHubSpot(");
+    if (reconcileAt === -1)
+      fail("api/twilio-inbound.js", "does not call reconcileReoptin - a provider-confirmed START can no longer complete a website re-opt-in");
+    else if (projectAt !== -1 && projectAt < reconcileAt)
+      fail("api/twilio-inbound.js", "projects to HubSpot before reconciling the re-opt-in - the CRM would be written from a belief the ledger had not yet settled");
+  }
+}
+
+/* ---------------------------------------------------------------------
    THE ZOHO MAIL ACKNOWLEDGEMENT IS SECONDARY, AND MUST STAY THAT WAY
    ---------------------------------------------------------------------
    One short email is sent from Crystal's mailbox after a lead reaches
@@ -1920,7 +2086,7 @@ for (const file of pages) {
       ["\"metadata.invalidates:not_a_blocking_event\"",
        "a target naming a non-blocking event type is no longer refused - it would be inert in the fold while the operator believed it worked"],
       ["\"source:not_operator\"",
-       "an unsuppressed event no longer requires source=operator - an inbound webhook could format a clearance, and the design's first decision is that no automatic path writes one"],
+       "an unsuppressed event no longer refuses an unlisted source - `retell`, a script or a future integration could format a clearance. `twilio` is the ONE admitted automatic source and is fenced separately; everything else is still refused here"],
       ["\"metadata.error_origin:not_applicable\"",
        "a consumer_request carrying error_origin is no longer refused - it would assert a cause nothing established"],
     ])

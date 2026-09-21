@@ -74,6 +74,11 @@ if (!existsSync(gate8Path)) {
         fail(rel, `calls ${fn}() directly - every sender must go through ${GATE8_REL}, which reads durable suppression last`);
     if (/\b_gateForTest\b/.test(code))
       fail(rel, `builds a gate 8 over injected boundaries - only ${GATE8_REL} may name _gateForTest`);
+    /* Same rule, the other bound boundary. An injected readiness lookup
+       answering "blocked, and a fresh consent exists" manufactures an
+       unsuppression for a number that never asked for one. */
+    if (rel !== "api/_lib/reoptin.mjs" && /\b_reoptinGateForTest\b/.test(code))
+      fail(rel, "builds a re-opt-in readiness gate over injected boundaries - only api/_lib/reoptin.mjs may name _reoptinGateForTest");
   }
 }
 

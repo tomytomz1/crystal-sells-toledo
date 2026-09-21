@@ -498,7 +498,11 @@ export function applySubmissionConsent(currentState, evidence) {
     sms: applyChannel(state.sms, evidence.sms, evidence),
     ai_voice: applyChannel(state.ai_voice, evidence.ai_voice, evidence),
     /* Untouched, always. Suppression is cleared by a re-opt-in workflow,
-       never by a form. */
+       never by a form — and that is still exactly true now that an automatic
+       workflow exists. The clearance is written by api/twilio-inbound.js, on
+       a provider-confirmed START, against the durable evidence THIS fold
+       recorded; the submission that produced the evidence changes nothing on
+       its own. docs/updates/2026-09-21-website-sms-reoptin.md. */
     suppression: state.suppression || {},
   };
 }

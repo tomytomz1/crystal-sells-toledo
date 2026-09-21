@@ -692,9 +692,14 @@ describe("the gate 7 static guards", () => {
        `startedAt` argument on 11 September 2026 and this `replace()`
        silently stopped matching — the "mutation that does not mutate"
        failure the test below already documents, arriving here by a
-       different route. A moved target must fail loudly, not quietly. */
+       different route. A moved target must fail loudly, not quietly.
+
+       It grew a `reoptinGrant` argument on 21 September 2026, when the
+       provider-confirmed re-opt-in reconciliation began running between the
+       durable append and the projection. The pin did its job and failed
+       loudly rather than silently ceasing to mutate; this is the update. */
     const PROJECT_CALL =
-      "  await projectToHubSpot({ decision, from, occurredAt, shape, startedAt });";
+      "  await projectToHubSpot({ decision, from, occurredAt, shape, startedAt, reoptinGrant });";
     assert.ok(src.includes(PROJECT_CALL),
       "the projection call site moved - this test would prove nothing");
     const swapped = src

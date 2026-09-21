@@ -49,4 +49,19 @@
 
   <p class="consent__note">Leaving these unticked will not affect your request &mdash; Crystal
     will still reply by email or phone about what you asked for.</p>
+
+  <!-- THE RE-OPT-IN INSTRUCTION, and it is OUTSIDE the disclosure above on
+       purpose. The disclosure text is versioned evidence: contacts already
+       carry it as the exact wording they agreed to, and editing an existing
+       version retroactively falsifies their record (api/_lib/consent.mjs).
+       This note is ordinary page copy that describes how the system behaves,
+       so it can be corrected without minting a new consent version.
+
+       It says what the system actually does: a ticked box is one of TWO
+       facts, and a previous STOP stands until the other one arrives from the
+       handset itself. Saying less would promise a restart the code refuses to
+       perform. -->
+  <p class="consent__note">Replied <b>STOP</b> to Crystal&rsquo;s texts before? Ticking the
+    text-message box again does not restart them by itself. Reply <b>START</b> from that same
+    phone as well &mdash; texts resume only once both are on record.</p>
 </fieldset>

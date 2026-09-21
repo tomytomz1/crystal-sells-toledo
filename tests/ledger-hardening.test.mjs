@@ -280,13 +280,41 @@ describe("unsuppressed is a first-class suppression-ledger event", () => {
   /* FOUND IN ADVERSARIAL REVIEW, 15 September 2026. Refusing only
      SOURCE_WEBSITE left `twilio` and `retell` able to format a valid
      clearance — so an inbound webhook could lift the suppression a STOP had
-     just created. The design's FIRST decision is that no automatic path
-     writes `unsuppressed` (§4.1, §11). */
-  test("ONLY the operator may lift a block — no automated source may", () => {
-    for (const src of [SOURCE_TWILIO, "retell", "system", "classifier", "cron"])
+     just created. The design's FIRST decision was that no automatic path
+     writes `unsuppressed` (§4.1, §11).
+
+     NARROWED 21 SEPTEMBER 2026, and this test was updated by the change
+     rather than deleted by it. `twilio` is now admitted — for the `sms` lane
+     only, with reason `consumer_request` only, and only carrying a
+     confirmation block naming the website consent it rests on. That fence is
+     tested in full in tests/reoptin.test.mjs. What this test still owns is
+     the OTHER half: every remaining source is refused exactly as before, and
+     a bare `twilio` clearance with no confirmation block does not get
+     through either. */
+  test("no source but the operator and twilio may lift a block", () => {
+    for (const src of ["retell", "system", "classifier", "cron", "manual"])
       refuses(() => buildSuppressionEvent(unsuppressionArgs({ source: src })),
         "source:not_operator");
     assert.equal(buildSuppressionEvent(unsuppressionArgs()).source, SOURCE_OPERATOR);
+  });
+
+  test("an admitted automatic source still cannot write a bare clearance", () => {
+    /* Past the source fence, and stopped by the evidence fence: the
+       operator's own metadata shape carries no confirmation block, so it
+       cannot be reused to mint an automatic clearance. */
+    refuses(() => buildSuppressionEvent(unsuppressionArgs({ source: SOURCE_TWILIO })),
+      "metadata.reoptin_confirmation");
+    /* And it cannot reach a lane that is a human's to clear. */
+    for (const channel of [CHANNEL.AI_VOICE, CHANNEL.ALL])
+      refuses(() => buildSuppressionEvent(unsuppressionArgs({
+        source: SOURCE_TWILIO, channel,
+      })), "channel:not_automatic");
+    /* Nor decide that a record was wrong. */
+    refuses(() => buildSuppressionEvent(unsuppressionArgs({
+      source: SOURCE_TWILIO,
+      reasonCode: UNSUPPRESSION_REASON.RECORDED_IN_ERROR,
+      metadata: { error_origin: "classifier", invalidates: [blockingKey()] },
+    })), "reason_code:not_automatic");
   });
 
   test("the operator-only rule applies to a suppression path that may still use twilio", () => {
