@@ -77,8 +77,12 @@ if (!existsSync(gate8Path)) {
   }
 }
 
-/* The only outbound SMS side-effect site is the dark sender. */
+/* The only outbound SMS side-effect site is the sender, and Gate 9 gives that
+ * sender exactly one production importer: the internal seller acknowledgement
+ * orchestrator. The only production importer of that orchestrator is /api/lead. */
 const SENDER_REL = "api/_lib/sms-sender.mjs";
+const ACK_REL = "api/_lib/lead-sms-ack.mjs";
+const LEAD_REL = "api/lead.js";
 const senderPath = join(REPO, SENDER_REL);
 if (!existsSync(senderPath)) {
   fail(SENDER_REL, "missing - the designated outbound sender is gone");
@@ -113,8 +117,34 @@ if (!existsSync(senderPath)) {
     for (const [re, what] of SENDER_ONLY)
       if (re.test(code))
         fail(rel, `${what} - only ${SENDER_REL} may cause an outbound Twilio side effect`);
-    if (/\bsms-sender\b/.test(code))
-      fail(rel, `imports ${SENDER_REL} - the sender is deliberately unreachable while outbound messaging is dark`);
+    if (/\bsms-sender\b/.test(code) && rel !== ACK_REL)
+      fail(rel, `imports ${SENDER_REL} - deliberately unreachable from this module; only ${ACK_REL} may reach the outbound transport`);
+    if (/\blead-sms-ack\b/.test(code) && rel !== LEAD_REL)
+      fail(rel, `imports ${ACK_REL} - only ${LEAD_REL} may invoke the automatic acknowledgement`);
+  }
+
+  const ackPath = join(REPO, ACK_REL);
+  if (!existsSync(ackPath)) {
+    fail(ACK_REL, "missing - Gate 9 has no closed acknowledgement orchestrator");
+  } else {
+    const ackSrc = strip(readFileSync(ackPath, "utf8"));
+    if (!/import\s*\{[^}]*\bsendSms\b[^}]*\}\s*from\s*"\.\/sms-sender\.mjs"/.test(ackSrc))
+      fail(ACK_REL, `does not import sendSms from ${SENDER_REL}`);
+    if (!/export\s+const\s+sendLeadSmsAcknowledgement\s*=\s*makeLeadSmsAcknowledgement\(\s*sendSms\s*\)/.test(ackSrc))
+      fail(ACK_REL, "the production acknowledgement is not closed over the real sendSms transport");
+    if (/^(?:let|var)\s/m.test(ackSrc))
+      fail(ACK_REL, "declares module-scope mutable state - acknowledgement boundaries must be closed over");
+    if (/export\s+(?:function|const|let|var)\s+_(?:set|reset)/.test(ackSrc))
+      fail(ACK_REL, "exports a mutable production seam");
+  }
+
+  const leadPath = join(REPO, LEAD_REL);
+  if (!existsSync(leadPath)) {
+    fail(LEAD_REL, "missing");
+  } else {
+    const leadSrc = strip(readFileSync(leadPath, "utf8"));
+    if (!/from\s*"\.\/_lib\/lead-sms-ack\.mjs"/.test(leadSrc))
+      fail(LEAD_REL, `does not import the designated ${ACK_REL} orchestrator`);
   }
 
   const sites = senderSrc.match(/\bmessages\s*\.\s*create\s*\(/g) || [];
@@ -141,6 +171,9 @@ if (!existsSync(senderPath)) {
     fail(SENDER_REL, "the outbound flag is not compared strictly to \"true\" - outbound messaging must not switch on through a typo");
   if (/OUTBOUND_SMS_FLAG[^\n]{0,60}(?:!==?\s*"false"|[^!=]==\s*"true")/.test(senderSrc))
     fail(SENDER_REL, "compares the outbound flag loosely - only the exact string \"true\" may enable outbound messaging");
+  if (!/timeout\s*:\s*TWILIO_REQUEST_TIMEOUT_MS/.test(senderSrc) ||
+      !/TWILIO_REQUEST_TIMEOUT_MS\s*=\s*5000/.test(senderSrc))
+    fail(SENDER_REL, "does not enforce the 5-second Twilio request bound for the courtesy acknowledgement");
 
   const flagAt = senderSrc.search(/outboundSmsEnabled\s*\(\s*env\s*\)/);
   const authAt = senderSrc.search(/\bawait\s+authorize\s*\(/);
