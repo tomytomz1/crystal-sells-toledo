@@ -6,12 +6,14 @@ import {
   TWILIO_CONSENT_STATUS,
   TWILIO_CONSENT_REASON,
   TWILIO_CONSENT_ENDPOINT,
+  twilioConsentLogShape,
 } from "../api/_lib/twilio-consent.mjs";
 
 const PHONE = "+14195550000";
 const SERVICE = "MG" + "a".repeat(32);
 const SENDER = "+14195551234";
-const KEY = "SK" + "b".repeat(32);
+const ACCOUNT = "AC" + "b".repeat(32);
+const AUTH_TOKEN = "auth-token-value";
 const CONSENT_AT = "2026-09-21T16:05:49.036Z";
 const UUIDS = [
   "11111111-1111-4111-8111-111111111111",
@@ -21,8 +23,8 @@ const CORRELATION_IDS = UUIDS.map((value) => value.replace(/-/g, ""));
 
 function env(overrides = {}) {
   return {
-    TWILIO_CONSENT_API_KEY_SID: KEY,
-    TWILIO_CONSENT_API_KEY_SECRET: "secret-value",
+    TWILIO_ACCOUNT_SID: ACCOUNT,
+    TWILIO_AUTH_TOKEN: AUTH_TOKEN,
     TWILIO_CONSENT_MESSAGING_SERVICE_SID: SERVICE,
     TWILIO_CONSENT_SENDER_NUMBER: SENDER,
     ...overrides,
@@ -37,6 +39,7 @@ function uuids() {
 function responseFor(ids, codes = [0, 0]) {
   return {
     ok: true,
+    status: 200,
     json: async () => ({
       items: ids.map((id, i) => ({ correlation_id: id, error_code: codes[i], error_messages: [] })),
     }),
@@ -44,14 +47,14 @@ function responseFor(ids, codes = [0, 0]) {
 }
 
 describe("Twilio Consent Management client", () => {
-  test("fails closed when dedicated provider credentials are absent", async () => {
+  test("fails closed when documented provider credentials are absent", async () => {
     const client = _twilioConsentClientForTest({ fetchImpl: async () => { throw new Error("should not call"); }, uuidFactory: uuids() });
     const result = await client({ phone: PHONE, consentAt: CONSENT_AT }, { env: {} });
     assert.equal(result.status, TWILIO_CONSENT_STATUS.NOT_CONFIRMED);
     assert.equal(result.reason, TWILIO_CONSENT_REASON.NOT_CONFIGURED);
   });
 
-  test("posts exactly two website opt-ins: Messaging Service and sender number", async () => {
+  test("posts exactly two website opt-ins using Account SID and Auth Token", async () => {
     const calls = [];
     const client = _twilioConsentClientForTest({
       uuidFactory: uuids(),
@@ -66,7 +69,8 @@ describe("Twilio Consent Management client", () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, TWILIO_CONSENT_ENDPOINT);
     assert.equal(calls[0].options.method, "POST");
-    assert.match(calls[0].options.headers.Authorization, /^Basic /);
+    const expectedAuth = "Basic " + Buffer.from(`${ACCOUNT}:${AUTH_TOKEN}`, "utf8").toString("base64");
+    assert.equal(calls[0].options.headers.Authorization, expectedAuth);
 
     const body = new URLSearchParams(calls[0].options.body);
     const items = body.getAll("Items").map((x) => JSON.parse(x));
@@ -97,6 +101,7 @@ describe("Twilio Consent Management client", () => {
       uuidFactory: uuids(),
       fetchImpl: async () => ({
         ok: true,
+        status: 200,
         json: async () => ({ items: [{ correlation_id: CORRELATION_IDS[0], error_code: 0 }] }),
       }),
     });
@@ -104,16 +109,23 @@ describe("Twilio Consent Management client", () => {
     assert.equal(result.reason, TWILIO_CONSENT_REASON.MALFORMED_RESPONSE);
   });
 
-  test("HTTP/provider exceptions never become confirmed consent", async () => {
+  test("HTTP rejection preserves only safe status diagnostics", async () => {
     const rejected = _twilioConsentClientForTest({
       uuidFactory: uuids(),
-      fetchImpl: async () => ({ ok: false, json: async () => ({}) }),
+      fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({ message: "secret provider detail" }) }),
     });
-    assert.equal(
-      (await rejected({ phone: PHONE, consentAt: CONSENT_AT }, { env: env() })).reason,
-      TWILIO_CONSENT_REASON.HTTP_REJECTED,
-    );
+    const result = await rejected({ phone: PHONE, consentAt: CONSENT_AT }, { env: env() });
+    assert.equal(result.reason, TWILIO_CONSENT_REASON.HTTP_REJECTED);
+    assert.equal(result.http_status, 403);
+    assert.deepEqual(twilioConsentLogShape(result), {
+      consent_provider_status: TWILIO_CONSENT_STATUS.NOT_CONFIRMED,
+      consent_provider_reason: TWILIO_CONSENT_REASON.HTTP_REJECTED,
+      consent_provider_http_status: 403,
+    });
+    assert.ok(!JSON.stringify(result).includes("secret provider detail"));
+  });
 
+  test("provider exceptions never become confirmed consent", async () => {
     const failed = _twilioConsentClientForTest({
       uuidFactory: uuids(),
       fetchImpl: async () => { throw new Error("raw provider detail with PII"); },
