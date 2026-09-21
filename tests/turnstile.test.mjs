@@ -378,6 +378,11 @@ describe("home_value physical-address rule", () => {
       "123 Main St, Toledo, OH 43604",
       "7824 Oak Ridge Drive, Sylvania, OH",
       "10 Boxwood Lane, Perrysburg, OH 43551",
+      /* "Post Office" WITHOUT "Box" is a street name, not a mail drop. The
+         rule's spelled-out branch requires BOX; drop that requirement and
+         these real addresses are hard-rejected before the CRM. */
+      "1 Post Office Road, Maumee, OH",
+      "5 Post Office Square, Toledo, OH",
     ]) {
       const result = validateLead({ ...validHomeValue, property_address: address });
       assert.equal(result.lead.property_address, address);
