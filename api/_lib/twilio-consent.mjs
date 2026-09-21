@@ -10,23 +10,26 @@
    records succeed. A partial response is therefore failure, never degraded
    success.
 
-   It sends no SMS. It never touches Neon or HubSpot. It never uses the
-   inbound TWILIO_AUTH_TOKEN. A dedicated API key pair is used so the consent
-   capability can be enabled, rotated and revoked separately from message
-   sending and inbound signature verification.
+   It sends no SMS. It never touches Neon or HubSpot.
+
+   Authentication follows Twilio's Consent Management API reference, which
+   explicitly shows Account SID + Auth Token for this endpoint. This is
+   intentionally different from the outbound SMS transport, which continues to
+   use its own restricted API key. The Auth Token is already present server-side
+   for inbound webhook signature validation and is never logged or returned.
    ===================================================================== */
 
 import { randomUUID } from "node:crypto";
 import { toE164 } from "./consent-ledger.mjs";
 
-export const TWILIO_CONSENT_API_KEY_SID_VAR = "TWILIO_CONSENT_API_KEY_SID";
-export const TWILIO_CONSENT_API_KEY_SECRET_VAR = "TWILIO_CONSENT_API_KEY_SECRET";
+export const TWILIO_ACCOUNT_SID_VAR = "TWILIO_ACCOUNT_SID";
+export const TWILIO_AUTH_TOKEN_VAR = "TWILIO_AUTH_TOKEN";
 export const TWILIO_CONSENT_SERVICE_SID_VAR = "TWILIO_CONSENT_MESSAGING_SERVICE_SID";
 export const TWILIO_CONSENT_SENDER_VAR = "TWILIO_CONSENT_SENDER_NUMBER";
 export const TWILIO_CONSENT_ENDPOINT = "https://accounts.twilio.com/v1/Consents/Bulk";
 export const TWILIO_CONSENT_TIMEOUT_MS = 4500;
 
-const API_KEY_SID = /^SK[0-9a-fA-F]{32}$/;
+const ACCOUNT_SID = /^AC[0-9a-fA-F]{32}$/;
 const SERVICE_SID = /^MG[0-9a-fA-F]{32}$/;
 const CORRELATION_ID = /^[0-9a-fA-F]{32}$/;
 
@@ -58,12 +61,12 @@ function readEnv(env, name) {
 }
 
 export function twilioConsentConfig(env = process.env) {
-  const keySid = readEnv(env, TWILIO_CONSENT_API_KEY_SID_VAR);
-  const keySecret = readEnv(env, TWILIO_CONSENT_API_KEY_SECRET_VAR);
+  const accountSid = readEnv(env, TWILIO_ACCOUNT_SID_VAR);
+  const authToken = readEnv(env, TWILIO_AUTH_TOKEN_VAR);
   const serviceSid = readEnv(env, TWILIO_CONSENT_SERVICE_SID_VAR);
   const senderRaw = readEnv(env, TWILIO_CONSENT_SENDER_VAR);
 
-  if (!keySid || !keySecret || !serviceSid || !senderRaw)
+  if (!accountSid || !authToken || !serviceSid || !senderRaw)
     return { ok: false, reason: TWILIO_CONSENT_REASON.NOT_CONFIGURED };
 
   let senderNumber;
@@ -73,10 +76,10 @@ export function twilioConsentConfig(env = process.env) {
     return { ok: false, reason: TWILIO_CONSENT_REASON.CONFIG_MALFORMED };
   }
 
-  if (!API_KEY_SID.test(keySid) || !SERVICE_SID.test(serviceSid))
+  if (!ACCOUNT_SID.test(accountSid) || !SERVICE_SID.test(serviceSid))
     return { ok: false, reason: TWILIO_CONSENT_REASON.CONFIG_MALFORMED };
 
-  return Object.freeze({ ok: true, keySid, keySecret, serviceSid, senderNumber });
+  return Object.freeze({ ok: true, accountSid, authToken, serviceSid, senderNumber });
 }
 
 function correlationId(uuidFactory) {
@@ -89,8 +92,12 @@ function correlationId(uuidFactory) {
   return CORRELATION_ID.test(raw) ? raw.toLowerCase() : "";
 }
 
-function notConfirmed(reason) {
-  return Object.freeze({ status: TWILIO_CONSENT_STATUS.NOT_CONFIRMED, reason });
+function notConfirmed(reason, extra = {}) {
+  return Object.freeze({
+    status: TWILIO_CONSENT_STATUS.NOT_CONFIRMED,
+    reason,
+    ...extra,
+  });
 }
 
 function parseInstant(value) {
@@ -98,8 +105,13 @@ function parseInstant(value) {
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
-function basicAuth(keySid, keySecret) {
-  return "Basic " + Buffer.from(`${keySid}:${keySecret}`, "utf8").toString("base64");
+function basicAuth(username, password) {
+  return "Basic " + Buffer.from(`${username}:${password}`, "utf8").toString("base64");
+}
+
+function safeHttpStatus(response) {
+  const status = Number(response?.status);
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
 }
 
 function makeClient({ fetchImpl, uuidFactory }) {
@@ -158,7 +170,7 @@ function makeClient({ fetchImpl, uuidFactory }) {
       response = await fetchImpl(TWILIO_CONSENT_ENDPOINT, {
         method: "POST",
         headers: {
-          Authorization: basicAuth(config.keySid, config.keySecret),
+          Authorization: basicAuth(config.accountSid, config.authToken),
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: body.toString(),
@@ -173,8 +185,13 @@ function makeClient({ fetchImpl, uuidFactory }) {
       clearTimeout(timer);
     }
 
-    if (!response || response.ok !== true)
-      return notConfirmed(TWILIO_CONSENT_REASON.HTTP_REJECTED);
+    if (!response || response.ok !== true) {
+      const httpStatus = safeHttpStatus(response);
+      return notConfirmed(
+        TWILIO_CONSENT_REASON.HTTP_REJECTED,
+        httpStatus ? { http_status: httpStatus } : {},
+      );
+    }
 
     let json;
     try {
@@ -228,5 +245,8 @@ export function twilioConsentLogShape(result) {
   return {
     consent_provider_status: String(result?.status || "unknown"),
     ...(result?.reason ? { consent_provider_reason: String(result.reason) } : {}),
+    ...(Number.isInteger(result?.http_status)
+      ? { consent_provider_http_status: result.http_status }
+      : {}),
   };
 }
