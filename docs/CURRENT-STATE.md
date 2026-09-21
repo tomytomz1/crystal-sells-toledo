@@ -10,14 +10,14 @@ Resolve `origin/main` dynamically. Do not pin this file to a commit SHA merely b
 - Static pages are built from `src/` into generated `public/`. **Edit `src/`, never `public/`.**
 - Live server endpoints:
   - `api/lead.js` — lead intake.
-  - `api/twilio-inbound.js` — signed inbound SMS STOP/HELP/classification path.
+  - `api/twilio-inbound.js` — signed inbound SMS STOP/HELP/START classification path, and the website re-opt-in reconciliation (off; see below).
   - `api/operator-action.js` — human suppression action for surfaced unclassified SMS.
   - `api/operator-unsuppress.js` — deliberate human unsuppression.
 - HubSpot is the live CRM.
 - Neon Postgres is the append-only consent/suppression evidence system of record.
 - Zoho Mail SMTP is live for acknowledgement/operator email. Zoho CRM is dormant rollback.
 - Cloudflare Turnstile is live on the lead path.
-- Gate 9's narrow internal outbound path is implemented as `api/lead.js` -> `api/_lib/lead-sms-ack.mjs` -> `api/_lib/sms-sender.mjs`, but it remains deliberately **dark** because `OUTBOUND_SMS_ENABLED` is off/unset. There is no generic/public send-SMS endpoint.
+- Gate 9's narrow internal outbound path is `api/lead.js` -> `api/_lib/lead-sms-ack.mjs` -> `api/_lib/sms-sender.mjs`, and it is the only outbound SMS path in the repository. There is no generic/public send-SMS endpoint. The operator reports `OUTBOUND_SMS_ENABLED=true` in Production; see the Gate 9 section below for what that report does and does not evidence here.
 - No automated AI-voice caller exists.
 
 ## Production controls already live
@@ -49,7 +49,7 @@ Resolve `origin/main` dynamically. Do not pin this file to a commit SHA merely b
 | **6 — A2P Campaign approved** | **CLOSED.** Twilio approved the corrected A2P 10DLC campaign on 18 Sep 2026 and reports it registered with carriers. |
 | **7 — inbound STOP / provider opt-out confirmations** | **CLOSED.** Real STOP -> Twilio `OptOutType=STOP` -> signed Production webhook -> Neon suppression -> HubSpot projection is proven, and post-approval STOP/START/HELP confirmation messages all reached the handset. |
 | **8 — send-time authorization** | **CLOSED FOR THE DARK AUTHORIZATION BOUNDARY; SENDER STILL DARK.** Dedicated sender-role DB lookup has been executed successfully by the deployed Production app. The internal Gate 9 call path exists, but the outbound feature flag remains off. |
-| **9 — controlled consent -> send -> STOP/DNC** | **OPEN.** The automatic acknowledgement path is implemented behind the dark sender. Remaining work is deliberate outbound activation followed by one controlled end-to-end exercise. |
+| **9 — controlled consent -> send -> STOP/DNC** | **REPORTED CLOSED BY THE OPERATOR, NOT VERIFIED BY THIS REPOSITORY.** See the Gate 9 section below for exactly what was reported and what remains unevidenced here. |
 
 ## Gate 6 — Twilio A2P 10DLC
 
@@ -126,6 +126,10 @@ Independent HubSpot readback confirmed:
 
 **Unsuppression never grants consent.** It also does not reconcile Twilio provider-level opt-out state.
 
+This workflow is **unchanged** by the website re-opt-in path below, and remains
+the documented fallback and the only path that can clear an `ai_voice` or `all`
+lane or record a `recorded_in_error` correction.
+
 Detail: `docs/updates/2026-09-18-unsuppression-operator-workflow.md`.
 
 ## Gate 8 — send-time authorization and dark SMS transport
@@ -163,20 +167,80 @@ The final Gate 8 suppression read and the external Twilio acceptance are not one
 
 Now that Gate 6 is approved, outbound credentials may be configured only as part of a deliberate Gate 9 activation plan. Do not set `OUTBOUND_SMS_ENABLED=true` until the controlled send target, fresh consent evidence, rollback/disable path, and evidence-capture steps are ready.
 
+## Gate 9 — outbound activation
+
+**Reported closed by the operator on or before 21 September 2026. Recorded here
+with its provenance rather than as a repository-verified fact.**
+
+The operator's session brief states that in Production, with
+`OUTBOUND_SMS_ENABLED=true` and Twilio Advanced Opt-Out active:
+
+- an opted-in `/home-value` submission sent the acknowledgement SMS;
+- the consumer replied `STOP`;
+- the durable suppression path ran;
+- HubSpot projected `cst_sms_suppressed=true`;
+- the suppression reason was `stop_keyword`.
+
+**What this file does not assert.** No session recorded in this repository has
+itself read those Twilio, Neon or HubSpot records. The next session to touch
+Gate 9 should confirm the readings directly — and post them to the Pulse Log —
+before any further claim rests on them. Sections written before 21 September
+2026 that describe the sender as dark describe the state at their own date.
+
+## Website SMS re-opt-in — BUILT AND OFF
+
+An automatic two-factor clearance exists in the repository and is **not
+activated anywhere**.
+
+- `SMS_REOPTIN_ENABLED` is unset in every environment. Only exact `"true"`
+  enables it.
+- `CONSENT_LEDGER_REOPTIN_URL` is configured in no environment.
+- **`db/004_website_reoptin.sql` has not been applied to any database**, so
+  `get_reoptin_readiness()` does not exist in Neon and the
+  `consent_ledger_reoptin` role does not exist.
+
+With either switch absent, `api/twilio-inbound.js` behaves exactly as it did
+before: a `START` is recorded as a re-opt-in request and the suppression stands.
+
+**What it does when activated.** A previous `STOP` is lifted only when BOTH a
+fresh, phone-matched, durably evidenced website SMS consent AND a
+**Twilio-classified** `OptOutType=START` from that handset are on record. The
+clearance is a new append-only `unsuppressed`/`consumer_request` event that
+db/003 folds exactly as it folds the operator's; the original `STOP` row is
+never touched. A ticked box alone clears nothing, a `START` alone clears
+nothing, and a locally classified opt-in word clears nothing — only Twilio's own
+`OptOutType` says the provider lifted its own block.
+
+It never clears an `ai_voice` or `all` lane, and it never writes a
+`recorded_in_error` correction. Both remain the human operator's alone.
+
+Full design, the Twilio research it rests on, the residual abuse risk, the
+failure semantics and the production verification sequence:
+`docs/updates/2026-09-21-website-sms-reoptin.md`.
+
+**Twilio provider-level opt-out.** Twilio publishes no REST API for removing a
+number from a Messaging Service's Advanced Opt-Out block list, so none is
+called. Reconciliation happens because Twilio lifts its own block when it
+processes the `START` that triggers ours. Twilio's Consent Management API is a
+recorded follow-up, not a dependency — §2.2 of that document says why.
+
 ## Remaining application gaps
 
-- Gate 9 remains open until compliant outbound sending is deliberately activated and tested.
+- Gate 9's closure is an operator report this repository has not independently verified.
 - No automated AI-voice caller exists and no spoken-DNC Retell ingress exists.
-- Local unsuppression and Twilio provider-level opt-out state remain separate systems.
+- Operator unsuppression still does not reconcile Twilio provider-level opt-out
+  state. The website re-opt-in path does, by triggering on the provider's own
+  `START` — but it is not activated, and `db/004` is not applied.
+- There is no supported Twilio API for clearing an Advanced Opt-Out block list
+  entry, so no code path attempts one.
 
 ## Safe next sequence
 
 1. Preserve the approved A2P campaign and working Messaging Service / Advanced Opt-Out configuration.
-2. Prepare the controlled Gate 9 test before enabling the sender: choose a controlled target, capture fresh evidenced SMS consent, define the exact test message, and keep the disable path immediately available.
-3. Configure the outbound Twilio API-key variables required by the dark sender without changing `OUTBOUND_SMS_ENABLED` yet.
-4. Re-verify the exact Production configuration boundary, then deliberately set `OUTBOUND_SMS_ENABLED=true` only for the controlled test.
-5. Execute one consent -> authorized send -> STOP/DNC exercise and capture Twilio, Neon, HubSpot, and handset evidence.
-6. Disable or leave enabled only according to the explicit post-test operating decision.
+2. **Verify the Gate 9 report directly** — read the Twilio, Neon and HubSpot records for the exercise the operator described, record the actual readings in the Pulse Log, and reconcile the Gate 9 section above with what was observed rather than with what was reported.
+3. Only then, activate the website SMS re-opt-in, in this order and no other: apply `db/004_website_reoptin.sql` as the table owner and run its §4 verification in full; configure `CONSENT_LEDGER_REOPTIN_URL` while leaving `SMS_REOPTIN_ENABLED` unset and confirm the endpoint is unchanged; prove the credential from the deployed application; then set the flag for one controlled exercise.
+4. Execute that exercise end to end — consent, send, `STOP`, fresh consent, `START` — and capture Twilio, Neon, HubSpot and handset evidence at every step. The exact sequence is `docs/updates/2026-09-21-website-sms-reoptin.md` §11.
+5. Disable or leave enabled only according to the explicit post-test operating decision.
 
 ## Repository / release controls
 

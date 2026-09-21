@@ -692,6 +692,87 @@ export function toHubSpotReoptinProperties({ channel, at } = {}) {
   };
 }
 
+/**
+ * Project a COMPLETED website re-opt-in into HubSpot current state.
+ *
+ * WHY THIS IS NOT toHubSpotUnsuppressionProperties(). That function projects
+ * an OPERATOR clearance, and an operator clearance carries no consent: it
+ * lifts a block and deliberately leaves the permission at NEVER_GRANTED,
+ * because a human deciding a number may be contacted again is not the number's
+ * owner agreeing to be contacted. A completed re-opt-in is the opposite case —
+ * it exists only because a fresh, phone-matched, durably recorded agreement to
+ * the current disclosure was found, and the START that confirmed it came from
+ * the line itself. Writing NEVER_GRANTED here would discard the one thing that
+ * made the clearance lawful.
+ *
+ * So this emits BOTH halves of one transition, and they must not be split:
+ * the suppression clears and the permission becomes GRANTED, bound to the
+ * phone, moment and disclosure version of the durable consent event named in
+ * the clearance row.
+ *
+ * WHAT IT NEVER TOUCHES:
+ *   * ai_voice, in any form. SMS and automated voice are separate permissions
+ *     everywhere else in this system and an SMS re-opt-in grants no voice.
+ *   * cst_do_not_call* and cst_do_not_contact*. A global do-not-contact is
+ *     cleared only by api/operator-unsuppress.js, and api/_lib/reoptin.mjs
+ *     refuses the whole transition while one stands.
+ *   * the two re-opt-in request properties. They record that someone asked,
+ *     which stays true after the request is honoured — the same treatment the
+ *     operator workflow gives them.
+ *
+ * IT TAKES NO `current` STATE, and that is the difference from every other
+ * builder in this module. The others fold a patch onto what HubSpot already
+ * holds, so they need to read it. This one does not: by the time it runs the
+ * clearance is already durable in the append-only ledger, and THAT is the
+ * authority. A contact whose state could not be read, or which HubSpot never
+ * had, still gets the flag cleared and the grant written — a CRM read failure
+ * is not a reason to leave HubSpot asserting a suppression the system of
+ * record no longer holds. The `cst_*` properties remain a projection either
+ * way; api/_lib/permission.mjs treats them as a conservative overlay on the
+ * ledger, never as the source of truth.
+ */
+export function toHubSpotReoptinGrantProperties({ channel, consent } = {}) {
+  /* One lane, and it is a literal rather than a parameter with a default.
+     api/_lib/reoptin.mjs fences the lane too; this is the second fence, in
+     the layer that would actually write the property. */
+  if (channel !== "sms")
+    throw new ConsentStateError(MALFORMED_RESPONSE, "REOPTIN_GRANT_PROJECT");
+  if (!consent || typeof consent !== "object" || Array.isArray(consent))
+    throw new ConsentStateError(MALFORMED_RESPONSE, "REOPTIN_GRANT_PROJECT");
+
+  const S = SUPPRESSION_PROPERTIES;
+  const M = SMS_STATE_PROPERTIES;
+  const props = {};
+
+  /* THE CLEARANCE. Unconditional, and all three together: a contact left
+     reading `suppressed=false` beside a populated suppression timestamp and
+     reason is a record that contradicts itself, and an operator reading it
+     cannot tell which half is current. */
+  props[S.smsSuppressed] = "false";
+  props[S.smsSuppressedAt] = "";
+  props[S.smsSuppressionReason] = "";
+
+  /* THE GRANT. Throws rather than writing a permission with a blank
+     timestamp, a blank number or a blank disclosure version — the props
+     object is discarded with the request that was being built, the durable
+     clearance stands, and the failure is logged. A grant HubSpot cannot tie
+     to a disclosure is the one this project refuses to write. */
+  props[M.status] = assertConsentEnum(M.status, GRANTED, PERMISSION_STATUS_VALUES);
+  props[M.at] = toHubSpotDateTime(consent.occurredAt, M.at);
+  const phone = str(consent.phone);
+  if (!phone) throw new ConsentStateError(MALFORMED_VALUE, "REOPTIN_GRANT_PROJECT");
+  props[M.phone] = phone;
+  const version = str(consent.version);
+  if (!version) throw new ConsentStateError(MALFORMED_VALUE, "REOPTIN_GRANT_PROJECT");
+  props[M.version] = version;
+  /* Descriptive, not load-bearing: an empty form type or page narrows what an
+     operator can see, and narrows nothing about the permission. */
+  props[M.source] = str(consent.formType);
+  props[M.page] = str(consent.pagePath);
+
+  return props;
+}
+
 /** A PII-free log line: which properties were written, never their values. */
 export function suppressionWriteLogShape(props) {
   return { properties: Object.keys(props || {}).sort() };

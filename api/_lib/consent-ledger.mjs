@@ -202,6 +202,55 @@ const INVALIDATABLE_EVENT_TYPES = Object.freeze([
 ]);
 
 /* ---------------------------------------------------------------------
+   THE ONE AUTOMATIC CLEARANCE, AND ITS FENCE
+   ---------------------------------------------------------------------
+   Until 21 September 2026 this module refused EVERY `unsuppressed` row
+   whose source was not `operator`, and the comment in validateUnsuppression()
+   said so in one line: "only a human may lift a block". That rule bought
+   something real — an inbound webhook could otherwise lift the suppression a
+   STOP had just created — and it is not being deleted. It is being narrowed
+   to the one case where the provider itself has already lifted its own block
+   and the handset proved it.
+
+   A `twilio_start` clearance is admitted ONLY when every one of these holds,
+   and each is checked below before any database call:
+
+     * the source is `twilio`, so the row came from a signature-verified
+       inbound webhook and not from a form, an operator form or a script;
+     * the lane is `sms`. NEVER `all` — a global do-not-contact is a human's
+       to clear — and NEVER `ai_voice`: START is a messaging keyword, the
+       voice permission is a separate permission everywhere else in this
+       system, and there is no voice ingress for it to have come from;
+     * the reason is `consumer_request`, so db/003 folds it as a lane
+       clearance. `recorded_in_error` stays operator-only: correcting a
+       record is a judgement about a record, which no webhook can make;
+     * the row NAMES THE CONSENT THAT JUSTIFIES IT — the dedupe_key of a
+       website `consent_selected` row in the same lane, plus that row's
+       occurred_at. An append-only clearance that cannot be traced back to
+       the agreement it rests on is a clearance an auditor cannot check, and
+       this table has no UPDATE with which to add the reference later.
+
+   WHAT THIS MODULE STILL DOES NOT CHECK, and does not pretend to: that the
+   named consent row exists, is fresh, or post-dates the refusal. That needs
+   a read this module holds no privilege for. It is `get_reoptin_readiness`
+   in db/004, evaluated by api/_lib/reoptin.mjs, and a caller that skipped it
+   would produce a row naming a consent that proves nothing — inert for the
+   consumer, because the fold would still clear the lane, so the check is the
+   caller's duty and is stated as such rather than implied away here. */
+export const AUTOMATIC_UNSUPPRESSION_SOURCES = Object.freeze([SOURCE_TWILIO]);
+export const AUTOMATIC_UNSUPPRESSION_CHANNELS = Object.freeze([CHANNEL.SMS]);
+
+/** How an automatic clearance learned the phone's owner asked for it.
+ *  Closed, for the same reason every other vocabulary here is closed: an
+ *  unknown value would sit forever in a table with no UPDATE grant. */
+export const REOPTIN_CONFIRMATION = Object.freeze({
+  /* A provider-classified START/UNSTOP from the handset itself, delivered on
+     the signed inbound webhook. Twilio has lifted its own block by the time
+     this arrives, which is the other half of the reconciliation. */
+  TWILIO_START: "twilio_start",
+});
+
+/* ---------------------------------------------------------------------
    FAILING CLOSED
    ---------------------------------------------------------------------
    Every refusal below is an append failure, and an append failure
@@ -739,20 +788,91 @@ function requireOneOf(value, allowed, field) {
    * CONSUMER ATTESTATION AND TOKEN SEMANTICS. They belong to the endpoint
      that authenticates the human, not to the module that formats a row.
    --------------------------------------------------------------------- */
+/**
+ * The evidence an AUTOMATIC lane clearance must carry, checked before any
+ * database call because this table has no UPDATE and no DELETE grant.
+ *
+ * RETURNS THE METADATA THAT WILL BE STORED, canonicalised — for exactly the
+ * reason the `invalidates` list is canonicalised above. Validating a trimmed
+ * value and storing the untrimmed one would make every rule here decorative
+ * the moment anyone tried to join on it.
+ */
+function validateProviderConfirmation(ch, metadata) {
+  const confirmation = requireOneOf(
+    metadata.reoptin_confirmation, Object.values(REOPTIN_CONFIRMATION),
+    "metadata.reoptin_confirmation");
+
+  /* THE CONSENT THIS CLEARANCE RESTS ON, named by the only identifier a
+     caller holding no SELECT can derive: `source:source_event_id:channel:
+     event_type`, which db/001 declares NOT NULL UNIQUE so it names at most
+     one row. `event_id` was rejected for the same reason db/003 rejected it:
+     learning it needs the table read the privilege model forbids. */
+  const rawKey = metadata.consent_dedupe_key;
+  if (typeof rawKey !== "string")
+    throw new ConsentLedgerError(
+      LEDGER_EVIDENCE_INCOMPLETE, "metadata.consent_dedupe_key:not_a_key");
+  const key = rawKey.trim();
+  const parts = key.split(":");
+  if (parts.length !== 4 || parts.some((x) => !x))
+    throw new ConsentLedgerError(
+      LEDGER_EVIDENCE_INCOMPLETE, "metadata.consent_dedupe_key:malformed_key");
+  /* Only a submission that DISPLAYED a disclosure can evidence agreement to
+     one, and only a ticked box is an agreement. A provider or operator row
+     carries no disclosure text; `consent_not_selected` is the record of NOT
+     ticking and must never be cited as a grant. */
+  if (parts[0] !== SOURCE_WEBSITE)
+    throw new ConsentLedgerError(
+      LEDGER_EVIDENCE_INCOMPLETE, "metadata.consent_dedupe_key:not_website");
+  if (parts[2] !== ch)
+    throw new ConsentLedgerError(
+      LEDGER_EVIDENCE_INCOMPLETE, "metadata.consent_dedupe_key:cross_channel");
+  if (parts[3] !== EVENT_TYPE.CONSENT_SELECTED)
+    throw new ConsentLedgerError(
+      LEDGER_EVIDENCE_INCOMPLETE, "metadata.consent_dedupe_key:not_a_consent");
+
+  /* When that agreement was given. Stored so the clearance can be audited
+     without a second lookup, and required so a caller cannot cite a key it
+     never actually read. */
+  const consentAt = requireInstant(
+    metadata.consent_occurred_at, "metadata.consent_occurred_at");
+
+  return {
+    ...metadata,
+    reoptin_confirmation: confirmation,
+    consent_dedupe_key: key,
+    consent_occurred_at: consentAt,
+  };
+}
+
 function validateUnsuppression(ch, src, reasonCode, metadata) {
   /* RETURNS THE METADATA THAT WILL BE STORED, canonicalised. Validating one
      value and storing a different one is how a rule becomes decorative:
      see the `invalidates` trim below. */
 
-  /* ONLY A HUMAN MAY LIFT A BLOCK. The approved design's first decision is
-     that NO AUTOMATIC PATH WRITES `unsuppressed` (§4.1, §11: source is
-     `operator`, "a human did this, and no other source may"). Refusing only
-     SOURCE_WEBSITE — which is all the general check below does — leaves
-     `twilio` and `retell` able to format a perfectly valid clearance, so
-     an inbound webhook could lift the suppression a STOP had just created.
-     That is the one direction this whole workflow exists to keep manual. */
-  if (src !== SOURCE_OPERATOR)
+  /* WHO MAY LIFT A BLOCK — narrowed 21 September 2026, not widened open.
+     The approved design's first decision was that NO AUTOMATIC PATH WRITES
+     `unsuppressed` (§4.1, §11: source is `operator`, "a human did this, and
+     no other source may"), and the reason it was worth having is unchanged:
+     refusing only SOURCE_WEBSITE — which is all the general check in
+     buildSuppressionEvent() does — leaves every other source able to format
+     a perfectly valid clearance, so an inbound webhook could lift the
+     suppression a STOP had just created.
+
+     `twilio` is now the ONE admitted automatic source, and it buys none of
+     that back: it is admitted only for the `sms` lane, only with reason
+     `consumer_request`, and only carrying a confirmation block that names
+     the website consent it rests on. `retell`, `system`, a script and
+     anything else are refused here exactly as before, and
+     `recorded_in_error` stays a human's judgement in every case. The full
+     fence, and why each part of it is load-bearing, is at
+     AUTOMATIC_UNSUPPRESSION_SOURCES above. */
+  const automatic = src !== SOURCE_OPERATOR;
+  if (automatic && !AUTOMATIC_UNSUPPRESSION_SOURCES.includes(src))
     throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "source:not_operator");
+  /* The lane fence, applied before anything else an automatic clearance
+     could be judged on. `all` and `ai_voice` are a human's to clear. */
+  if (automatic && !AUTOMATIC_UNSUPPRESSION_CHANNELS.includes(ch))
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "channel:not_automatic");
 
   const reason = requireOneOf(reasonCode, Object.values(UNSUPPRESSION_REASON), "reason_code");
 
@@ -782,10 +902,17 @@ function validateUnsuppression(ch, src, reasonCode, metadata) {
     if (origin !== undefined && origin !== null)
       throw new ConsentLedgerError(
         LEDGER_EVIDENCE_INCOMPLETE, "metadata.error_origin:not_applicable");
-    return metadata;
+    return automatic ? validateProviderConfirmation(ch, metadata) : metadata;
   }
 
-  /* recorded_in_error — a TARGETED INVALIDATION. */
+  /* recorded_in_error — a TARGETED INVALIDATION, AND A HUMAN'S JUDGEMENT.
+     Deciding that a record was wrong is a statement about the record, which
+     no webhook is in a position to make. The automatic path may only say
+     "the consumer asked for this lane back", never "that row should not
+     have been written". */
+  if (automatic)
+    throw new ConsentLedgerError(LEDGER_EVIDENCE_INCOMPLETE, "reason_code:not_automatic");
+
   requireOneOf(origin, Object.values(UNSUPPRESSION_ERROR_ORIGIN), "metadata.error_origin");
 
   if (!Array.isArray(targets))

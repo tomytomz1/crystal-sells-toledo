@@ -113,8 +113,13 @@ import { SUPPRESSION_REASON } from "./_lib/consent.mjs";
 import { SUPPRESSION_SCOPE } from "./_lib/permission.mjs";
 import {
   consentStateEnabled, toHubSpotSuppressionProperties, toHubSpotReoptinProperties,
-  suppressionWriteLogShape, SUPPRESSION_TRIGGER,
+  toHubSpotReoptinGrantProperties, suppressionWriteLogShape, SUPPRESSION_TRIGGER,
 } from "./_lib/hubspot-consent-state.mjs";
+import {
+  reoptinActive, reoptinEnabled, lookupReoptinReadiness, evaluateReoptin,
+  buildReoptinUnsuppression, appendReoptinUnsuppression, reoptinLogShape,
+  REOPTIN_LOOKUP_TIMEOUT_MS, REOPTIN_APPEND_TIMEOUT_MS, REOPTIN_MIN_BUDGET_MS,
+} from "./_lib/reoptin.mjs";
 import {
   findContactsByPhone, writeSuppressionProperties, isConfigured, HUBSPOT_TIMEOUT_MS,
 } from "./_lib/hubspot.mjs";
@@ -510,8 +515,26 @@ export default async function handler(req, res) {
     return reply(req, res, 503);
   }
 
+  /* ---- 3a. THE RE-OPT-IN RECONCILIATION ----------------------------
+     AFTER the request is durably recorded and BEFORE anything is projected,
+     so the CRM is written once, from the final durable state, rather than
+     twice from two different beliefs about it.
+
+     It clears a lane only on a provider-confirmed START standing beside a
+     fresh, phone-matched, durably evidenced website consent. Every other
+     answer — off, unconfigured, out of budget, database unavailable, no
+     qualifying consent, a global block, a replay — leaves the suppression
+     exactly where it was and returns null. Nothing here can fail the
+     webhook: the record this endpoint exists to make is already durable,
+     and failing closed means staying suppressed, not answering 5xx. */
+  const reoptinGrant = decision.kind === "reoptin"
+    ? await reconcileReoptin({
+      decision, params, from, messageSid, occurredAt, shape, startedAt,
+    })
+    : null;
+
   /* ---- 4. THE PROJECTION, BEST-EFFORT AND BOUNDED ------------------- */
-  await projectToHubSpot({ decision, from, occurredAt, shape, startedAt });
+  await projectToHubSpot({ decision, from, occurredAt, shape, startedAt, reoptinGrant });
 
   return reply(req, res, 200, EMPTY_TWIML);
 }
@@ -604,6 +627,195 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
   return reply(req, res, 200, EMPTY_TWIML);
 }
 
+/* ---------------------------------------------------------------------
+   THE RE-OPT-IN RECONCILIATION
+   ---------------------------------------------------------------------
+   TWO FACTS, BOTH DURABLE, OR NOTHING HAPPENS.
+
+     1. TWILIO ITSELF classified this message START. Not our own keyword
+        layer — TWILIO'S `OptOutType=START`.
+     2. A fresh, phone-matched website SMS consent is in the append-only
+        ledger, post-dating every refusal it would have to supersede.
+
+   WHY RULE 1 IS THE PROVIDER'S CLASSIFICATION AND NOT OUR OWN, which is the
+   single most important line in this function:
+
+   Under Advanced Opt-Out, Twilio LIFTS ITS OWN BLOCK when it processes a
+   START. That is what makes the reconciliation whole — our ledger and the
+   provider agree afterwards. Our local classifier (api/_lib/optout.mjs)
+   recognises a wider set, including `optin` and `opt in`, which are NOT
+   Twilio opt-in keywords. Clearing on one of those would leave our ledger
+   saying "allowed" while Twilio still refused the number: a send that gate 8
+   permits and the provider drops, and a consumer we believe we may text.
+   That split is the exact outcome this whole workflow exists to prevent, so
+   the trigger is narrowed to the one case where the provider has TOLD us it
+   processed an opt-in. Every other re-opt-in signal is still recorded as a
+   request, exactly as before, and clears nothing.
+
+   Twilio publishes no REST API for removing a number from a Messaging
+   Service's Advanced Opt-Out block list, so there is no server-side
+   alternative to reconcile against and none is attempted. The research and
+   the sources are in docs/updates/2026-09-21-website-sms-reoptin.md §2.
+
+   EVERY OTHER OUTCOME RETURNS null AND CHANGES NOTHING. Off, unconfigured,
+   out of budget, database unavailable, malformed answer, a global
+   do-not-contact, a lane that is not blocked, no qualifying consent, a
+   replayed webhook: the suppression stands and this endpoint behaves as it
+   did before. It never throws and never changes the response — the record
+   this endpoint exists to make is already durable by the time it runs, and
+   a 5xx here would ask Twilio to redeliver a message that was handled.
+   --------------------------------------------------------------------- */
+async function reconcileReoptin({
+  decision, params, from, messageSid, occurredAt, shape, startedAt,
+}) {
+  /* RULE 1. `source` and `rule` together, not either alone: `rule` names the
+     branch of classify() that produced this, and only that branch is reached
+     when Twilio supplied OptOutType=START. */
+  if (decision.source !== "twilio" || decision.rule !== "opt_out_type_start") {
+    log("twilio.inbound.reoptin_skipped", { ...shape, reason: "not_provider_start" });
+    return null;
+  }
+  /* The lane, checked here as well as in api/_lib/reoptin.mjs and again in
+     the ledger builder. A START is an SMS keyword and clears an SMS lane. */
+  if (decision.scope !== SUPPRESSION_SCOPE.SMS) {
+    log("twilio.inbound.reoptin_skipped", { ...shape, reason: "not_sms_scope" });
+    return null;
+  }
+
+  if (!reoptinActive()) {
+    log("twilio.inbound.reoptin_skipped", {
+      ...shape,
+      reason: !consentStateEnabled() ? "consent_disabled"
+        : reoptinEnabled() ? "not_configured" : "disabled",
+    });
+    return null;
+  }
+
+  /* THE SAME ABSOLUTE DEADLINE THE PROJECTION USES, measured from handler
+     entry, so this phase SPENDS the budget rather than adding to it. A
+     non-finite `startedAt` falls back to now, which is the conservative
+     direction: a shorter window, never an unbounded one — the same fallback
+     and the same reasoning as projectToHubSpot() below. */
+  const entry = Number.isFinite(startedAt) ? startedAt : Date.now();
+  const remaining = () => entry + PROJECTION_DEADLINE_MS - Date.now();
+
+  /* REOPTIN_MIN_BUDGET_MS is exactly LOOKUP + APPEND + MIN_SEARCH_MS, so
+     starting only above it is what guarantees a searchable projection budget
+     survives this phase. Below it, say so and leave the suppression alone —
+     a lookup begun here would be aborted in flight and reported as a
+     database failure, which is a different and wrong story. */
+  if (remaining() < REOPTIN_MIN_BUDGET_MS) {
+    log("twilio.inbound.reoptin_skipped", { ...shape, reason: "budget_exhausted" });
+    return null;
+  }
+
+  let readiness;
+  try {
+    readiness = await lookupReoptinReadiness(from, {
+      channel: CHANNEL.SMS,
+      timeoutMs: Math.min(REOPTIN_LOOKUP_TIMEOUT_MS, remaining()),
+    });
+  } catch (err) {
+    /* FAIL CLOSED. An unavailable or unreadable answer is not "not
+       suppressed"; it is no answer, and no answer clears nothing. */
+    log("twilio.inbound.reoptin_failed", { ...shape, stage: "lookup", ...reoptinLogShape(err) });
+    return null;
+  }
+
+  const verdict = evaluateReoptin({ channel: CHANNEL.SMS, readiness });
+  if (!verdict.eligible) {
+    log("twilio.inbound.reoptin_declined", { ...shape, reason: verdict.reason });
+    return null;
+  }
+
+  let event;
+  try {
+    event = buildReoptinUnsuppression({
+      occurredAt,
+      channel: CHANNEL.SMS,
+      phone: from,
+      /* TWILIO'S OWN MESSAGE ID. It makes the clearance's dedupe key
+         `twilio:<MessageSid>:sms:unsuppressed`, so a redelivered START
+         inserts nothing and the replay is visible as rowsAffected 0. */
+      sourceEventId: messageSid,
+      consent: readiness.consent,
+      providerMetadata: {
+        MessageSid: messageSid,
+        AccountSid: String(params.AccountSid || ""),
+        MessagingServiceSid: String(params.MessagingServiceSid || ""),
+        OptOutType: optOutType(params) || null,
+        classified_by: decision.source,
+        rule: decision.rule,
+      },
+    });
+  } catch (buildErr) {
+    log("twilio.inbound.reoptin_failed", { ...shape, stage: "build", ...ledgerLogShape(buildErr) });
+    return null;
+  }
+
+  /* The append gets what is left MINUS the projection's searchable minimum,
+     so the guarantee above holds even if the lookup used its whole window. */
+  const appendMs = Math.min(REOPTIN_APPEND_TIMEOUT_MS, remaining() - MIN_SEARCH_MS);
+  if (appendMs < MIN_WRITE_MS) {
+    log("twilio.inbound.reoptin_skipped", { ...shape, reason: "budget_exhausted" });
+    return null;
+  }
+
+  let result;
+  try {
+    result = await appendReoptinUnsuppression(event, { timeoutMs: appendMs });
+  } catch (appendErr) {
+    /* The clearance is NOT durable, so nothing may be projected. An
+       unacknowledged append may still have committed — which is why this
+       says "failed", not "not written" — but either way this process has no
+       proof of a transition and must not project one. A later START
+       reconciles again on the same two facts. */
+    log("twilio.inbound.reoptin_failed", { ...shape, stage: "append", ...ledgerLogShape(appendErr) });
+    return null;
+  }
+
+  /* ROWS AFFECTED IS LOAD-BEARING, and reading `appended: true` instead is
+     the §9.1 defect in a new place. A replayed START finds its own earlier
+     row, inserts nothing, and did not create a transition NOW. Projecting on
+     a replay would clear `cst_sms_suppressed` for a number a later STOP has
+     since — and correctly — re-suppressed. `> 0` rather than truthy: the
+     driver answers null when it did not say, and "it did not say" is not
+     "it wrote something". */
+  if (!(Number(result?.rowsAffected) > 0)) {
+    log("twilio.inbound.reoptin_replay", {
+      ...shape, rows_affected: result?.rowsAffected ?? null,
+    });
+    return null;
+  }
+
+  /* DURABLE. The lane is cleared in the system of record; what follows is
+     projection, and its failure cannot undo this.
+
+     THE RACE THIS DOES NOT SERIALIZE, stated rather than glossed. The
+     readiness read and this append are two statements, not one transaction,
+     so a STOP can land between them and no application-level lock would
+     change that. What resolves it is db/003's fold, toward the block, on
+     either clock: a STOP RECEIVED AFTER the START carries a later
+     occurred_at than this clearance — whose occurred_at is the START's own
+     receipt time — and a STOP DELIVERED LATE carries a later recorded_at.
+     Either one alone keeps the lane blocked, and gate 8 re-reads the fold
+     immediately before any send regardless.
+     tests/reoptin-fold.test.mjs measures both against a real PostgreSQL. */
+  log("twilio.inbound.reoptin_cleared", {
+    ...shape, consent_version: readiness.consent.version,
+  });
+
+  return {
+    /* The NORMALISED number the durable clearance was written against, never
+       the raw provider string. */
+    phone: readiness.phone,
+    occurredAt: readiness.consent.occurredAt,
+    version: readiness.consent.version,
+    formType: readiness.consent.formType,
+    pagePath: readiness.consent.pagePath,
+  };
+}
+
 /**
  * Flag every contact holding this number. Never throws: by the time this
  * runs the suppression is DURABLY RECORDED in the ledger, and this CRM
@@ -614,7 +826,7 @@ async function surfaceToOperator({ params, from, messageSid, occurredAt, shape, 
  * Bounded by MAX_PROJECTION_CONTACTS requests and by an absolute deadline
  * PROJECTION_DEADLINE_MS after handler entry — see the bound above.
  */
-async function projectToHubSpot({ decision, from, occurredAt, shape, startedAt }) {
+async function projectToHubSpot({ decision, from, occurredAt, shape, startedAt, reoptinGrant = null }) {
   if (!consentStateEnabled()) {
     /* With the consent feature off, no `cst_*` property is read or written
        anywhere — that is what makes "off" mean production-equivalent. The
@@ -681,9 +893,23 @@ async function projectToHubSpot({ decision, from, occurredAt, shape, startedAt }
       let props;
       try {
         props = decision.kind === "reoptin"
-          ? toHubSpotReoptinProperties({
-            channel: REOPTIN_CHANNEL[decision.scope] || "sms", at: occurredAt,
-          })
+          ? {
+            /* THE REQUEST IS STILL RECORDED, honoured or not. "They asked to
+               come back" stays true after it is granted, and the operator
+               workflow keeps the same two properties for the same reason. */
+            ...toHubSpotReoptinProperties({
+              channel: REOPTIN_CHANNEL[decision.scope] || "sms", at: occurredAt,
+            }),
+            /* AND, ONLY WHEN A CLEARANCE ACTUALLY LANDED IN THE LEDGER, the
+               transition it caused: the suppression cleared and the SMS
+               permission granted against the durable consent that justified
+               it. `reoptinGrant` is null for every other outcome, so this
+               spread contributes nothing and the patch is byte-identical to
+               what this endpoint wrote before. */
+            ...(reoptinGrant
+              ? toHubSpotReoptinGrantProperties({ channel: CHANNEL.SMS, consent: reoptinGrant })
+              : {}),
+          }
           : toHubSpotSuppressionProperties({
             scope: decision.scope,
             trigger: decision.trigger || SUPPRESSION_TRIGGER.KEYWORD,
