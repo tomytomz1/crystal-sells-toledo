@@ -1,7 +1,11 @@
 /* Static guards for automatic website SMS re-opt-in through Twilio Consent
  * Management API. This is intentionally separate from check-sms-sender.mjs:
- * provider consent synchronization is not an outbound message send and uses
- * a separate credential with a separate blast radius.
+ * provider consent synchronization is not an outbound message send.
+ *
+ * Twilio's current Consent Management guide explicitly specifies Account SID
+ * + Auth Token for this endpoint. That token is already server-side for
+ * inbound signature verification, so this guard permits that documented use
+ * while still forbidding reuse of the outbound message-sender API key.
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -23,12 +27,13 @@ const STORE_REL = "api/_lib/website-reoptin-store.mjs";
 const ACK_REL = "api/_lib/lead-sms-ack.mjs";
 const MIGRATION_REL = "db/005_automatic_website_sms_reoptin.sql";
 const ENDPOINT = "https://accounts.twilio.com/v1/Consents/Bulk";
-const SECRET_NAMES = [
-  "TWILIO_CONSENT_API_KEY_SID",
-  "TWILIO_CONSENT_API_KEY_SECRET",
+const SERVER_SECRET_NAMES = ["TWILIO_AUTH_TOKEN"];
+const PROVIDER_ONLY_CONFIG = [
+  "TWILIO_CONSENT_MESSAGING_SERVICE_SID",
+  "TWILIO_CONSENT_SENDER_NUMBER",
 ];
 
-/* Dedicated consent credentials must never ship to a browser artifact. */
+/* Server credentials must never ship to a browser artifact. */
 if (existsSync(PUBLIC)) {
   const files = readdirSync(PUBLIC).filter((name) => name.endsWith(".html"))
     .map((name) => join(PUBLIC, name));
@@ -36,7 +41,7 @@ if (existsSync(PUBLIC)) {
     if (existsSync(join(PUBLIC, rel))) files.push(join(PUBLIC, rel));
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    for (const name of SECRET_NAMES)
+    for (const name of SERVER_SECRET_NAMES)
       if (text.includes(name))
         fail(file.slice(REPO.length + 1), `references server secret ${name}`);
   }
@@ -49,15 +54,16 @@ if (!existsSync(providerPath)) {
   const raw = readFileSync(providerPath, "utf8");
   const src = strip(raw);
   if (!raw.includes(ENDPOINT)) fail(PROVIDER_REL, "does not use the documented Consent Management bulk endpoint");
-  if (/TWILIO_AUTH_TOKEN/.test(src)) fail(PROVIDER_REL, "reuses the inbound master auth token");
   if (/TWILIO_API_KEY_(?:SID|SECRET)|TWILIO_MESSAGING_SERVICE_SID/.test(src))
-    fail(PROVIDER_REL, "reuses the outbound message-sender credential instead of the dedicated consent credential");
+    fail(PROVIDER_REL, "reuses the outbound message-sender credential");
   for (const name of [
-    "TWILIO_CONSENT_API_KEY_SID",
-    "TWILIO_CONSENT_API_KEY_SECRET",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
     "TWILIO_CONSENT_MESSAGING_SERVICE_SID",
     "TWILIO_CONSENT_SENDER_NUMBER",
   ]) if (!raw.includes(name)) fail(PROVIDER_REL, `missing required provider config ${name}`);
+  if (!/Authorization:\s*basicAuth\(config\.accountSid,\s*config\.authToken\)/.test(src))
+    fail(PROVIDER_REL, "does not authenticate the Consent API with Account SID + Auth Token");
   if (!/body\.append\("Items",\s*JSON\.stringify\(item\)\)/.test(src))
     fail(PROVIDER_REL, "does not encode the documented repeated Items form field");
   if (!/status:\s*"opt-in"/.test(src) || !/source:\s*"website"/.test(src))
@@ -70,15 +76,16 @@ if (!existsSync(providerPath)) {
     fail(PROVIDER_REL, "production client is not closed over real fetch and randomUUID");
 }
 
-/* No other application module may know the provider endpoint or credential
- * names. The orchestrator consumes only the provider function. */
+/* No other application module may address the provider endpoint or own the
+ * consent-specific sender identifiers. TWILIO_AUTH_TOKEN and
+ * TWILIO_ACCOUNT_SID legitimately exist at other server boundaries too. */
 if (existsSync(API)) {
   for (const abs of walk(API)) {
     const rel = "api" + abs.slice(API.length).replace(/\\/g, "/");
     if (rel === PROVIDER_REL) continue;
     const src = strip(readFileSync(abs, "utf8"));
     if (src.includes(ENDPOINT)) fail(rel, `addresses Twilio Consent Management directly; only ${PROVIDER_REL} may`);
-    for (const name of SECRET_NAMES)
+    for (const name of PROVIDER_ONLY_CONFIG)
       if (src.includes(name)) fail(rel, `reads ${name}; only ${PROVIDER_REL} may`);
     if (/\btwilio-consent\b/.test(src) && rel !== ORCHESTRATOR_REL)
       fail(rel, `imports ${PROVIDER_REL}; only ${ORCHESTRATOR_REL} may reconcile provider consent`);
