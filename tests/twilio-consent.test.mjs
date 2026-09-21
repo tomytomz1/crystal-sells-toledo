@@ -13,6 +13,11 @@ const SERVICE = "MG" + "a".repeat(32);
 const SENDER = "+14195551234";
 const KEY = "SK" + "b".repeat(32);
 const CONSENT_AT = "2026-09-21T16:05:49.036Z";
+const UUIDS = [
+  "11111111-1111-4111-8111-111111111111",
+  "22222222-2222-4222-8222-222222222222",
+];
+const CORRELATION_IDS = UUIDS.map((value) => value.replace(/-/g, ""));
 
 function env(overrides = {}) {
   return {
@@ -25,10 +30,7 @@ function env(overrides = {}) {
 }
 
 function uuids() {
-  const values = [
-    "11111111-1111-4111-8111-111111111111",
-    "22222222-2222-4222-8222-222222222222",
-  ];
+  const values = [...UUIDS];
   return () => values.shift();
 }
 
@@ -51,12 +53,11 @@ describe("Twilio Consent Management client", () => {
 
   test("posts exactly two website opt-ins: Messaging Service and sender number", async () => {
     const calls = [];
-    const ids = ["1".repeat(32), "2".repeat(32)];
     const client = _twilioConsentClientForTest({
       uuidFactory: uuids(),
       fetchImpl: async (url, options) => {
         calls.push({ url, options });
-        return responseFor(ids);
+        return responseFor(CORRELATION_IDS);
       },
     });
 
@@ -71,6 +72,7 @@ describe("Twilio Consent Management client", () => {
     const items = body.getAll("Items").map((x) => JSON.parse(x));
     assert.equal(items.length, 2);
     assert.deepEqual(items.map((x) => x.sender_id), [SERVICE, SENDER]);
+    assert.deepEqual(items.map((x) => x.correlation_id), CORRELATION_IDS);
     for (const item of items) {
       assert.equal(item.contact_id, PHONE);
       assert.equal(item.status, "opt-in");
@@ -81,10 +83,9 @@ describe("Twilio Consent Management client", () => {
   });
 
   test("one failed provider item means the re-opt-in is not confirmed", async () => {
-    const ids = ["1".repeat(32), "2".repeat(32)];
     const client = _twilioConsentClientForTest({
       uuidFactory: uuids(),
-      fetchImpl: async () => responseFor(ids, [0, 30646]),
+      fetchImpl: async () => responseFor(CORRELATION_IDS, [0, 30646]),
     });
     const result = await client({ phone: PHONE, consentAt: CONSENT_AT }, { env: env() });
     assert.equal(result.status, TWILIO_CONSENT_STATUS.NOT_CONFIRMED);
@@ -96,7 +97,7 @@ describe("Twilio Consent Management client", () => {
       uuidFactory: uuids(),
       fetchImpl: async () => ({
         ok: true,
-        json: async () => ({ items: [{ correlation_id: "1".repeat(32), error_code: 0 }] }),
+        json: async () => ({ items: [{ correlation_id: CORRELATION_IDS[0], error_code: 0 }] }),
       }),
     });
     const result = await client({ phone: PHONE, consentAt: CONSENT_AT }, { env: env() });
