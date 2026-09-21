@@ -1,7 +1,9 @@
 /* Composite repository checker.
  *
  * The canonical current-main checks live in check-base.mjs. PR #51 adds the
- * outbound/Gate 8 checks in check-sms-sender.mjs. This entry point runs both.
+ * outbound/Gate 8 checks in check-sms-sender.mjs. Automatic website SMS
+ * re-opt-in adds the independent provider-consent checks in
+ * check-twilio-consent.mjs. This entry point runs all three.
  *
  * Some permanent mutation tests intentionally inspect tools/check.mjs itself
  * to pin the exact call-site strings and browser-secret containment contract
@@ -39,7 +41,9 @@ for (const anchor of BASE_CALLSITE_ANCHORS) {
    Mirror the base checker's browser-secret contract and verify the delegate
    still carries every name, so the source-level assertion remains evidence
    about the checker that actually runs rather than a stale compatibility
-   string. */
+   string. The new Twilio Consent API credential is guarded independently by
+   check-twilio-consent.mjs because it is not part of this historical base
+   contract. */
 const SECRET_NAMES = [
   "HUBSPOT_ACCESS_TOKEN",
   "ZOHO_SMTP_PASSWORD", "ZOHO_SMTP_USER", "ZOHO_SMTP_HOST", "ZOHO_SMTP_PORT",
@@ -65,3 +69,4 @@ for (const name of SECRET_NAMES) {
 
 await import("./check-base.mjs");
 await import("./check-sms-sender.mjs");
+await import("./check-twilio-consent.mjs");
