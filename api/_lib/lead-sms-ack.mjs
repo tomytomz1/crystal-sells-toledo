@@ -27,6 +27,7 @@ import { sendSms, SMS_STATUS, smsSendLogShape } from "./sms-sender.mjs";
 import {
   reconcileWebsiteSmsReoptin,
   WEBSITE_REOPTIN_STATUS,
+  websiteSmsReoptinLogShape,
 } from "./website-sms-reoptin.mjs";
 
 export const LEAD_SMS_ACK_REASON = Object.freeze({
@@ -40,7 +41,11 @@ export const LEAD_SMS_ACK_REASON = Object.freeze({
   UNEXPECTED_FAILURE: "SMS_ACK_UNEXPECTED_FAILURE",
 });
 
-const notSent = (reason) => ({ status: SMS_STATUS.NOT_SENT, reason });
+const notSent = (reason, diagnostics = null) => ({
+  status: SMS_STATUS.NOT_SENT,
+  reason,
+  ...(diagnostics && typeof diagnostics === "object" ? { diagnostics } : {}),
+});
 
 /**
  * Fixed, use-case-aligned variant of the first message sample submitted with
@@ -117,7 +122,10 @@ function makeLeadSmsAcknowledgement(sender, reoptin = reconcileWebsiteSmsReoptin
       );
       if (reoptinResult?.status === WEBSITE_REOPTIN_STATUS.BLOCKED ||
           reoptinResult?.status === WEBSITE_REOPTIN_STATUS.FAILED)
-        return notSent(LEAD_SMS_ACK_REASON.REOPTIN_FAILED);
+        return notSent(
+          LEAD_SMS_ACK_REASON.REOPTIN_FAILED,
+          websiteSmsReoptinLogShape(reoptinResult),
+        );
 
       const body = buildLeadSmsAcknowledgement();
       return await sender({ email: lead.email, phone: lead.phone, body }, { env });
@@ -142,5 +150,8 @@ export function _leadSmsAckForTest({ sender, reoptin } = {}) {
 
 /** PII-free structure for api/lead.js logs. */
 export function leadSmsAckLogShape(result) {
-  return smsSendLogShape(result);
+  const safe = smsSendLogShape(result);
+  if (result?.diagnostics && typeof result.diagnostics === "object")
+    Object.assign(safe, result.diagnostics);
+  return safe;
 }
