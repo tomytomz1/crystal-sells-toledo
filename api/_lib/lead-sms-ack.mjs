@@ -6,16 +6,17 @@
    Eligibility is about THIS submission, not merely the contact's historic
    HubSpot state. The current /home-value submission must carry a fresh SMS
    grant whose server-built evidence was acknowledged by the durable ledger.
-   Only then is the existing sender invoked. The sender still performs Gate 8
-   immediately before Twilio, so a STOP, suppression, revoked permission or
-   phone mismatch already visible to Gate 8's final reads denies the send. The
-   read and Twilio are different systems, so no code can claim atomic ordering
-   against a STOP that races after that final suppression read.
+
+   If that number has a previous STOP, the website re-opt-in reconciler runs
+   before the acknowledgement sender. It can clear ONLY the SMS lane, only
+   after fresh website consent and provider-confirmed Twilio re-opt-in. The
+   sender then performs Gate 8 again immediately before message creation, so a
+   new STOP that races after reconciliation still denies the send.
 
    The acknowledgement is a courtesy after HubSpot has already captured the
    lead. The production acknowledgement function therefore never rejects:
-   malformed input, ineligibility and an unexpected sender exception all become
-   a PII-free NOT_SENT result.
+   malformed input, ineligibility, failed re-opt-in and an unexpected sender
+   exception all become a PII-free NOT_SENT result.
 
    The SMS body is fixed. No browser-supplied field is interpolated into it;
    doing so would turn this otherwise narrow acknowledgement path into a
@@ -23,6 +24,10 @@
    ===================================================================== */
 
 import { sendSms, SMS_STATUS, smsSendLogShape } from "./sms-sender.mjs";
+import {
+  reconcileWebsiteSmsReoptin,
+  WEBSITE_REOPTIN_STATUS,
+} from "./website-sms-reoptin.mjs";
 
 export const LEAD_SMS_ACK_REASON = Object.freeze({
   MALFORMED_CALL: "SMS_ACK_MALFORMED_CALL",
@@ -31,6 +36,7 @@ export const LEAD_SMS_ACK_REASON = Object.freeze({
   NO_FRESH_CONSENT: "SMS_ACK_NO_FRESH_CONSENT",
   CONSENT_NOT_DURABLE: "SMS_ACK_CONSENT_NOT_DURABLE",
   EVIDENCE_MISMATCH: "SMS_ACK_EVIDENCE_MISMATCH",
+  REOPTIN_FAILED: "SMS_ACK_REOPTIN_FAILED",
   UNEXPECTED_FAILURE: "SMS_ACK_UNEXPECTED_FAILURE",
 });
 
@@ -51,7 +57,7 @@ export function buildLeadSmsAcknowledgement() {
   return LEAD_SMS_ACK_BODY;
 }
 
-function makeLeadSmsAcknowledgement(sender) {
+function makeLeadSmsAcknowledgement(sender, reoptin = reconcileWebsiteSmsReoptin) {
   return async function sendLeadSmsAcknowledgement(payload, options) {
     try {
       /* Keep argument handling inside the try. A signature such as
@@ -91,14 +97,27 @@ function makeLeadSmsAcknowledgement(sender) {
         return notSent(LEAD_SMS_ACK_REASON.CONSENT_NOT_DURABLE);
 
       /* Bind the evidence to this exact validated submission before handing
-         anything to Gate 8. These values are server-owned when the payload is
-         built by api/lead.js; a mismatch is a programming error and fails shut.
-         property_address is required here only as a completeness invariant; it
-         is deliberately never inserted into the outbound message body. */
+         anything to the re-opt-in reconciler or Gate 8. These values are
+         server-owned when api/lead.js builds the payload. property_address is
+         required only as a completeness invariant; it is never inserted into
+         the outbound message body. */
       if (!meta.submission_id || consent.submission_id !== meta.submission_id ||
           consent.form_type !== lead.form_type || consent.sms.phone !== lead.phone ||
           !lead.email || !lead.phone || !lead.property_address)
         return notSent(LEAD_SMS_ACK_REASON.EVIDENCE_MISMATCH);
+
+      /* A normal never-stopped lead returns NOT_NEEDED and continues. A prior
+         STOP with fresh consent is automatically reconciled. Any blocked or
+         failed reconciliation stops here and leaves Gate 8's suppression
+         intact. SKIPPED preserves the old behavior when the feature is off:
+         the sender still asks Gate 8 and will deny a suppressed number. */
+      const reoptinResult = await reoptin(
+        { email: lead.email, phone: lead.phone },
+        { env },
+      );
+      if (reoptinResult?.status === WEBSITE_REOPTIN_STATUS.BLOCKED ||
+          reoptinResult?.status === WEBSITE_REOPTIN_STATUS.FAILED)
+        return notSent(LEAD_SMS_ACK_REASON.REOPTIN_FAILED);
 
       const body = buildLeadSmsAcknowledgement();
       return await sender({ email: lead.email, phone: lead.phone, body }, { env });
@@ -113,9 +132,12 @@ function makeLeadSmsAcknowledgement(sender) {
 /** Production path: permanently bound to the real Gate-8-enforcing sender. */
 export const sendLeadSmsAcknowledgement = makeLeadSmsAcknowledgement(sendSms);
 
-/** Test only: creates an independent acknowledgement path over a fake sender. */
-export function _leadSmsAckForTest({ sender } = {}) {
-  return makeLeadSmsAcknowledgement(sender);
+/** Test only: creates an independent acknowledgement path over fakes. The
+ * default fake re-opt-in result preserves pre-re-opt-in acknowledgement tests
+ * without giving them a network dependency. */
+export function _leadSmsAckForTest({ sender, reoptin } = {}) {
+  const fakeReoptin = reoptin || (async () => ({ status: WEBSITE_REOPTIN_STATUS.NOT_NEEDED }));
+  return makeLeadSmsAcknowledgement(sender, fakeReoptin);
 }
 
 /** PII-free structure for api/lead.js logs. */
