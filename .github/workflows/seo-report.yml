@@ -1,6 +1,6 @@
 name: SEO snapshot
 
-# Weekly, Monday 11:00 UTC — roughly 07:00 in Toledo, so a snapshot is
+# Weekly, Monday 11:00 UTC, roughly 07:00 in Toledo, so a snapshot is
 # waiting before STRATEGY.md's Monday market-review block rather than
 # landing in the middle of it.
 #
@@ -17,9 +17,9 @@ on:
         required: false
         default: "28"
 
-# Two runs committing to main would race. Snapshots are cheap and the
-# schedule is weekly, so let an in-flight run finish rather than
-# cancelling it mid-commit.
+# A weekly run can take several minutes because the snapshot PR must pass the
+# repository's real test gate before it can merge. Never cancel one halfway
+# through and leave an ambiguous branch/PR behind.
 concurrency:
   group: seo-report
   cancel-in-progress: false
@@ -28,13 +28,20 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
 
-    # Only to commit the snapshot file. Nothing here reads or writes any
-    # other part of the repository.
+    # main is protected by the Protect Main ruleset. This workflow therefore
+    # writes the snapshot on a topic branch, opens a PR, explicitly dispatches
+    # the required `test` workflow for that commit, waits for it to pass, and
+    # merges only through the PR. No ruleset bypass is used.
     permissions:
       contents: write
+      pull-requests: write
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -49,9 +56,7 @@ jobs:
       # everyone to ignore a red badge.
       #
       # It is a SKIP, not a pass: while this branch is taken NO SNAPSHOTS
-      # ARE BEING COLLECTED, and nothing in this repository may describe
-      # snapshot collection as active. docs/CURRENT-STATE.md records the
-      # workflow as inert for exactly this reason.
+      # ARE BEING COLLECTED.
       - name: Are credentials configured?
         id: creds
         env:
@@ -89,57 +94,102 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit it
+      - name: Publish through the protected-main gate
         if: steps.creds.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           if [ -z "$(git status --porcelain docs/seo)" ]; then
-            echo "No change under docs/seo — nothing to commit."
+            echo "No change under docs/seo. Nothing to publish."
             exit 0
           fi
 
-          # Name the window from the file that was actually written, not
-          # from a second copy of the script's lag arithmetic. A duplicated
-          # `date -u -d '3 days ago'` here would silently start lying the
-          # day LAG_DAYS changes.
           THROUGH="$(git status --porcelain docs/seo \
             | sed -n 's|.*docs/seo/\([0-9-]\{10\}\)\.json$|\1|p' \
             | sort | tail -1)"
 
-          # docs/seo changed but no dated snapshot did. Nothing here knows
-          # what that is, and a commit message with a hole in it is worse
-          # than a failed run.
           if [ -z "$THROUGH" ]; then
             echo "::error::docs/seo changed but no YYYY-MM-DD.json was written"
             git status --porcelain docs/seo
             exit 1
           fi
 
-          git config user.name  "github-actions[bot]"
+          BRANCH="automation/seo-snapshot-${THROUGH}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
           git add docs/seo
+          git commit \
+            -m "Search performance snapshot through ${THROUGH}" \
+            -m "Written by .github/workflows/seo-report.yml. Search Console discards performance data after 16 months; these snapshots outlive it."
 
-          # [skip ci] because this commit changes nothing the site serves.
-          # docs/ is not an input to tools/build.mjs, so a deploy would
-          # rebuild byte-identical output. GitHub already suppresses
-          # workflow runs for GITHUB_TOKEN pushes; this is for the Vercel
-          # integration, which is a separate webhook and does not know that.
-          git commit -m "Search performance snapshot through ${THROUGH} [skip ci]" -m \
-          "Written by .github/workflows/seo-report.yml. Search Console discards
-          performance data after 16 months; these snapshots outlive it."
+          SNAPSHOT_SHA="$(git rev-parse HEAD)"
+          git push --set-upstream origin "HEAD:${BRANCH}"
 
-          # The branch may have moved while the APIs were being queried. A
-          # snapshot is an independent new file, so replaying it onto the
-          # new tip is always correct — but never force: a failure here
-          # must lose the snapshot, not someone's commit.
-          #
-          # Resolved from HEAD rather than hardcoded to main, so a
-          # workflow_dispatch run from a branch pushes to that branch
-          # instead of quietly writing to main.
-          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-          for attempt in 1 2 3; do
-            if git push origin "HEAD:${BRANCH}"; then exit 0; fi
-            echo "push rejected (attempt ${attempt}) — rebasing onto the current ${BRANCH}"
-            git pull --rebase origin "$BRANCH" || exit 1
+          PR_URL="$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Search performance snapshot through ${THROUGH}" \
+            --body "Automated weekly Search Console + GA4 snapshot. Generated by the SEO snapshot workflow. The snapshot is merged only after the repository's required test gate passes.")"
+          PR_NUMBER="${PR_URL##*/}"
+
+          echo "Created PR #${PR_NUMBER}: ${PR_URL}"
+
+          # PRs created with GITHUB_TOKEN do not reliably trigger other
+          # workflows. Dispatch the repository's required test workflow
+          # explicitly against this exact snapshot commit instead.
+          gh workflow run test.yml --ref "$BRANCH"
+
+          echo "Waiting for required test check on ${SNAPSHOT_SHA}..."
+          for attempt in $(seq 1 90); do
+            STATUS="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/commits/${SNAPSHOT_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "test")] | sort_by(.started_at) | last | (.status // "")')"
+            CONCLUSION="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/commits/${SNAPSHOT_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "test")] | sort_by(.started_at) | last | (.conclusion // "")')"
+
+            if [ "$STATUS" = "completed" ] && [ "$CONCLUSION" = "success" ]; then
+              echo "Required test passed."
+              break
+            fi
+
+            if [ "$STATUS" = "completed" ] && [ -n "$CONCLUSION" ] && [ "$CONCLUSION" != "success" ]; then
+              echo "::error::required test finished with conclusion: ${CONCLUSION}"
+              echo "Snapshot PR left open for inspection: ${PR_URL}"
+              exit 1
+            fi
+
+            if [ "$attempt" -eq 90 ]; then
+              echo "::error::timed out waiting for required test check"
+              echo "Snapshot PR left open for inspection: ${PR_URL}"
+              exit 1
+            fi
+
+            sleep 10
           done
-          echo "::error::could not push the snapshot after 3 attempts"
-          exit 1
+
+          # Merge through the normal PR route. The Protect Main ruleset still
+          # decides whether the merge is allowed; this command has no bypass.
+          gh pr merge "$PR_NUMBER" --merge --delete-branch
+
+          # A merge performed with GITHUB_TOKEN does not necessarily emit a
+          # new workflow trigger, so dispatch the diff explicitly after main
+          # contains the new snapshot.
+          gh workflow run seo-diff.yml --ref main
+
+          {
+            echo
+            echo "### Snapshot publication"
+            echo
+            echo "- Snapshot: \`docs/seo/${THROUGH}.json\`"
+            echo "- PR: #${PR_NUMBER}"
+            echo "- Required test: passed"
+            echo "- Merge: completed through protected main"
+            echo "- SEO diff: dispatched after merge"
+          } >> "$GITHUB_STEP_SUMMARY"
