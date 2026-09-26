@@ -1,21 +1,13 @@
 name: SEO diff
 
-# Chained to the snapshot job rather than scheduled independently.
-#
-# `workflow_run` fires when "SEO snapshot" finishes, so this always reads a
-# snapshot that has just been written instead of racing the job that writes
-# it. Two consequences worth knowing:
-#
-#   - workflow_run only fires for workflows on the DEFAULT BRANCH, and this
-#     file must itself be on the default branch to trigger at all. On a
-#     topic branch it is inert.
-#   - the event's head_sha is the commit the SNAPSHOT job ran on, which is
-#     the commit BEFORE the one it created. Checking that sha out would read
-#     last week's data. The checkout below pins `main` instead.
+# The snapshot workflow explicitly dispatches this after its branch-protected
+# snapshot PR has merged. A push trigger remains as a safety net for a human
+# merge or any other legitimate docs/seo snapshot landing on main.
 on:
-  workflow_run:
-    workflows: ["SEO snapshot"]
-    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - "docs/seo/*.json"
   workflow_dispatch:
 
 concurrency:
@@ -24,14 +16,6 @@ concurrency:
 
 jobs:
   diff:
-    # A failed snapshot wrote nothing, so there is nothing new to diff.
-    # A SKIPPED snapshot also reports success (the unconfigured path exits
-    # 0 by design), and that case is harmless: the two newest files are
-    # unchanged from last week, so the diff reports no movement and stays
-    # quiet rather than inventing one.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     permissions:
@@ -43,7 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Deliberately main, not the event's head_sha — see the note above.
           ref: main
 
       - uses: actions/setup-node@v4
