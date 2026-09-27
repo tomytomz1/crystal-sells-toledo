@@ -1,0 +1,402 @@
+{
+  "generated": "2026-09-27T01:22:55.364Z",
+  "range": {
+    "start": "2026-08-28",
+    "end": "2026-09-24",
+    "days": 28
+  },
+  "sources": {
+    "searchConsole": "queried",
+    "analytics": "queried"
+  },
+  "searchConsole": {
+    "site": "sc-domain:crystalsellstoledo.com",
+    "totals": {
+      "clicks": 5,
+      "impressions": 121,
+      "ctr": 0.04132231404958678,
+      "position": 18.462809917355372
+    },
+    "queries": [
+      {
+        "query": "917 hilltop ln toledo oh 43615",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 76.71428571428571
+      },
+      {
+        "query": "crystal saylor",
+        "clicks": 0,
+        "impressions": 8,
+        "ctr": 0,
+        "position": 7.75
+      },
+      {
+        "query": "crystal toledo",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 9
+      },
+      {
+        "query": "home sellers agents toledo oh",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 59
+      },
+      {
+        "query": "how to sell rental property toledo ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 76
+      },
+      {
+        "query": "sell my house without a realtor toledo",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 49
+      },
+      {
+        "query": "sell my house without realtor in toledo ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 50
+      },
+      {
+        "query": "sellers agents toledo oh",
+        "clicks": 0,
+        "impressions": 5,
+        "ctr": 0,
+        "position": 60.8
+      },
+      {
+        "query": "selling home in crystal springs",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 73
+      },
+      {
+        "query": "toledo home sellers",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 46.5
+      }
+    ],
+    "pages": [
+      {
+        "page": "https://crystalsellstoledo.com/",
+        "clicks": 5,
+        "impressions": 81,
+        "ctr": 0.06172839506172839,
+        "position": 6
+      },
+      {
+        "page": "https://crystalsellstoledo.com/home-value",
+        "clicks": 0,
+        "impressions": 16,
+        "ctr": 0,
+        "position": 17.0625
+      },
+      {
+        "page": "https://crystalsellstoledo.com/privacy",
+        "clicks": 0,
+        "impressions": 10,
+        "ctr": 0,
+        "position": 8.6
+      },
+      {
+        "page": "https://crystalsellstoledo.com/sell",
+        "clicks": 0,
+        "impressions": 29,
+        "ctr": 0,
+        "position": 53.58620689655172
+      }
+    ],
+    "daily": [
+      {
+        "date": "2026-08-31",
+        "clicks": 0,
+        "impressions": 0,
+        "ctr": 0,
+        "position": 0
+      },
+      {
+        "date": "2026-09-01",
+        "clicks": 1,
+        "impressions": 4,
+        "ctr": 0.25,
+        "position": 3.25
+      },
+      {
+        "date": "2026-09-02",
+        "clicks": 0,
+        "impressions": 0,
+        "ctr": 0,
+        "position": 0
+      },
+      {
+        "date": "2026-09-03",
+        "clicks": 1,
+        "impressions": 8,
+        "ctr": 0.125,
+        "position": 7.25
+      },
+      {
+        "date": "2026-09-04",
+        "clicks": 0,
+        "impressions": 14,
+        "ctr": 0,
+        "position": 4.428571428571429
+      },
+      {
+        "date": "2026-09-05",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 3.5
+      },
+      {
+        "date": "2026-09-06",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 17
+      },
+      {
+        "date": "2026-09-07",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 9
+      },
+      {
+        "date": "2026-09-08",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 6.428571428571429
+      },
+      {
+        "date": "2026-09-09",
+        "clicks": 0,
+        "impressions": 5,
+        "ctr": 0,
+        "position": 18.8
+      },
+      {
+        "date": "2026-09-10",
+        "clicks": 0,
+        "impressions": 0,
+        "ctr": 0,
+        "position": 0
+      },
+      {
+        "date": "2026-09-11",
+        "clicks": 0,
+        "impressions": 5,
+        "ctr": 0,
+        "position": 4.6
+      },
+      {
+        "date": "2026-09-12",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 32
+      },
+      {
+        "date": "2026-09-13",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 18.714285714285715
+      },
+      {
+        "date": "2026-09-14",
+        "clicks": 0,
+        "impressions": 13,
+        "ctr": 0,
+        "position": 48.61538461538461
+      },
+      {
+        "date": "2026-09-15",
+        "clicks": 0,
+        "impressions": 5,
+        "ctr": 0,
+        "position": 35.2
+      },
+      {
+        "date": "2026-09-16",
+        "clicks": 1,
+        "impressions": 2,
+        "ctr": 0.5,
+        "position": 5
+      },
+      {
+        "date": "2026-09-17",
+        "clicks": 1,
+        "impressions": 12,
+        "ctr": 0.08333333333333333,
+        "position": 2
+      },
+      {
+        "date": "2026-09-18",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 42.5
+      },
+      {
+        "date": "2026-09-19",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 11
+      },
+      {
+        "date": "2026-09-20",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 42.5
+      },
+      {
+        "date": "2026-09-21",
+        "clicks": 1,
+        "impressions": 5,
+        "ctr": 0.2,
+        "position": 28.6
+      },
+      {
+        "date": "2026-09-22",
+        "clicks": 0,
+        "impressions": 9,
+        "ctr": 0,
+        "position": 41.44444444444444
+      },
+      {
+        "date": "2026-09-23",
+        "clicks": 0,
+        "impressions": 5,
+        "ctr": 0,
+        "position": 14.2
+      },
+      {
+        "date": "2026-09-24",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 4
+      }
+    ],
+    "anonymisedImpressions": 91
+  },
+  "analytics": {
+    "property": "552286907",
+    "totals": {
+      "sessions": 129,
+      "users": 98,
+      "keyEvents": 14
+    },
+    "channels": [
+      {
+        "channel": "Direct",
+        "sessions": 82,
+        "users": 53,
+        "keyEvents": 14
+      },
+      {
+        "channel": "Organic Search",
+        "sessions": 41,
+        "users": 40,
+        "keyEvents": 0
+      },
+      {
+        "channel": "Organic Social",
+        "sessions": 5,
+        "users": 5,
+        "keyEvents": 0
+      },
+      {
+        "channel": "Referral",
+        "sessions": 1,
+        "users": 1,
+        "keyEvents": 0
+      }
+    ],
+    "landingPages": [
+      {
+        "page": "/",
+        "sessions": 67,
+        "keyEvents": 13
+      },
+      {
+        "page": "/home-value",
+        "sessions": 19,
+        "keyEvents": 1
+      },
+      {
+        "page": "/privacy",
+        "sessions": 11,
+        "keyEvents": 0
+      },
+      {
+        "page": "/sms-terms",
+        "sessions": 10,
+        "keyEvents": 0
+      },
+      {
+        "page": "(not set)",
+        "sessions": 7,
+        "keyEvents": 0
+      },
+      {
+        "page": "/sms-privacy",
+        "sessions": 6,
+        "keyEvents": 0
+      },
+      {
+        "page": "/communications-terms",
+        "sessions": 2,
+        "keyEvents": 0
+      },
+      {
+        "page": "/sell",
+        "sessions": 2,
+        "keyEvents": 0
+      },
+      {
+        "page": "/43551-seller-review",
+        "sessions": 1,
+        "keyEvents": 0
+      },
+      {
+        "page": "/buy",
+        "sessions": 1,
+        "keyEvents": 0
+      },
+      {
+        "page": "/contact",
+        "sessions": 1,
+        "keyEvents": 0
+      },
+      {
+        "page": "/neighborhoods",
+        "sessions": 1,
+        "keyEvents": 0
+      },
+      {
+        "page": "/sms-consent-evidence",
+        "sessions": 1,
+        "keyEvents": 0
+      }
+    ]
+  }
+}
