@@ -1,0 +1,25 @@
+name: SEO snapshot self-test
+
+# Any change to the snapshot automation should exercise the real workflow once
+# after it lands on main. workflow_dispatch is explicitly allowed to create a
+# new run when invoked with GITHUB_TOKEN, so this does not weaken Protect Main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/seo-report.yml"
+      - ".github/workflows/seo-snapshot-self-test.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the real SEO snapshot workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run seo-report.yml --ref main
