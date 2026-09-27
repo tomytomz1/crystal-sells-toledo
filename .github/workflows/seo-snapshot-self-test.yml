@@ -22,4 +22,4 @@ jobs:
       - name: Run the real SEO snapshot workflow
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run seo-report.yml --ref main
+        run: gh workflow run seo-report.yml --repo "$GITHUB_REPOSITORY" --ref main
