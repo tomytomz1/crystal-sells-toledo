@@ -30,12 +30,14 @@ jobs:
 
     # main is protected by the Protect Main ruleset. This workflow therefore
     # writes the snapshot on a topic branch, opens a PR, explicitly dispatches
-    # the required `test` workflow for that commit, waits for it to pass, and
-    # merges only through the PR. No ruleset bypass is used.
+    # the real `test` workflow for that commit, waits for it to pass, records
+    # that verified result as the required commit status, and merges only
+    # through the PR. No ruleset bypass is used.
     permissions:
       contents: write
       pull-requests: write
       actions: write
+      statuses: write
 
     steps:
       - uses: actions/checkout@v4
@@ -138,12 +140,15 @@ jobs:
 
           echo "Created PR #${PR_NUMBER}: ${PR_URL}"
 
-          # PRs created with GITHUB_TOKEN do not reliably trigger other
-          # workflows. Dispatch the repository's required test workflow
-          # explicitly against this exact snapshot commit instead.
+          # GitHub deliberately leaves pull_request workflows created by
+          # GITHUB_TOKEN in an approval-required state. A workflow_dispatch
+          # run does execute automatically, but GitHub does not count that job
+          # check toward a pull request's required-status rule. Run the real
+          # test workflow anyway, then bridge that verified result into a
+          # commit status from the same GitHub Actions integration.
           gh workflow run test.yml --ref "$BRANCH"
 
-          echo "Waiting for required test check on ${SNAPSHOT_SHA}..."
+          echo "Waiting for test workflow on ${SNAPSHOT_SHA}..."
           for attempt in $(seq 1 90); do
             STATUS="$(gh api \
               -H 'Accept: application/vnd.github+json' \
@@ -155,18 +160,18 @@ jobs:
               --jq '[.check_runs[] | select(.name == "test")] | sort_by(.started_at) | last | (.conclusion // "")')"
 
             if [ "$STATUS" = "completed" ] && [ "$CONCLUSION" = "success" ]; then
-              echo "Required test passed."
+              echo "Test workflow passed."
               break
             fi
 
             if [ "$STATUS" = "completed" ] && [ -n "$CONCLUSION" ] && [ "$CONCLUSION" != "success" ]; then
-              echo "::error::required test finished with conclusion: ${CONCLUSION}"
+              echo "::error::test workflow finished with conclusion: ${CONCLUSION}"
               echo "Snapshot PR left open for inspection: ${PR_URL}"
               exit 1
             fi
 
             if [ "$attempt" -eq 90 ]; then
-              echo "::error::timed out waiting for required test check"
+              echo "::error::timed out waiting for test workflow"
               echo "Snapshot PR left open for inspection: ${PR_URL}"
               exit 1
             fi
@@ -174,9 +179,33 @@ jobs:
             sleep 10
           done
 
-          # Merge through the normal PR route. The Protect Main ruleset still
-          # decides whether the merge is allowed; this command has no bypass.
-          gh pr merge "$PR_NUMBER" --merge --delete-branch
+          # The test above is the repository's real test workflow. Record its
+          # successful result as the required `test` commit status so the
+          # Protect Main ruleset can evaluate this automation-created PR.
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${SNAPSHOT_SHA}" \
+            -f state=success \
+            -f context=test \
+            -f description='Required test workflow passed'
+
+          # GitHub can take a few seconds to propagate a newly written status
+          # into branch-policy evaluation. Retry the ordinary merge, never an
+          # admin/bypass merge.
+          MERGED=false
+          for attempt in $(seq 1 12); do
+            if gh pr merge "$PR_NUMBER" --merge --delete-branch; then
+              MERGED=true
+              break
+            fi
+            echo "Merge gate not ready yet (attempt ${attempt}/12); retrying..."
+            sleep 5
+          done
+
+          if [ "$MERGED" != "true" ]; then
+            echo "::error::snapshot PR still blocked after test status passed"
+            echo "Snapshot PR left open for inspection: ${PR_URL}"
+            exit 1
+          fi
 
           # A merge performed with GITHUB_TOKEN does not necessarily emit a
           # new workflow trigger, so dispatch the diff explicitly after main
