@@ -170,7 +170,8 @@ if (/window\.location\.href\s*=\s*(href|mailto)/.test(js))
 /* Attribution + analytics must be present in the shipped bundle. */
 for (const needle of ["csv_attr_v1", "lead_submit_success", "lead_submit_error",
                       "lead_form_start", "lead_form_step_complete",
-                      "cta_home_value_click", "cta_sell_click", "phone_click", "email_click"])
+                      "cta_home_value_click", "cta_sell_click", "cta_fsbo_click",
+                      "phone_click", "email_click"])
   if (!js.includes(needle)) fail("site", `main.js is missing analytics/attribution hook: ${needle}`);
 
 /* --- bot verification, browser half ------------------------------------

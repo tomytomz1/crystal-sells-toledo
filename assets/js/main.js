@@ -829,6 +829,15 @@
      6. CTA and contact-intent tracking
      ============================================================= */
   function initCtaTracking() {
+    /* The route itself, optionally with a query or fragment - NOT any href
+       that merely starts with the same characters. A bare prefix test
+       counted /sell-house-without-realtor-toledo as a /sell click. */
+    function isRoute(href, route) {
+      if (href.indexOf(route) !== 0) return false;
+      var next = href.charAt(route.length);
+      return next === "" || next === "?" || next === "#";
+    }
+
     document.addEventListener("click", function (e) {
       var link = e.target.closest("a");
       if (!link) return;
@@ -850,8 +859,10 @@
         analytics.track("email_click", { destination: href.split("?")[0] });
       } else if (href === "/home-value" || href.indexOf("/home-value") === 0) {
         analytics.track("cta_home_value_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
-      } else if (href === "/sell" || href.indexOf("/sell") === 0) {
+      } else if (isRoute(href, "/sell")) {
         analytics.track("cta_sell_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
+      } else if (isRoute(href, "/sell-house-without-realtor-toledo")) {
+        analytics.track("cta_fsbo_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
       }
     }, { passive: true });
   }
