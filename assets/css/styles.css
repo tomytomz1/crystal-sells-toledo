@@ -1189,9 +1189,13 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
    rule is `a { color: inherit; text-decoration: none }` and only .prose
    overrode it, so a link inside an aside or an FAQ answer rendered in body
    colour with no underline and no border. That is not a low-contrast link,
-   it is an invisible one. Same treatment .prose already uses. */
-.quietnote a, .faq__a a, .factor dd a { color: var(--gold-link); text-decoration: underline; text-underline-offset: 3px; }
-.quietnote a:hover, .faq__a a:hover, .factor dd a:hover { color: var(--gold); }
+   it is an invisible one. Same treatment .prose already uses.
+   The .argument__item / .returns__item selectors cover the FSBO guide's
+   source links; :not([class]) leaves .textlink and buttons alone. */
+.quietnote a, .faq__a a, .factor dd a,
+.argument__item p a:not([class]), .returns__item p a:not([class]) { color: var(--gold-link); text-decoration: underline; text-underline-offset: 3px; }
+.quietnote a:hover, .faq__a a:hover, .factor dd a:hover,
+.argument__item p a:not([class]):hover, .returns__item p a:not([class]):hover { color: var(--gold); }
 /* The effective-date / not-legal-advice line at the top of /privacy. */
 .prose__note { font-size: .92rem; color: var(--muted); }
 .prose code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1880,7 +1884,7 @@ a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px
    The guide reuses the /sell lead, .method, .returns, .argument, .included,
    .checklist and .faq components. Only two things are new: the "in this
    guide" list in the lead is made of links, and the comparison is a real
-   table. On a phone the table stacks into one block per task, each cell
+   table. Below 980px the table stacks into one block per task, each cell
    labelled from data-label; the explicit ARIA roles in the markup keep the
    table semantics a screen reader would otherwise drop once the rows are
    display:block. --gold-link, not --gold-dk, for the small labels: it
@@ -1904,8 +1908,14 @@ a.lead__k:hover { color: var(--gold-lt); }
   width: 22%;
 }
 .compare td { color: var(--muted); line-height: 1.6; width: 39%; }
+/* Four paths: the task column plus four equal columns. */
+.compare--paths tbody th { width: 16%; }
+.compare--paths td { width: 21%; font-size: .92rem; }
 .compare tbody tr:last-child > * { border-bottom: 1px solid var(--line); }
-@media (max-width: 719px) {
+/* Stacks into labelled cards below 980px: the only table (the FSBO
+   guide's four-path comparison) has five columns of prose, which do not
+   fit a tablet. */
+@media (max-width: 979px) {
   .compare thead {
     position: absolute; width: 1px; height: 1px; overflow: hidden;
     clip: rect(0 0 0 0); white-space: nowrap;
