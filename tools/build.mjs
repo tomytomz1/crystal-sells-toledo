@@ -212,20 +212,32 @@ const ASSET_VERSIONS = {
 /* ---------------------------------------------------------------------
    How each page loads the full stylesheet
    ---------------------------------------------------------------------
-   The inline paint bootstrap in _shell.html covers the HOMEPAGE's opening
-   viewport and nothing else. On the homepage the full stylesheet is
-   therefore fetched without blocking first paint.
+   A HYBRID POLICY, chosen per page for the seller-conversion funnel.
 
-   Every other page loads it render-blocking. An interior page painted with
+   ASYNC (ASYNC_STYLESHEET_SLUGS): the full stylesheet is fetched without
+   blocking first paint, behind the inline paint bootstrap in _shell.html.
+   The bootstrap covers the HOMEPAGE's opening viewport; on the other pages
+   in this list the async load is kept deliberately, to protect mobile first
+   paint and LCP on conversion pages, accepting that they can reflow a little
+   when the full sheet applies.
+
+   RENDER-BLOCKING: every other page. An informational page painted with
    the bootstrap alone lays out its page head, prose, cards and grids unstyled
    and then reflows when the full sheet applies. PageSpeed, 28 Sep 2026:
    desktop median CLS 0.12-0.29 on 10 of 13 interior pages; reproduced in a
    local browser, and 0.000 on all 13 with the sheet render-blocking.
+
    Extending the bootstrap to cover every interior component would copy
    most of styles.css into every page by hand. tools/check-base.mjs holds
-   the line.
+   the exact list, independently.
    --------------------------------------------------------------------- */
-const ASYNC_STYLESHEET_SLUGS = new Set(["index"]);
+const ASYNC_STYLESHEET_SLUGS = new Set([
+  "index",
+  "home-value",
+  "43551-seller-review",
+  "contact",
+  "sell",
+]);
 const STYLESHEET_HREF = `/assets/css/styles.css?v=${ASSET_VERSIONS.css_v}`;
 const stylesheetTagFor = (slug) => ASYNC_STYLESHEET_SLUGS.has(slug)
   ? `<!-- Fetch the immutable full stylesheet immediately, but do not make the

@@ -36,10 +36,11 @@
   arrives. Every rule is copied from styles.css on purpose: this is a paint
   bootstrap, not a second design system.
 
-  It covers the homepage's opening viewport ONLY. Every other page loads the
-  full stylesheet render-blocking (the stylesheet tag below is chosen per page in
-  tools/build.mjs), because an interior page painted with this block alone
-  reflows when the full sheet applies (desktop CLS up to 0.29 in PageSpeed).
+  It covers the homepage's opening viewport ONLY. The stylesheet tag below is
+  chosen per page in tools/build.mjs: a short allowlist of conversion pages
+  keeps the async load to protect mobile first paint, and every other page
+  loads the full stylesheet render-blocking, because a page painted with this
+  block alone reflows when the full sheet applies (desktop CLS up to 0.29).
 -->
 <style>
 :root{--gold:#b8863b;--gold-lt:#d9bc7f;--gold-dk:#8f6828;--ink:#14120f;--ink-soft:#2a2621;--muted:#6d665c;--cream:#faf8f5;--cream-dk:#f1ece4;--line:#e4ded4;--white:#fff;--serif:"Playfair Display","Cormorant Garamond",Georgia,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--wrap:1220px;--gutter:clamp(1.25rem,5vw,3rem);--radius:2px;--ease:cubic-bezier(.22,.61,.36,1)}
