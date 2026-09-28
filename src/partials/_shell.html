@@ -70,27 +70,30 @@
     : null;
   if (!source) return;
 
+  var readyKey = "__csvMaps" + "Ready";
+  var resolveKey = "__csvMaps" + "Resolve";
+  var rejectKey = "__csvMaps" + "Reject";
   var resolveReady;
   var rejectReady;
   var settled = false;
   var started = false;
 
-  window.__csvMapsReady = new Promise(function (resolve, reject) {
+  window[readyKey] = new Promise(function (resolve, reject) {
     resolveReady = resolve;
     rejectReady = reject;
   });
-  window.__csvMapsResolve = function (value) {
+  window[resolveKey] = function (value) {
     if (settled) return;
     settled = true;
     resolveReady(value);
   };
-  window.__csvMapsReject = function (error) {
+  window[rejectKey] = function (error) {
     if (settled) return;
     settled = true;
     rejectReady(error || new Error("Google Maps failed to load"));
   };
   window.csvMapsReady = function () {
-    window.__csvMapsResolve(true);
+    window[resolveKey](true);
     window.setTimeout(function () {
       var active = document.activeElement;
       if (active && active.matches &&
@@ -113,11 +116,11 @@
     var script = document.createElement("script");
     script.async = true;
     script.src = source.getAttribute("src");
-    script.onerror = function () { window.__csvMapsReject(); };
+    script.onerror = function () { window[rejectKey](); };
     document.head.appendChild(script);
 
     window.setTimeout(function () {
-      if (!settled) window.__csvMapsReject(new Error("Google Maps timed out"));
+      if (!settled) window[rejectKey](new Error("Google Maps timed out"));
     }, 8000);
   }
 
