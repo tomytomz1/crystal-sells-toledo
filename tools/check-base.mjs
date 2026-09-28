@@ -48,7 +48,10 @@ for (const file of pages) {
   /* --- how the full stylesheet loads --------------------------------
      The inline paint bootstrap covers the homepage's opening viewport
      only. Anywhere else an async stylesheet paints the page half-styled and
-     reflows it (desktop CLS up to 0.29), so only index.html may defer it. */
+     reflows it (desktop CLS up to 0.29), so only the pages in
+     ASYNC_CSS_PAGES may defer it - the conversion pages where that reflow
+     is accepted to protect mobile first paint. Every other page must load
+     styles.css render-blocking. */
   const asyncCss = /<link rel="preload" as="style" href="\/assets\/css\/styles\.css\?v=/.test(html);
   const blockingCss = /<link rel="stylesheet" href="\/assets\/css\/styles\.css\?v=/.test(html.replace(/<noscript>[\s\S]*?<\/noscript>/g, ""));
   const wantAsync = ASYNC_CSS_PAGES.has(file);
