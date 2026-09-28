@@ -831,7 +831,7 @@
   function initCtaTracking() {
     /* The route itself, optionally with a query or fragment - NOT any href
        that merely starts with the same characters. A bare prefix test
-       counted /sell-house-without-realtor-toledo as a /sell click. */
+       counted /sell-house-without-agent-toledo as a /sell click. */
     function isRoute(href, route) {
       if (href.indexOf(route) !== 0) return false;
       var next = href.charAt(route.length);
@@ -861,7 +861,7 @@
         analytics.track("cta_home_value_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
       } else if (isRoute(href, "/sell")) {
         analytics.track("cta_sell_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
-      } else if (isRoute(href, "/sell-house-without-realtor-toledo")) {
+      } else if (isRoute(href, "/sell-house-without-agent-toledo")) {
         analytics.track("cta_fsbo_click", { link_text: (link.textContent || "").trim().slice(0, 60) });
       }
     }, { passive: true });

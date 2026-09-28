@@ -1876,7 +1876,7 @@ a.desk__item:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px
 }
 .direct__mail:hover { color: var(--ink); border-color: var(--gold); }
 
-/* --- /sell-house-without-realtor-toledo --------------------------------
+/* --- /sell-house-without-agent-toledo --------------------------------
    The guide reuses the /sell lead, .method, .returns, .argument, .included,
    .checklist and .faq components. Only two things are new: the "in this
    guide" list in the lead is made of links, and the comparison is a real

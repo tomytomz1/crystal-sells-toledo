@@ -706,16 +706,16 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
         out.push([href]);
         el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       };
-      ["/sell", "/sell#faq", "/sell?from=test", "/sell-house-without-realtor-toledo",
-       "/sell-house-without-realtor-toledo#steps", "/seller-something"].forEach(click);
+      ["/sell", "/sell#faq", "/sell?from=test", "/sell-house-without-agent-toledo",
+       "/sell-house-without-agent-toledo#steps", "/seller-something"].forEach(click);
       return out;
     });
     const got = Object.fromEntries(seen.map(([href, ...events]) => [href, events]));
     assert.deepEqual(got["/sell"], ["cta_sell_click"]);
     assert.deepEqual(got["/sell#faq"], ["cta_sell_click"]);
     assert.deepEqual(got["/sell?from=test"], ["cta_sell_click"]);
-    assert.deepEqual(got["/sell-house-without-realtor-toledo"], ["cta_fsbo_click"]);
-    assert.deepEqual(got["/sell-house-without-realtor-toledo#steps"], ["cta_fsbo_click"]);
+    assert.deepEqual(got["/sell-house-without-agent-toledo"], ["cta_fsbo_click"]);
+    assert.deepEqual(got["/sell-house-without-agent-toledo#steps"], ["cta_fsbo_click"]);
     assert.deepEqual(got["/seller-something"], [], "an unrelated /sell-prefixed path was classified");
     await p.close();
   });
@@ -724,7 +724,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     for (const [w, h] of [[390, 844], [1440, 900]]) {
       const p = await browser.newPage({ viewport: { width: w, height: h } });
       await p.route("**/*", (r) => r.request().url().startsWith(base) ? r.continue() : r.abort());
-      const res = await p.goto(`${base}/sell-house-without-realtor-toledo`, { waitUntil: "load" });
+      const res = await p.goto(`${base}/sell-house-without-agent-toledo`, { waitUntil: "load" });
       assert.equal(res.status(), 200);
       const m = await p.evaluate(() => ({
         h1: [...document.querySelectorAll("h1")].map((e) => e.textContent.trim()),
@@ -739,8 +739,8 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
           return r.width > 0 && (r.right > document.documentElement.clientWidth + 1 || r.left < -1);
         }).map((el) => el.tagName.toLowerCase() + "." + String(el.className || "").split(" ")[0]),
       }));
-      assert.deepEqual(m.h1, ["How to Sell a House Without a Realtor in Toledo, Ohio"]);
-      assert.equal(m.canonical, "https://crystalsellstoledo.com/sell-house-without-realtor-toledo");
+      assert.deepEqual(m.h1, ["How to Sell a House Without an Agent in Toledo, Ohio"]);
+      assert.equal(m.canonical, "https://crystalsellstoledo.com/sell-house-without-agent-toledo");
       assert.ok(!/noindex/.test(m.robots), "the guide is noindex");
       assert.equal(m.forms, 0, "the guide must use /home-value, not a second lead form");
       assert.ok(m.toSell && m.toValue, "the guide lost its link to /sell or /home-value");
@@ -756,7 +756,7 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     }
     const p = await page();
     await p.goto(`${base}/sell`, { waitUntil: "load" });
-    assert.equal(await p.locator('main a[href="/sell-house-without-realtor-toledo"]').count(), 1,
+    assert.equal(await p.locator('main a[href="/sell-house-without-agent-toledo"]').count(), 1,
       "/sell no longer links to the FSBO guide");
     await p.close();
   });
