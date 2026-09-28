@@ -29,12 +29,19 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">{{turnstilePreconnect}}
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<!-- Inter is a variable font: 400;500;600 and 400..700 resolve to the SAME
-     15 woff2 files, so asking for the range costs nothing to download and
-     ~5KB less CSS. It buys a real 700, which the CTA labels use - at 600
-     the browser would synthesise the weight and smear small uppercase. -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap">
+<!-- Inter is a variable font: 400..700 resolves to the same font files as
+     enumerating individual weights. Preload the stylesheet but apply it
+     asynchronously so typography cannot hold up the first render/LCP. The
+     noscript fallback preserves the intended typography when JS is disabled. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap"></noscript>
 <script>document.documentElement.classList.add("js")</script>
+<!-- With JS available the multi-step form will immediately collapse to step 1.
+     Hide later steps before first paint so main.js does not cause a large
+     layout shift when it initializes them. If JS is disabled, .js is never
+     added and both steps remain visible as the no-JS fallback intends. -->
+<style>.js form[data-steps]:not([data-current-step]) [data-step]:not([data-step="1"]){display:none}</style>
 <link rel="stylesheet" href="/assets/css/styles.css?v={{css_v}}">
 {{jsonld}}
 </head>
