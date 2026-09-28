@@ -210,6 +210,32 @@ const ASSET_VERSIONS = {
 };
 
 /* ---------------------------------------------------------------------
+   How each page loads the full stylesheet
+   ---------------------------------------------------------------------
+   The inline paint bootstrap in _shell.html covers the HOMEPAGE's opening
+   viewport and nothing else. On the homepage the full stylesheet is
+   therefore fetched without blocking first paint.
+
+   Every other page loads it render-blocking. An interior page painted with
+   the bootstrap alone lays out its page head, prose, cards and grids unstyled
+   and then reflows when the full sheet applies. PageSpeed, 28 Sep 2026:
+   desktop median CLS 0.12-0.29 on 10 of 13 interior pages; reproduced in a
+   local browser, and 0.000 on all 13 with the sheet render-blocking.
+   Extending the bootstrap to cover every interior component would copy
+   most of styles.css into every page by hand. tools/check-base.mjs holds
+   the line.
+   --------------------------------------------------------------------- */
+const ASYNC_STYLESHEET_SLUGS = new Set(["index"]);
+const STYLESHEET_HREF = `/assets/css/styles.css?v=${ASSET_VERSIONS.css_v}`;
+const stylesheetTagFor = (slug) => ASYNC_STYLESHEET_SLUGS.has(slug)
+  ? `<!-- Fetch the immutable full stylesheet immediately, but do not make the
+     network round trip a prerequisite for first paint. The inline bootstrap
+     above keeps the opening viewport stable until this applies. -->
+<link rel="preload" as="style" href="${STYLESHEET_HREF}" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="${STYLESHEET_HREF}"></noscript>`
+  : `<link rel="stylesheet" href="${STYLESHEET_HREF}">`;
+
+/* ---------------------------------------------------------------------
    Homepage hero image
    ---------------------------------------------------------------------
    The hero is the primary conversion surface, so a development
@@ -469,6 +495,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     updated: CONTENT_UPDATED,
     css_v: ASSET_VERSIONS.css_v,
     js_v: ASSET_VERSIONS.js_v,
+    stylesheet: stylesheetTagFor(slug),
     heroImage: heroImageTag,
     mapsLoader: mapsLoaderTag,
     turnstileLoader: turnstileLoaderTag,

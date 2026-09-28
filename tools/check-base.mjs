@@ -38,6 +38,17 @@ for (const file of pages) {
   const leftover = html.match(/\{\{[^}]*\}\}/g);
   if (leftover) fail(file, `unreplaced template tokens: ${[...new Set(leftover)].join(", ")}`);
 
+  /* --- how the full stylesheet loads --------------------------------
+     The inline paint bootstrap covers the homepage's opening viewport
+     only. Anywhere else an async stylesheet paints the page half-styled and
+     reflows it (desktop CLS up to 0.29), so only index.html may defer it. */
+  const asyncCss = /<link rel="preload" as="style" href="\/assets\/css\/styles\.css\?v=/.test(html);
+  const blockingCss = /<link rel="stylesheet" href="\/assets\/css\/styles\.css\?v=/.test(html.replace(/<noscript>[\s\S]*?<\/noscript>/g, ""));
+  if (file === "index.html" ? !asyncCss || blockingCss : asyncCss || !blockingCss)
+    fail(file, file === "index.html"
+      ? "the homepage must load styles.css via preload behind the inline bootstrap"
+      : "styles.css must be render-blocking here - the inline bootstrap covers only the homepage, so an async sheet reflows this page");
+
   /* --- title / description ---------------------------------------- */
   const title = html.match(/<title>([^<]*)<\/title>/)?.[1];
   const desc = html.match(/<meta name="description" content="([^"]*)"/)?.[1];
