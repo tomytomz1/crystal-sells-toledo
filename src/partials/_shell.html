@@ -29,12 +29,18 @@
 <!--
   First-paint performance contract.
 
-  The complete stylesheet is still the single source of truth, but it is no
-  longer allowed to block the first paint. The small block below contains the
-  exact rules required to render the shared header, dark opening surface and
-  homepage valuation form without a flash or layout jump while the immutable
-  full stylesheet arrives. Every rule is duplicated verbatim from styles.css
-  on purpose: this is a paint bootstrap, not a second design system.
+  The complete stylesheet is still the single source of truth. On the
+  homepage it is not allowed to block the first paint: the small block below
+  contains the rules required to render the shared header, dark opening
+  surface and homepage valuation form while the immutable full stylesheet
+  arrives. Every rule is copied from styles.css on purpose: this is a paint
+  bootstrap, not a second design system.
+
+  It covers the homepage's opening viewport ONLY. The stylesheet tag below is
+  chosen per page in tools/build.mjs: a short allowlist of conversion pages
+  keeps the async load to protect mobile first paint, and every other page
+  loads the full stylesheet render-blocking, because a page painted with this
+  block alone reflows when the full sheet applies (desktop CLS up to 0.29).
 -->
 <style>
 :root{--gold:#b8863b;--gold-lt:#d9bc7f;--gold-dk:#8f6828;--ink:#14120f;--ink-soft:#2a2621;--muted:#6d665c;--cream:#faf8f5;--cream-dk:#f1ece4;--line:#e4ded4;--white:#fff;--serif:"Playfair Display","Cormorant Garamond",Georgia,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--wrap:1220px;--gutter:clamp(1.25rem,5vw,3rem);--radius:2px;--ease:cubic-bezier(.22,.61,.36,1)}
@@ -43,11 +49,7 @@
 @media(min-width:640px){.hero .hv-form__lead{grid-template-columns:1fr auto;align-items:end;gap:.75rem}.hero .hv-form__go{padding-inline:1.9rem}}@media(max-width:639px){.hero .hv-form__go{width:100%}}@media(min-width:1024px){.hero__grid{grid-template-columns:1.04fr .96fr;gap:clamp(3rem,5vw,5rem);align-items:start}.hero--capture .hero__content{max-width:36rem}}@media(max-width:940px){.nav-toggle{display:block}.nav{position:fixed;inset:0 0 auto 0;top:100%;flex-direction:column;align-items:stretch;gap:0;background:rgba(250,248,245,.985);padding:1rem var(--gutter) 2rem;opacity:0;pointer-events:none}.nav__link{color:var(--ink-soft)!important}}@media(max-width:380px){.hero--capture h1{font-size:1.82rem;margin-bottom:.45em}.hero--capture .eyebrow{margin-bottom:.7rem;font-size:.66rem}.hero--capture .hero__lede{margin-bottom:1.25rem;font-size:.97rem}}
 </style>
 
-<!-- Fetch the immutable full stylesheet immediately, but do not make the
-     network round trip a prerequisite for first paint. The inline bootstrap
-     above keeps the opening viewport stable until this applies. -->
-<link rel="preload" as="style" href="/assets/css/styles.css?v={{css_v}}" onload="this.onload=null;this.rel='stylesheet'">
-<noscript><link rel="stylesheet" href="/assets/css/styles.css?v={{css_v}}"></noscript>
+{{stylesheet}}
 
 <!-- Keep the branded web fonts out of the critical network race. They are
      optional decoration; system/Georgia fallbacks are metrically stable and

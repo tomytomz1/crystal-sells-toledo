@@ -28,6 +28,13 @@ const PLACEHOLDERS = [];
 const pages = readdirSync(ROOT).filter((f) => f.endsWith(".html"));
 if (!pages.length) fail("build", "no HTML pages found in public/ — run `npm run build` first");
 
+/* The pages allowed to load styles.css asynchronously. Deliberately a
+   second copy of ASYNC_STYLESHEET_SLUGS in tools/build.mjs rather than an
+   import: changing the policy has to be done in both places, on purpose. */
+const ASYNC_CSS_PAGES = new Set(["index.html", "home-value.html", "43551-seller-review.html", "contact.html", "sell.html"]);
+for (const f of ASYNC_CSS_PAGES)
+  if (!pages.includes(f)) fail(f, "is on the async-stylesheet allowlist but was not built - remove it from the allowlist or restore the page");
+
 const titles = new Map();
 const descs = new Map();
 
@@ -37,6 +44,21 @@ for (const file of pages) {
   /* --- unreplaced template tokens --------------------------------- */
   const leftover = html.match(/\{\{[^}]*\}\}/g);
   if (leftover) fail(file, `unreplaced template tokens: ${[...new Set(leftover)].join(", ")}`);
+
+  /* --- how the full stylesheet loads --------------------------------
+     The inline paint bootstrap covers the homepage's opening viewport
+     only. Anywhere else an async stylesheet paints the page half-styled and
+     reflows it (desktop CLS up to 0.29), so only the pages in
+     ASYNC_CSS_PAGES may defer it - the conversion pages where that reflow
+     is accepted to protect mobile first paint. Every other page must load
+     styles.css render-blocking. */
+  const asyncCss = /<link rel="preload" as="style" href="\/assets\/css\/styles\.css\?v=/.test(html);
+  const blockingCss = /<link rel="stylesheet" href="\/assets\/css\/styles\.css\?v=/.test(html.replace(/<noscript>[\s\S]*?<\/noscript>/g, ""));
+  const wantAsync = ASYNC_CSS_PAGES.has(file);
+  if (wantAsync ? !asyncCss || blockingCss : asyncCss || !blockingCss)
+    fail(file, wantAsync
+      ? "styles.css must load via preload here (async allowlist in tools/build.mjs), with the blocking link only inside <noscript>"
+      : "styles.css must be render-blocking here - only the async allowlist may defer it, because an async sheet reflows this page");
 
   /* --- title / description ---------------------------------------- */
   const title = html.match(/<title>([^<]*)<\/title>/)?.[1];

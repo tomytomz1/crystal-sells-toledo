@@ -210,6 +210,52 @@ const ASSET_VERSIONS = {
 };
 
 /* ---------------------------------------------------------------------
+   How each page loads the full stylesheet
+   ---------------------------------------------------------------------
+   A HYBRID POLICY, chosen per page for the seller-conversion funnel.
+
+   ASYNC (ASYNC_STYLESHEET_SLUGS): the full stylesheet is fetched without
+   blocking first paint, behind the inline paint bootstrap in _shell.html.
+   The bootstrap covers the HOMEPAGE's opening viewport; on the other pages
+   in this list the async load is kept deliberately, to protect mobile first
+   paint and LCP on conversion pages, accepting that they reflow when the
+   full sheet applies. Local Lighthouse 13.5.0, median of 3, 28 Sep 2026 -
+   mobile LCP async vs render-blocking, and the CLS async costs (mobile /
+   desktop):
+     /home-value           1.00 s vs 1.67 s   CLS 0.002 / 0.024
+     /43551-seller-review  1.06 s vs 1.66 s   CLS 0.000 / 0.087
+     /contact              0.99 s vs 1.53 s   CLS 0.032 / 0.053
+     /sell                 1.29 s vs 1.69 s   CLS 0.089 / 0.170
+   A page leaves this list only on evidence that render-blocking serves it
+   at least as well.
+
+   RENDER-BLOCKING: every other page. An informational page painted with
+   the bootstrap alone lays out its page head, prose, cards and grids unstyled
+   and then reflows when the full sheet applies. PageSpeed, 28 Sep 2026:
+   desktop median CLS 0.12-0.29 on 10 of 13 interior pages; reproduced in a
+   local browser, and 0.000 on all 13 with the sheet render-blocking.
+
+   Extending the bootstrap to cover every interior component would copy
+   most of styles.css into every page by hand. tools/check-base.mjs holds
+   the exact list, independently.
+   --------------------------------------------------------------------- */
+const ASYNC_STYLESHEET_SLUGS = new Set([
+  "index",
+  "home-value",
+  "43551-seller-review",
+  "contact",
+  "sell",
+]);
+const STYLESHEET_HREF = `/assets/css/styles.css?v=${ASSET_VERSIONS.css_v}`;
+const stylesheetTagFor = (slug) => ASYNC_STYLESHEET_SLUGS.has(slug)
+  ? `<!-- Fetch the immutable full stylesheet immediately, but do not make the
+     network round trip a prerequisite for first paint. The inline bootstrap
+     above keeps the opening viewport stable until this applies. -->
+<link rel="preload" as="style" href="${STYLESHEET_HREF}" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="${STYLESHEET_HREF}"></noscript>`
+  : `<link rel="stylesheet" href="${STYLESHEET_HREF}">`;
+
+/* ---------------------------------------------------------------------
    Homepage hero image
    ---------------------------------------------------------------------
    The hero is the primary conversion surface, so a development
@@ -477,6 +523,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     updated: CONTENT_UPDATED,
     css_v: ASSET_VERSIONS.css_v,
     js_v: ASSET_VERSIONS.js_v,
+    stylesheet: stylesheetTagFor(slug),
     heroImage: heroImageTag,
     mapsLoader: mapsLoaderTag,
     turnstileLoader: turnstileLoaderTag,
