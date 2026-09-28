@@ -218,8 +218,16 @@ const ASSET_VERSIONS = {
    blocking first paint, behind the inline paint bootstrap in _shell.html.
    The bootstrap covers the HOMEPAGE's opening viewport; on the other pages
    in this list the async load is kept deliberately, to protect mobile first
-   paint and LCP on conversion pages, accepting that they can reflow a little
-   when the full sheet applies.
+   paint and LCP on conversion pages, accepting that they reflow when the
+   full sheet applies. Local Lighthouse 13.5.0, median of 3, 28 Sep 2026 -
+   mobile LCP async vs render-blocking, and the CLS async costs (mobile /
+   desktop):
+     /home-value           1.00 s vs 1.67 s   CLS 0.002 / 0.024
+     /43551-seller-review  1.06 s vs 1.66 s   CLS 0.000 / 0.087
+     /contact              0.99 s vs 1.53 s   CLS 0.032 / 0.053
+     /sell                 1.29 s vs 1.69 s   CLS 0.089 / 0.170
+   A page leaves this list only on evidence that render-blocking serves it
+   at least as well.
 
    RENDER-BLOCKING: every other page. An informational page painted with
    the bootstrap alone lays out its page head, prose, cards and grids unstyled
