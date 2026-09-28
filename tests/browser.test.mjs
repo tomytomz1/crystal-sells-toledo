@@ -682,6 +682,85 @@ describe("browser behaviour", { skip: canRun ? false : "playwright or build outp
     await p.close();
   });
 
+  /* A bare `href.indexOf("/sell") === 0` counted the FSBO guide as a /sell
+     click. /sell - with or without a query or fragment - must still report
+     cta_sell_click exactly as before; the guide must report only its own
+     event. Real links from the built pages, plus the /sell variants no page
+     carries yet, all clicked on the same page and collected in one pass. */
+  test("/sell and the FSBO guide report distinct CTA events", async () => {
+    const p = await page();
+    await p.goto(`${base}/sell`, { waitUntil: "load" });
+    const seen = await p.evaluate(() => {
+      const out = [];
+      ["cta_sell_click", "cta_fsbo_click", "cta_home_value_click"]
+        .forEach((n) => window.addEventListener(n, () => out[out.length - 1].push(n)));
+      document.addEventListener("click", (e) => e.preventDefault(), true);
+      const click = (href) => {
+        let el = document.querySelector(`a[href="${href}"]`);
+        if (!el) {
+          el = document.createElement("a");
+          el.setAttribute("href", href);
+          el.textContent = "synthetic";
+          document.body.appendChild(el);
+        }
+        out.push([href]);
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      };
+      ["/sell", "/sell#faq", "/sell?from=test", "/sell-house-without-agent-toledo",
+       "/sell-house-without-agent-toledo#steps", "/seller-something"].forEach(click);
+      return out;
+    });
+    const got = Object.fromEntries(seen.map(([href, ...events]) => [href, events]));
+    assert.deepEqual(got["/sell"], ["cta_sell_click"]);
+    assert.deepEqual(got["/sell#faq"], ["cta_sell_click"]);
+    assert.deepEqual(got["/sell?from=test"], ["cta_sell_click"]);
+    assert.deepEqual(got["/sell-house-without-agent-toledo"], ["cta_fsbo_click"]);
+    assert.deepEqual(got["/sell-house-without-agent-toledo#steps"], ["cta_fsbo_click"]);
+    assert.deepEqual(got["/seller-something"], [], "an unrelated /sell-prefixed path was classified");
+    await p.close();
+  });
+
+  test("FSBO guide renders, links both ways, and fits phone and desktop", async () => {
+    for (const [w, h] of [[390, 844], [1440, 900]]) {
+      const p = await browser.newPage({ viewport: { width: w, height: h } });
+      await p.route("**/*", (r) => r.request().url().startsWith(base) ? r.continue() : r.abort());
+      const res = await p.goto(`${base}/sell-house-without-agent-toledo`, { waitUntil: "load" });
+      assert.equal(res.status(), 200);
+      const m = await p.evaluate(() => ({
+        h1: [...document.querySelectorAll("h1")].map((e) => e.textContent.trim()),
+        canonical: document.querySelector('link[rel="canonical"]')?.href,
+        robots: document.querySelector('meta[name="robots"]')?.content || "",
+        forms: document.querySelectorAll("form").length,
+        toSell: !!document.querySelector('main a[href="/sell"]'),
+        toValue: !!document.querySelector('main a[href="/home-value"]'),
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        escapes: [...document.querySelectorAll("main *")].filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && (r.right > document.documentElement.clientWidth + 1 || r.left < -1);
+        }).map((el) => el.tagName.toLowerCase() + "." + String(el.className || "").split(" ")[0]),
+      }));
+      assert.deepEqual(m.h1, ["How to Sell a House Without an Agent in Toledo, Ohio"]);
+      assert.equal(m.canonical, "https://crystalsellstoledo.com/sell-house-without-agent-toledo");
+      assert.ok(!/noindex/.test(m.robots), "the guide is noindex");
+      assert.equal(m.forms, 0, "the guide must use /home-value, not a second lead form");
+      assert.ok(m.toSell && m.toValue, "the guide lost its link to /sell or /home-value");
+      assert.equal(m.overflow, 0, `document horizontal overflow at ${w}x${h}`);
+      assert.deepEqual(m.escapes, [], `content escapes the viewport at ${w}x${h}: ${m.escapes.join(", ")}`);
+
+      /* The shared accordion works here too. */
+      const q = p.locator(".faq__q").first();
+      await q.click();
+      assert.equal(await q.getAttribute("aria-expanded"), "true");
+      assert.ok(await p.locator("#fsbo-q1").isVisible(), "FAQ answer did not open");
+      await p.close();
+    }
+    const p = await page();
+    await p.goto(`${base}/sell`, { waitUntil: "load" });
+    assert.equal(await p.locator('main a[href="/sell-house-without-agent-toledo"]').count(), 1,
+      "/sell no longer links to the FSBO guide");
+    await p.close();
+  });
+
   test("lead_form_start fires on first input", async () => {
     const p = await page();
     await p.goto(`${base}/contact`, { waitUntil: "load" });
