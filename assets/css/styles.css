@@ -706,6 +706,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   color: var(--gold); margin-bottom: .9rem; line-height: 1;
 }
 .card h3 { font-size: 1.22rem; margin-bottom: .55rem; }
+/* The contact cards' labels sit under an <h2>, so they are <h3> for the
+   outline, but they keep the look of the <h4> they replaced. */
+.card h3.card__label {
+  font-family: var(--sans); font-size: 1.1rem; font-weight: 600;
+  letter-spacing: 0; margin-bottom: .6em;
+}
 .card p { color: var(--muted); font-size: .96rem; margin-bottom: 0; }
 .card__icon {
   width: 44px; height: 44px; margin-bottom: 1.25rem;
@@ -744,7 +750,9 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .hood__meta {
   display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-top: 1.1rem;
   padding-top: 1.1rem; border-top: 1px solid var(--line);
-  font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-lt);
+  /* --muted, not --muted-lt: #9a938a on the white card measured 3.03:1 at
+     11.5px, under the 4.5:1 AA minimum. --muted is ~5.7:1. */
+  font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
 }
 
 /* Testimonial */
@@ -1011,7 +1019,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   margin-inline-start: calc(var(--kr) * -.0718);
 }
 @media (max-width: 560px) { .footer__brokerage { --kr: 68px; } }
-.site-footer h4 {
+/* Column titles are <h2>: each is a top-level section of the page, and as
+   <h4> they skipped a level after every page body ending on an <h2>
+   (Lighthouse heading-order). Styled exactly as the <h4> they replace -
+   the family was inherited from the global h4 rule, so it is named here. */
+.site-footer .footer__title {
+  font-family: var(--sans);
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
 }
