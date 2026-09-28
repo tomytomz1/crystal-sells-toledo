@@ -966,6 +966,15 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 /* On the dark page head the lockup sits under the h1 */
 .pagehead .legalid { margin: 1.5rem 0 0; }
+/* The one lockup on a LIGHT ground: the reviewer block on
+   /43551-seller-review. The colours above are for dark surfaces, and on
+   cream they measured 1.19:1 (names) and 1.73:1 (licence), so the legal
+   identity was effectively invisible. Colour only, and the names are
+   still set by ONE selector that matches both - the same pattern as
+   .byline .legalid__name. */
+.whyhuman .legalid__name { color: var(--ink); }
+.whyhuman .legalid__sep { color: var(--muted); }
+.whyhuman .legalid__lic { color: var(--gold-link); }
 
 /* OAC 1301:5-1-02(E) — displayed content-review date. */
 .footer__updated {
