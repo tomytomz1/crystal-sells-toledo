@@ -31,11 +31,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Inter is a variable font: 400..700 resolves to the same font files as
      enumerating individual weights. Preload the stylesheet but apply it
-     asynchronously so typography cannot hold up the first render/LCP. The
-     noscript fallback preserves the intended typography when JS is disabled. -->
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=swap"></noscript>
+     asynchronously so typography cannot hold up the first render/LCP. Use
+     font-display=optional so a slow first visit keeps the fast system-font
+     fallback instead of repainting large hero text late in the load. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional"></noscript>
 <script>document.documentElement.classList.add("js")</script>
 <!-- With JS available the multi-step form will immediately collapse to step 1.
      Hide later steps before first paint so main.js does not cause a large
@@ -54,7 +55,85 @@
 {{> footer}}
 {{> sticky-cta}}
 <script src="/assets/js/main.js?v={{js_v}}" defer></script>
-{{mapsLoader}}{{turnstileLoader}}
+
+<!-- Google Places is useful only when a visitor actually uses an address field.
+     Keep the build-injected loader inert in a template so its large third-party
+     script never enters the critical path for visitors who do not use the form.
+     We reproduce only its public readiness contract here; main.js still owns the
+     autocomplete behavior itself. -->
+<template id="csv-maps-loader">{{mapsLoader}}</template>
+<script>
+(function () {
+  var template = document.getElementById("csv-maps-loader");
+  var source = template && template.content
+    ? template.content.querySelector("script[src]")
+    : null;
+  if (!source) return;
+
+  var readyKey = "__csvMaps" + "Ready";
+  var resolveKey = "__csvMaps" + "Resolve";
+  var rejectKey = "__csvMaps" + "Reject";
+  var resolveReady;
+  var rejectReady;
+  var settled = false;
+  var started = false;
+
+  window[readyKey] = new Promise(function (resolve, reject) {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  window[resolveKey] = function (value) {
+    if (settled) return;
+    settled = true;
+    resolveReady(value);
+  };
+  window[rejectKey] = function (error) {
+    if (settled) return;
+    settled = true;
+    rejectReady(error || new Error("Google Maps failed to load"));
+  };
+  window.csvMapsReady = function () {
+    window[resolveKey](true);
+    window.setTimeout(function () {
+      var active = document.activeElement;
+      if (active && active.matches &&
+          active.matches('input[name="property_address"]') && active.value) {
+        active.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }, 0);
+  };
+
+  function cleanup() {
+    document.removeEventListener("focusin", maybeStart);
+    document.removeEventListener("pointerdown", maybeStart);
+  }
+
+  function start() {
+    if (started) return;
+    started = true;
+    cleanup();
+
+    var script = document.createElement("script");
+    script.async = true;
+    script.src = source.getAttribute("src");
+    script.onerror = function () { window[rejectKey](); };
+    document.head.appendChild(script);
+
+    window.setTimeout(function () {
+      if (!settled) window[rejectKey](new Error("Google Maps timed out"));
+    }, 8000);
+  }
+
+  function maybeStart(event) {
+    var target = event.target;
+    if (target && target.matches && target.matches('input[name="property_address"]')) start();
+  }
+
+  document.addEventListener("focusin", maybeStart);
+  document.addEventListener("pointerdown", maybeStart, { passive: true });
+})();
+</script>
+{{turnstileLoader}}
 <!-- Vercel Web Analytics. Cookieless, no personal data, no cross-site
      tracking. Served from Vercel's edge, so it 404s harmlessly when the
      site is run locally. -->
