@@ -256,6 +256,37 @@ const stylesheetTagFor = (slug) => ASYNC_STYLESHEET_SLUGS.has(slug)
   : `<link rel="stylesheet" href="${STYLESHEET_HREF}">`;
 
 /* ---------------------------------------------------------------------
+   Page-specific critical CSS supplements
+   ---------------------------------------------------------------------
+   An ASYNC page whose first viewport the homepage bootstrap does not cover
+   may carry a tiny supplement, injected right after the bootstrap. It holds
+   only the geometry that measurably moves when styles.css applies - not a
+   second stylesheet. Every declaration is copied verbatim from styles.css,
+   and tools/check-base.mjs fails the build if one drifts from it.
+
+   /contact, 28 Sep 2026: mobile CLS 0.113 (production PageSpeed and a local
+   Chromium reproduction agree) came from the page head being 21px too tall
+   at first paint (.lede margin and size) and from the section padding and
+   card boxes arriving late. Found by ablation: these five rules take local
+   mobile CLS to 0.003 and desktop to 0.001. Tested and not needed: .split,
+   .grid, the card label, card paragraphs and .textlink.
+   --------------------------------------------------------------------- */
+const CRITICAL_SUPPLEMENTS = {
+  contact:
+    ":root{--section-y:clamp(4.5rem,9vw,8rem)}" +
+    "p:last-child{margin-bottom:0}" +
+    ".lede{font-size:clamp(1.075rem,1.6vw,1.25rem);line-height:1.65;max-width:62ch}" +
+    ".section{padding-block:var(--section-y)}" +
+    ".card{border:1px solid var(--line);padding:clamp(1.75rem,3vw,2.35rem);height:100%}",
+};
+for (const slug of Object.keys(CRITICAL_SUPPLEMENTS))
+  if (!ASYNC_STYLESHEET_SLUGS.has(slug))
+    throw new Error(`critical CSS supplement for "${slug}", which does not load styles.css async - it would do nothing`);
+const criticalSupplementFor = (slug) => CRITICAL_SUPPLEMENTS[slug]
+  ? `<style data-critical-supplement="${slug}">${CRITICAL_SUPPLEMENTS[slug]}</style>`
+  : "";
+
+/* ---------------------------------------------------------------------
    Homepage hero image
    ---------------------------------------------------------------------
    The hero is the primary conversion surface, so a development
@@ -524,6 +555,7 @@ for (const file of readdirSync(pagesDir).filter((f) => f.endsWith(".html")).sort
     css_v: ASSET_VERSIONS.css_v,
     js_v: ASSET_VERSIONS.js_v,
     stylesheet: stylesheetTagFor(slug),
+    criticalSupplement: criticalSupplementFor(slug),
     heroImage: heroImageTag,
     mapsLoader: mapsLoaderTag,
     turnstileLoader: turnstileLoaderTag,
