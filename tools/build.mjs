@@ -422,11 +422,19 @@ console.log(GA4_ON
    Build-time half of one environment variable that is also read at
    runtime by api/lead.js. OFF unless it is exactly "true".
 
-   OFF is what production runs today: no consent checkbox renders on any
-   form, /communications-terms is not built at all (so it cannot 404 from
-   a sitemap or describe a programme that does not run), and the privacy
-   page's messaging section is omitted. A visitor is never shown a consent
-   promise the backend is not yet configured to keep.
+   Production has run with it ON since activation (recorded in
+   docs/CURRENT-STATE.md, which is authoritative for its current state), so
+   a default local build, which leaves it unset, is NOT the production page
+   set: it omits the four gated pages
+   (/communications-terms, /sms-consent-evidence, /sms-privacy,
+   /sms-terms) and their sitemap entries. Set the variable to reproduce
+   production.
+
+   When OFF, no consent checkbox renders on any form, the gated pages are
+   not built at all (so they cannot 404 from a sitemap or describe a
+   programme that does not run), and the privacy page's messaging section
+   is omitted. A visitor is never shown a consent promise the backend is
+   not configured to keep.
    --------------------------------------------------------------------- */
 const CONSENT_ON = consentFeatureEnabled();
 /* Fails the build, not a test: displaying different words from the ones

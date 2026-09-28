@@ -40,9 +40,11 @@
    It is NOT a secret and carries no credential - it is a boolean that says
    whether a feature is on.
 
-   Default OFF, and the default is what production runs until a human turns
-   it on. Showing a visitor a consent checkbox the backend is not yet
-   configured to preserve would be a promise the site cannot keep.
+   Default OFF: absent or misspelt, the feature stays off. Production has
+   run with it ON since activation; docs/CURRENT-STATE.md, not this comment,
+   is authoritative for its current state. Showing a visitor a consent
+   checkbox the backend is not configured to preserve would be a promise
+   the site cannot keep.
    --------------------------------------------------------------------- */
 export const FEATURE_FLAG = "COMMUNICATIONS_CONSENT_ENABLED";
 

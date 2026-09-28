@@ -134,6 +134,9 @@ p:last-child { margin-bottom: 0; }
 }
 .section--ink .eyebrow { color: var(--gold-lt); }
 .section--ink .eyebrow::before, .section--ink .eyebrow::after { background: var(--gold); }
+/* --gold-dk measures 4.27:1 on the --cream-dk ground, under AA for an
+   11.5px label; --gold-link (4.81:1) exists for exactly this surface. */
+.section--cream .eyebrow { color: var(--gold-link); }
 
 .lede {
   font-size: clamp(1.075rem, 1.6vw, 1.25rem);
@@ -357,6 +360,9 @@ p:last-child { margin-bottom: 0; }
   transition: gap .25s var(--ease), border-color .25s var(--ease);
 }
 .textlink:hover { gap: .85rem; border-color: var(--gold-dk); }
+/* --gold-dk on --ink is 3.72:1; the light gold the dark bands already use
+   for their eyebrows is 10.19:1. */
+.section--ink .textlink { color: var(--gold-lt); }
 
 /* --------------------------------------------------------------- header -- */
 .site-header {
@@ -706,6 +712,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   color: var(--gold); margin-bottom: .9rem; line-height: 1;
 }
 .card h3 { font-size: 1.22rem; margin-bottom: .55rem; }
+/* The contact cards' labels sit under an <h2>, so they are <h3> for the
+   outline, but they keep the look of the <h4> they replaced. */
+.card h3.card__label {
+  font-family: var(--sans); font-size: 1.1rem; font-weight: 600;
+  letter-spacing: 0; margin-bottom: .6em;
+}
 .card p { color: var(--muted); font-size: .96rem; margin-bottom: 0; }
 .card__icon {
   width: 44px; height: 44px; margin-bottom: 1.25rem;
@@ -744,7 +756,9 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 .hood__meta {
   display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-top: 1.1rem;
   padding-top: 1.1rem; border-top: 1px solid var(--line);
-  font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-lt);
+  /* --muted, not --muted-lt: #9a938a on the white card measured 3.03:1 at
+     11.5px, under the 4.5:1 AA minimum. --muted is ~5.7:1. */
+  font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
 }
 
 /* Testimonial */
@@ -952,6 +966,15 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
 }
 /* On the dark page head the lockup sits under the h1 */
 .pagehead .legalid { margin: 1.5rem 0 0; }
+/* The one lockup on a LIGHT ground: the reviewer block on
+   /43551-seller-review. The colours above are for dark surfaces, and on
+   cream they measured 1.19:1 (names) and 1.73:1 (licence), so the legal
+   identity was effectively invisible. Colour only, and the names are
+   still set by ONE selector that matches both - the same pattern as
+   .byline .legalid__name. */
+.whyhuman .legalid__name { color: var(--ink); }
+.whyhuman .legalid__sep { color: var(--muted); }
+.whyhuman .legalid__lic { color: var(--gold-link); }
 
 /* OAC 1301:5-1-02(E) — displayed content-review date. */
 .footer__updated {
@@ -1011,7 +1034,12 @@ body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta:hover
   margin-inline-start: calc(var(--kr) * -.0718);
 }
 @media (max-width: 560px) { .footer__brokerage { --kr: 68px; } }
-.site-footer h4 {
+/* Column titles are <h2>: each is a top-level section of the page, and as
+   <h4> they skipped a level after every page body ending on an <h2>
+   (Lighthouse heading-order). Styled exactly as the <h4> they replace -
+   the family was inherited from the global h4 rule, so it is named here. */
+.site-footer .footer__title {
+  font-family: var(--sans);
   color: var(--white); font-size: .71rem; font-weight: 600;
   letter-spacing: .2em; text-transform: uppercase; margin-bottom: 1.25rem;
 }

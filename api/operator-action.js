@@ -197,19 +197,22 @@ const MAX_NOTE_CHARS = 280;
    projection itself, which is best-effort operational state.
 
    NOT SAID HERE, because it would not be true: that an incomplete
-   projection cannot matter. The `cst_*` flags are the only suppression
-   signal any code in this repository reads at all — api/lead.js folds a
-   submission onto a contact's existing flags so a ticked box cannot grant
-   through a suppression, and that read is of the FLAGS, never of the
-   ledger. Send-time enforcement against the ledger is GATE 8 and has not
-   begun.
+   projection cannot matter. The `cst_*` flags are the CRM's current-state
+   view of consent, and a human working from HubSpot reads them.
 
-   Two things keep that from being a live exposure today, and both are
-   conditions of the deployment rather than properties of this code: the
-   consent feature is OFF in Production, so even that read does not happen
-   there; and no automated outbound sender exists, so there is no send for
-   an unread opt-out to leak past. Neither is a reason the projection
-   does not matter — they are reasons GATE 8 MUST PRECEDE ACTIVATION.
+   CORRECTED 28 Sep 2026. This block was written before activation, and it
+   said the consent feature was OFF in Production, that no automated
+   outbound sender existed, and that send-time enforcement against the
+   ledger (GATE 8) had not begun. None of that is current:
+   COMMUNICATIONS_CONSENT_ENABLED is "true" in Production (as of this
+   correction; docs/CURRENT-STATE.md is authoritative), and the designated
+   outbound SMS transport, api/_lib/sms-sender.mjs, goes through GATE 8 in
+   api/_lib/send-permission.mjs, which looks up durable phone-keyed
+   suppression through the ledger's sender role - not through these
+   flags. The ledger append above commits before any projection write, so
+   it is the durable record, not the projection, that a send-time
+   suppression check sees; what an incomplete projection leaves wrong is
+   the CRM's picture of it.
 
    A FIRST ATTEMPT AT THIS WAS NOT ACTUALLY A DEADLINE. It checked the
    clock BETWEEN writes, which bounds when a write may START and says
