@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">{{analytics}}
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <meta name="description" content="{{description}}">
@@ -27,23 +27,43 @@
 <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
 <link rel="manifest" href="/site.webmanifest">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">{{turnstilePreconnect}}
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<!-- Inter is a variable font: 400..700 resolves to the same font files as
-     enumerating individual weights. Preload the stylesheet but apply it
-     asynchronously so typography cannot hold up the first render/LCP. Use
-     font-display=optional so a slow first visit keeps the fast system-font
-     fallback instead of repainting large hero text late in the load. -->
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional" media="print" onload="this.media='all'">
+<!--
+  First-paint performance contract.
+
+  The complete stylesheet is still the single source of truth, but it is no
+  longer allowed to block the first paint. The small block below contains the
+  exact rules required to render the shared header, dark opening surface and
+  homepage valuation form without a flash or layout jump while the immutable
+  full stylesheet arrives. Every rule is duplicated verbatim from styles.css
+  on purpose: this is a paint bootstrap, not a second design system.
+-->
+<style>
+:root{--gold:#b8863b;--gold-lt:#d9bc7f;--gold-dk:#8f6828;--ink:#14120f;--ink-soft:#2a2621;--muted:#6d665c;--cream:#faf8f5;--cream-dk:#f1ece4;--line:#e4ded4;--white:#fff;--serif:"Playfair Display","Cormorant Garamond",Georgia,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--wrap:1220px;--gutter:clamp(1.25rem,5vw,3rem);--radius:2px;--ease:cubic-bezier(.22,.61,.36,1)}
+*,*::before,*::after{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-padding-top:6rem}body{margin:0;background:var(--cream);color:var(--ink-soft);font-family:var(--sans);font-size:1.0625rem;line-height:1.7;-webkit-font-smoothing:antialiased;overflow-x:hidden}img,svg,video{max-width:100%;height:auto;display:block}a{color:inherit;text-decoration:none}button,input,select,textarea{font:inherit;color:inherit}h1,h2,h3,h4{font-family:var(--serif);font-weight:500;color:var(--ink);line-height:1.12;letter-spacing:-.015em;margin:0 0 .6em}h1{font-size:clamp(2.5rem,6.2vw,4.25rem)}p{margin:0 0 1.15em}.wrap{width:100%;max-width:var(--wrap);margin-inline:auto;padding-inline:var(--gutter)}.skip-link{position:absolute;left:1rem;top:-100%;z-index:999;background:var(--ink);color:var(--white);padding:.75rem 1.25rem;border-radius:var(--radius)}.skip-link:focus{top:1rem}.eyebrow{display:inline-flex;align-items:center;gap:.7rem;font-family:var(--sans);font-size:.72rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--gold-dk);margin:0 0 1.1rem}.eyebrow::before{content:"";width:2rem;height:1px;background:var(--gold);flex:none}.btn{display:inline-flex;align-items:center;justify-content:center;gap:.6rem;padding:1.05rem 2.1rem;font-size:.84rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;border:1px solid transparent;border-radius:var(--radius);cursor:pointer;text-align:center}.btn--primary{background:var(--ink);color:var(--white)}.btn--ghost{background:transparent;border-color:currentColor;color:var(--ink)}.site-header{position:fixed;inset:0 0 auto 0;z-index:100;padding-block:1.1rem;background:transparent;border-bottom:1px solid transparent}.site-header .wrap{display:flex;align-items:center;justify-content:space-between;gap:1.5rem}.brand{display:flex;align-items:center;gap:.85rem;flex:none}.brand__logo{height:46px;width:auto}.brand__text{line-height:1.05}.brand__name{display:block;font-family:var(--serif);font-size:1.28rem;color:var(--ink);letter-spacing:-.01em}.brand__sub{display:block;font-size:.6rem;font-weight:600;letter-spacing:.3em;text-transform:uppercase;color:var(--gold-dk)}body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .brand__name{color:var(--white)}body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .brand__sub{color:var(--gold-lt)}.nav{display:flex;align-items:center;gap:clamp(1rem,2.4vw,2.1rem)}.nav__link{font-size:.76rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;white-space:nowrap}.nav__cta{padding:.7rem 1.35rem;border:1px solid currentColor;border-radius:var(--radius);font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.nav-toggle{display:none;width:44px;height:44px;background:none;border:0;cursor:pointer;padding:10px;flex:none}.nav-toggle__bar{display:block;height:1.5px;width:100%;background:var(--ink);border-radius:2px}.nav-toggle__bar+.nav-toggle__bar{margin-top:6px}body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__link,body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav__cta{color:rgba(255,255,255,.9)}body:not(.page--light) .site-header:not(.is-solid):not(.is-open) .nav-toggle__bar{background:var(--white)}
+.hero{position:relative;min-height:min(92vh,860px);display:flex;align-items:flex-end;background:var(--ink);overflow:hidden;padding-top:8rem}.hero__bg{position:absolute;inset:0}.hero__bg img{width:100%;height:100%;object-fit:cover;object-position:50% 28%}.hero__bg::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(10,9,7,.92) 0%,rgba(10,9,7,.62) 38%,rgba(10,9,7,.28) 68%,rgba(10,9,7,.55) 100%),linear-gradient(to right,rgba(10,9,7,.72) 0%,rgba(10,9,7,.15) 60%)}.hero__inner{position:relative;z-index:2;padding-bottom:clamp(3.5rem,7vw,6rem);width:100%}.hero h1{color:var(--white);margin-bottom:.45em}.hero__lede{color:rgba(255,255,255,.82);font-size:clamp(1.05rem,1.7vw,1.28rem);max-width:38ch}.hero .eyebrow{color:var(--gold-lt)}.hero--capture{align-items:center;min-height:auto;padding-top:clamp(5.6rem,14vw,9.5rem);padding-bottom:clamp(2.5rem,7vw,5.5rem)}.hero--capture .hero__bg{background:radial-gradient(120% 90% at 12% 8%,#241f18 0%,rgba(36,31,24,0) 60%),linear-gradient(160deg,#1b1813 0%,#12100d 55%,#0d0b09 100%)}.hero--capture .hero__bg::after{background:linear-gradient(to top,rgba(10,9,7,.86) 0%,rgba(10,9,7,.58) 45%,rgba(10,9,7,.5) 100%),linear-gradient(to right,rgba(10,9,7,.78) 0%,rgba(10,9,7,.28) 70%)}.hero--capture .hero__inner{padding-bottom:0}.hero--capture .hero__content{max-width:54rem}.hero--capture .eyebrow{margin-bottom:1rem}.hero--capture h1{font-size:clamp(1.95rem,6.4vw,3.35rem);line-height:1.1;max-width:21ch;margin-bottom:.55em}.hero--capture .hero__lede{max-width:46ch;font-size:clamp(1rem,1.5vw,1.14rem);margin-bottom:clamp(1.6rem,3vw,2.1rem)}.hero__grid{display:grid;gap:clamp(2.5rem,5vw,3.5rem)}.hero .hv-form{max-width:40rem}.form{display:grid;gap:1.15rem}.form__step{font-family:var(--sans);font-size:.74rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--gold-dk);margin:0 0 1.25rem}.hero .hv-form .form__step{color:var(--gold-lt);margin-bottom:.8rem}[data-step]:not([hidden]){display:grid;gap:1.15rem}.hv-form__lead{display:grid;gap:.85rem}.field{display:grid;gap:.45rem;align-content:start;position:relative}.field>label{font-size:.75rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}.hero .hv-form .field>label{color:rgba(255,255,255,.82)}.field input,.field select,.field textarea{width:100%;padding:.95rem 1.05rem;background:var(--white);border:1px solid var(--line);border-radius:var(--radius);font-size:1rem;color:var(--ink)}.hero .hv-form .field input,.hero .hv-form .field select,.hero .hv-form .field textarea{background:rgba(255,255,255,.97);border-color:rgba(255,255,255,.28)}.hero .hv-form .field input,.hero .hv-form .btn{min-height:3.4rem}.hero .hv-form .btn--primary{background:var(--gold);color:var(--ink)}.hv-form__micro{margin-top:.85rem;font-size:.82rem;letter-spacing:.01em}.hero .hv-form .form__note{color:rgba(255,255,255,.62)}.hero__secondary{margin-top:clamp(1.5rem,3vw,2rem)}.hero__secondary a{font-size:.88rem;color:rgba(255,255,255,.62);border-bottom:1px solid rgba(255,255,255,.22);padding-bottom:.2rem}.pagehead{background:var(--ink);color:rgba(255,255,255,.78);padding-top:clamp(8.5rem,14vw,11rem);padding-bottom:clamp(3.5rem,7vw,5.5rem);position:relative;overflow:hidden}.pagehead h1{color:var(--white);max-width:20ch}.pagehead .eyebrow{color:var(--gold-lt)}.sticky-cta{display:none}
+@media(min-width:640px){.hero .hv-form__lead{grid-template-columns:1fr auto;align-items:end;gap:.75rem}.hero .hv-form__go{padding-inline:1.9rem}}@media(max-width:639px){.hero .hv-form__go{width:100%}}@media(min-width:1024px){.hero__grid{grid-template-columns:1.04fr .96fr;gap:clamp(3rem,5vw,5rem);align-items:start}.hero--capture .hero__content{max-width:36rem}}@media(max-width:940px){.nav-toggle{display:block}.nav{position:fixed;inset:0 0 auto 0;top:100%;flex-direction:column;align-items:stretch;gap:0;background:rgba(250,248,245,.985);padding:1rem var(--gutter) 2rem;opacity:0;pointer-events:none}.nav__link{color:var(--ink-soft)!important}}@media(max-width:380px){.hero--capture h1{font-size:1.82rem;margin-bottom:.45em}.hero--capture .eyebrow{margin-bottom:.7rem;font-size:.66rem}.hero--capture .hero__lede{margin-bottom:1.25rem;font-size:.97rem}}
+</style>
+
+<!-- Fetch the immutable full stylesheet immediately, but do not make the
+     network round trip a prerequisite for first paint. The inline bootstrap
+     above keeps the opening viewport stable until this applies. -->
+<link rel="preload" as="style" href="/assets/css/styles.css?v={{css_v}}" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="/assets/css/styles.css?v={{css_v}}"></noscript>
+
+<!-- Keep the branded web fonts out of the critical network race. They are
+     optional decoration; system/Georgia fallbacks are metrically stable and
+     the existing font-display=optional contract prevents a late LCP repaint. -->
+<template id="csv-font-loader">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional">
+</template>
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..500&family=Inter:wght@400..700&display=optional"></noscript>
+
 <script>document.documentElement.classList.add("js")</script>
 <!-- With JS available the multi-step form will immediately collapse to step 1.
      Hide later steps before first paint so main.js does not cause a large
      layout shift when it initializes them. If JS is disabled, .js is never
      added and both steps remain visible as the no-JS fallback intends. -->
 <style>.js form[data-steps]:not([data-current-step]) [data-step]:not([data-step="1"]){display:none}</style>
-<link rel="stylesheet" href="/assets/css/styles.css?v={{css_v}}">
 {{jsonld}}
 </head>
 <body class="{{bodyClass}}">
@@ -54,6 +74,55 @@
 </main>
 {{> footer}}
 {{> sticky-cta}}
+
+<!-- GA4 keeps its queue/config available immediately so site events are not
+     lost merely because the vendor library is delayed. The large external
+     script starts on the first real interaction, when the page is hidden, or
+     eight seconds after load as a conservative fallback. -->
+<template id="csv-analytics-loader">{{analytics}}</template>
+<script>
+(function () {
+  var template = document.getElementById("csv-analytics-loader");
+  if (!template || !template.content) return;
+  var scripts = template.content.querySelectorAll("script");
+  if (!scripts.length) return;
+
+  var external = null;
+  scripts.forEach(function (source) {
+    if (source.src || source.getAttribute("src")) { external = source; return; }
+    if (!source.textContent.trim()) return;
+    var inline = document.createElement("script");
+    inline.text = source.textContent;
+    document.head.appendChild(inline);
+  });
+  if (!external) return;
+
+  var started = false;
+  function cleanup() {
+    ["pointerdown", "keydown", "touchstart"].forEach(function (name) {
+      window.removeEventListener(name, start, true);
+    });
+    document.removeEventListener("visibilitychange", onVisibility);
+  }
+  function start() {
+    if (started) return;
+    started = true;
+    cleanup();
+    var script = document.createElement("script");
+    script.async = true;
+    script.src = external.getAttribute("src");
+    document.head.appendChild(script);
+  }
+  function onVisibility() { if (document.visibilityState === "hidden") start(); }
+
+  ["pointerdown", "keydown", "touchstart"].forEach(function (name) {
+    window.addEventListener(name, start, { capture: true, passive: true, once: true });
+  });
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("load", function () { window.setTimeout(start, 8000); }, { once: true });
+})();
+</script>
+
 <script src="/assets/js/main.js?v={{js_v}}" defer></script>
 
 <!-- Google Places is useful only when a visitor actually uses an address field.
@@ -133,10 +202,110 @@
   document.addEventListener("pointerdown", maybeStart, { passive: true });
 })();
 </script>
-{{turnstileLoader}}
-<!-- Vercel Web Analytics. Cookieless, no personal data, no cross-site
-     tracking. Served from Vercel's edge, so it 404s harmlessly when the
-     site is run locally. -->
-<script defer src="/_vercel/insights/script.js"></script>
+
+<!-- Turnstile remains fully enforced server-side, but its third-party runtime
+     is not useful until somebody actually starts a lead form. Keep Cloudflare's
+     exact documented script inert in a template, expose the same readiness
+     promise main.js already expects, and start the vendor download on first
+     form interaction. -->
+<template id="csv-turnstile-loader">{{turnstileLoader}}</template>
+<script>
+(function () {
+  var template = document.getElementById("csv-turnstile-loader");
+  if (!template || !template.content) return;
+  var source = template.content.querySelector("script[src]");
+  var config = template.content.querySelector("script:not([src])");
+  if (!source || !config) return;
+
+  var match = config.textContent.match(/window\.__csvTurnstile\s*=\s*\{\s*sitekey:\s*("[^"]+")\s*\}/);
+  if (!match) return;
+  var sitekey;
+  try { sitekey = JSON.parse(match[1]); } catch (e) { return; }
+
+  var resolveReady;
+  var rejectReady;
+  var settled = false;
+  var started = false;
+  window.__csvTurnstile = { sitekey: sitekey };
+  window.__csvTurnstileReady = new Promise(function (resolve, reject) {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  window.__csvTurnstileResolve = function (value) {
+    if (settled) return;
+    settled = true;
+    resolveReady(value);
+  };
+  window.__csvTurnstileReject = function (error) {
+    if (settled) return;
+    settled = true;
+    rejectReady(error || new Error("Turnstile failed to load"));
+  };
+  window.csvTurnstileReady = function () {
+    window.__csvTurnstileResolve(window.turnstile);
+  };
+
+  function cleanup() {
+    document.removeEventListener("focusin", maybeStart);
+    document.removeEventListener("pointerdown", maybeStart);
+    document.removeEventListener("input", maybeStart);
+  }
+  function start() {
+    if (started) return;
+    started = true;
+    cleanup();
+    var script = document.createElement("script");
+    script.async = true;
+    script.defer = true;
+    script.src = source.getAttribute("src");
+    script.onerror = function () { window.__csvTurnstileReject(); };
+    document.head.appendChild(script);
+    window.setTimeout(function () {
+      if (!settled) window.__csvTurnstileReject(new Error("Turnstile timed out"));
+    }, 12000);
+  }
+  function maybeStart(event) {
+    var target = event.target;
+    if (target && target.closest && target.closest("form[data-form]")) start();
+  }
+
+  document.addEventListener("focusin", maybeStart);
+  document.addEventListener("pointerdown", maybeStart, { passive: true });
+  document.addEventListener("input", maybeStart, { passive: true });
+})();
+</script>
+
+<!-- Web fonts are deliberately last among nonessential downloads. With
+     font-display=optional they enhance a fast connection without being able
+     to move the LCP on a slow one. -->
+<script>
+window.addEventListener("load", function () {
+  window.setTimeout(function () {
+    var template = document.getElementById("csv-font-loader");
+    var link = template && template.content ? template.content.querySelector("link[rel=stylesheet]") : null;
+    if (!link) return;
+    document.head.appendChild(link.cloneNode(true));
+  }, 3000);
+}, { once: true });
+</script>
+
+<!-- Vercel Web Analytics is useful, but not before the first screen is painted.
+     Delay the small same-origin collector alongside the other telemetry. -->
+<script>
+(function () {
+  var started = false;
+  function start() {
+    if (started) return;
+    started = true;
+    var s = document.createElement("script");
+    s.defer = true;
+    s.src = "/_vercel/insights/script.js";
+    document.head.appendChild(s);
+  }
+  window.addEventListener("pointerdown", start, { once: true, passive: true });
+  window.addEventListener("keydown", start, { once: true });
+  window.addEventListener("load", function () { window.setTimeout(start, 8000); }, { once: true });
+})();
+</script>
 </body>
 </html>
