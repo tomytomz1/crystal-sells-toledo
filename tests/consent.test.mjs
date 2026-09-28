@@ -639,7 +639,7 @@ describe("rendered output and the feature gate", () => {
     assert.equal(existsSync(join(OFF_DIR, "communications-terms.html")), false);
     const sitemap = page(OFF_DIR, "sitemap.xml");
     assert.ok(!sitemap.includes("communications-terms"));
-    assert.equal((sitemap.match(/<loc>/g) || []).length, 9, "the sitemap changed while the feature is off");
+    assert.equal((sitemap.match(/<loc>/g) || []).length, 10, "the sitemap changed while the feature is off");
   });
 
   test("disabled: the privacy page names no messaging provider", () => {
