@@ -134,6 +134,9 @@ p:last-child { margin-bottom: 0; }
 }
 .section--ink .eyebrow { color: var(--gold-lt); }
 .section--ink .eyebrow::before, .section--ink .eyebrow::after { background: var(--gold); }
+/* --gold-dk measures 4.27:1 on the --cream-dk ground, under AA for an
+   11.5px label; --gold-link (4.81:1) exists for exactly this surface. */
+.section--cream .eyebrow { color: var(--gold-link); }
 
 .lede {
   font-size: clamp(1.075rem, 1.6vw, 1.25rem);
@@ -357,6 +360,9 @@ p:last-child { margin-bottom: 0; }
   transition: gap .25s var(--ease), border-color .25s var(--ease);
 }
 .textlink:hover { gap: .85rem; border-color: var(--gold-dk); }
+/* --gold-dk on --ink is 3.72:1; the light gold the dark bands already use
+   for their eyebrows is 10.19:1. */
+.section--ink .textlink { color: var(--gold-lt); }
 
 /* --------------------------------------------------------------- header -- */
 .site-header {
