@@ -35,6 +35,44 @@ const ASYNC_CSS_PAGES = new Set(["index.html", "home-value.html", "43551-seller-
 for (const f of ASYNC_CSS_PAGES)
   if (!pages.includes(f)) fail(f, "is on the async-stylesheet allowlist but was not built - remove it from the allowlist or restore the page");
 
+/* Pages that carry a page-specific critical CSS supplement (tools/build.mjs,
+   CRITICAL_SUPPLEMENTS). Kept as an independent copy on purpose. */
+const CRITICAL_SUPPLEMENT_PAGES = new Set(["contact.html"]);
+
+/* Top-level rules of a stylesheet as selector -> (property -> value), with
+   whitespace normalised so a minified copy compares equal to the source.
+   @-blocks are skipped: a supplement may only copy top-level rules. */
+const normCss = (v) => v.replace(/\s+/g, " ").replace(/\s*([,()])\s*/g, "$1").replace(/\(\s+/g, "(").trim();
+function parseCssRules(css) {
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = new Map();
+  let depth = 0, start = 0, sel = null, skip = false;
+  for (let i = 0; i < flat.length; i++) {
+    const ch = flat[i];
+    if (ch === "{") {
+      if (depth === 0) { sel = flat.slice(start, i).trim(); skip = sel.startsWith("@"); start = i + 1; }
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        if (!skip) for (const s of sel.split(",").map(normCss)) {
+          const m = rules.get(s) || new Map();
+          for (const d of flat.slice(start, i).split(";")) {
+            const k = d.indexOf(":"); if (k < 0) continue;
+            m.set(d.slice(0, k).trim(), normCss(d.slice(k + 1)));
+          }
+          rules.set(s, m);
+        }
+        start = i + 1;
+      }
+    }
+  }
+  return rules;
+}
+const STYLESHEET_RULES = parseCssRules(readFileSync(join(ROOT, "assets/css/styles.css"), "utf8"));
+for (const f of CRITICAL_SUPPLEMENT_PAGES)
+  if (!pages.includes(f)) fail(f, "has a critical CSS supplement listed but was not built");
+
 const titles = new Map();
 const descs = new Map();
 
@@ -59,6 +97,30 @@ for (const file of pages) {
     fail(file, wantAsync
       ? "styles.css must load via preload here (async allowlist in tools/build.mjs), with the blocking link only inside <noscript>"
       : "styles.css must be render-blocking here - only the async allowlist may defer it, because an async sheet reflows this page");
+
+  /* --- page-specific critical CSS supplement --------------------------
+     Only /contact carries one, only an async page may, and every
+     declaration in it must equal the same selector's declaration in
+     styles.css. A supplement that drifts from the stylesheet would paint
+     one layout and then snap to another - the shift it exists to remove. */
+  const supplements = [...html.matchAll(/<style data-critical-supplement="([^"]+)">([\s\S]*?)<\/style>/g)];
+  if (supplements.length && !CRITICAL_SUPPLEMENT_PAGES.has(file))
+    fail(file, "carries a critical CSS supplement but is not in CRITICAL_SUPPLEMENT_PAGES");
+  if (CRITICAL_SUPPLEMENT_PAGES.has(file) && supplements.length !== 1)
+    fail(file, `must carry exactly one critical CSS supplement, found ${supplements.length}`);
+  if (supplements.length && !wantAsync)
+    fail(file, "has a critical CSS supplement but loads styles.css render-blocking - the supplement would do nothing");
+  for (const [, , css] of supplements) {
+    const rules = parseCssRules(css);
+    if (!rules.size) fail(file, "critical CSS supplement is empty");
+    for (const [sel, decls] of rules) {
+      const src = STYLESHEET_RULES.get(sel);
+      if (!src) { fail(file, `critical CSS supplement selector "${sel}" has no top-level rule in styles.css`); continue; }
+      for (const [prop, val] of decls)
+        if (src.get(prop) !== val)
+          fail(file, `critical CSS supplement "${sel} { ${prop}: ${val} }" differs from styles.css (${src.get(prop) ?? "not set"})`);
+    }
+  }
 
   /* --- title / description ---------------------------------------- */
   const title = html.match(/<title>([^<]*)<\/title>/)?.[1];
