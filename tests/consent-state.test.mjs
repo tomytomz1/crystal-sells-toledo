@@ -148,7 +148,10 @@ const contactWrite = (calls) => {
   if (patch) return patch.body?.properties || {};
   return calls.find((c) => c.key === CREATE)?.body?.properties || {};
 };
-const cstKeys = (props) => Object.keys(props).filter((k) => k.startsWith("cst_")).sort();
+const consentPropertyNames = new Set(CONSENT_PROPERTIES);
+const cstKeys = (props) => Object.keys(props)
+  .filter((key) => consentPropertyNames.has(key))
+  .sort();
 
 /** A HubSpot contact that granted SMS a while ago, for OLD_PHONE. */
 const grantedSmsProps = {
@@ -173,7 +176,7 @@ describe("feature off", () => {
     assert.equal(consentPropertiesToRead({}).length, 0);
   });
 
-  test("no cst_ property is written", async () => {
+  test("no consent property is written", async () => {
     const calls = await submit({ sms_consent: true, ai_voice_consent: true });
     assert.deepEqual(cstKeys(contactWrite(calls)), []);
   });
@@ -885,7 +888,7 @@ describe("a grant requires durable evidence", () => {
     calls.find((c) => c.key === FORM)?.body?.fields
       ?.find((f) => f.name === "message")?.value || "";
 
-  test("a failed append writes no cst_ property at all", async () => {
+  test("a failed append writes no consent property at all", async () => {
     const calls = await submit(
       { sms_consent: true, ai_voice_consent: true }, {}, { durable: false });
     assert.deepEqual(cstKeys(contactWrite(calls)), [],

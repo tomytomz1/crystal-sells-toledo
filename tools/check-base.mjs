@@ -1089,22 +1089,27 @@ for (const file of pages) {
     .replace(/\/\*[\s\S]*?\*\//g, " ");
   if (/\bip\b|remoteAddress|x-forwarded-for/i.test(consentSrc))
     fail("api/_lib/consent.mjs", "reads an IP address - consent evidence deliberately stores no IP");
-  /* The HubSpot consent adapter owns every cst_ name. Scattering them back
-     into hubspot.mjs is how a schema contract quietly drifts from the
-     portal it describes - and how a suppression property gets written by
-     something that had no business writing one. */
+  /* The HubSpot consent adapter owns every CONSENT cst_ name. Scattering
+     those names back into hubspot.mjs is how a schema contract quietly
+     drifts from the portal it describes - and how a suppression property
+     gets written by something that had no business writing one. Other
+     names in the cst_ namespace can represent unrelated CRM concepts, so
+     the guard compares against the adapter's explicit consent-property set
+     rather than treating the namespace itself as consent. */
   const adapterPath = join(ROOT, "..", "api/_lib/hubspot-consent-state.mjs");
   if (!existsSync(adapterPath))
     fail("api/_lib/hubspot-consent-state.mjs", "missing - the consent state adapter is gone");
   else {
     const adapter = readFileSync(adapterPath, "utf8");
+    const declared = (adapter.match(/"(cst_[a-z_]+)"/g) || []).map((m) => m.slice(1, -1));
+    const consentNames = new Set(declared);
     const hubspotSrcAll = readFileSync(join(ROOT, "..", "api/_lib/hubspot.mjs"), "utf8");
-    const strayNames = (hubspotSrcAll.match(/\bcst_[a-z_]+/g) || []);
+    const strayNames = (hubspotSrcAll.match(/\bcst_[a-z_]+/g) || [])
+      .filter((name) => consentNames.has(name));
     if (strayNames.length)
       fail("api/_lib/hubspot.mjs",
         `hard-codes HubSpot consent property names (${[...new Set(strayNames)].join(", ")}) - they belong to api/_lib/hubspot-consent-state.mjs`);
 
-    const declared = (adapter.match(/"(cst_[a-z_]+)"/g) || []).map((m) => m.slice(1, -1));
     if (new Set(declared).size !== 23)
       fail("api/_lib/hubspot-consent-state.mjs",
         `declares ${new Set(declared).size} consent properties - the approved HubSpot schema has exactly 23`);
