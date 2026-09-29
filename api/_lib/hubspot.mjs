@@ -50,6 +50,29 @@ export const HUBSPOT_TIMEOUT_MS = TIMEOUT_MS;
  * Zoho integration used. Nothing is dropped. */
 export const DETAIL_PROPERTY = "message";
 
+/* A latest-state routing field on the Contact. It is deliberately derived
+ * here from the already validated form type and topic rather than accepted
+ * from the browser. Historical intent remains on the dated form-submission
+ * activities; this property answers only "what did this contact ask about
+ * most recently?". */
+export const INQUIRY_INTENT_PROPERTY = "cst_latest_inquiry_intent";
+
+/** Pure, defensive mapping from validated website enquiry data to HubSpot. */
+export function mapInquiryIntent(formType, topic) {
+  if (formType === "home_value") return "seller";
+  if (formType === "buyer_inquiry") return "buyer";
+  if (formType !== "contact") return "unknown";
+
+  switch (topic) {
+    case "Selling my home": return "seller";
+    case "Buying a home": return "buyer";
+    case "Both — selling and buying": return "both";
+    case "A home valuation": return "seller";
+    case "Something else": return "general_other";
+    default: return "unknown";
+  }
+}
+
 /* HubSpot caps a property value at 65,536 characters / 64 KB. The cap here is
    on BYTES with headroom, because a character count does not bound UTF-8. */
 export const DETAIL_MAX_BYTES = 60000;
@@ -126,6 +149,7 @@ export function toContactProperties(payload) {
      copy of the same history - unbounded and unreadable in the field HubSpot
      renders it in. */
   props[DETAIL_PROPERTY] = capBytes(buildSummary(payload));
+  props[INQUIRY_INTENT_PROPERTY] = mapInquiryIntent(lead.form_type, lead.topic);
   return props;
 }
 

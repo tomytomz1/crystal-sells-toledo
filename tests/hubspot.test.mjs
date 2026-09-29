@@ -13,7 +13,7 @@ import handler from "../api/lead.js";
 import {
   createLead, isConfigured, toContactProperties, toFormSubmission, classify,
   parseConflictId, findContactByEmail, DETAIL_PROPERTY, DETAIL_MAX_BYTES,
-  FORM_FIELDS,
+  FORM_FIELDS, INQUIRY_INTENT_PROPERTY, mapInquiryIntent,
 } from "../api/_lib/hubspot.mjs";
 import { validateLead } from "../api/_lib/validate.mjs";
 import { buildDescription, buildSummary, DESCRIPTION_LABELS, SUMMARY_LABELS }
@@ -164,9 +164,10 @@ describe("Standard contact field mapping", () => {
     assert.equal(props.phone, "(419) 555-0000");
   });
 
-  test("only the agreed standard properties are sent", () => {
+  test("only the agreed Contact properties are sent", () => {
     assert.deepEqual(Object.keys(toContactProperties(payloadOf(validHomeValue))).sort(),
-      ["address", "email", "firstname", "lastname", DETAIL_PROPERTY, "phone"].sort());
+      ["address", "email", "firstname", "lastname", DETAIL_PROPERTY, "phone",
+       INQUIRY_INTENT_PROPERTY].sort());
   });
 
   test("a form with no address does not send `address` at all", () => {
@@ -191,9 +192,55 @@ describe("Standard contact field mapping", () => {
     assert.ok(!("phone" in calls.find((c) => c.method === "PATCH").body.properties));
   });
 
-  test("no custom or unscoped property is ever sent", () => {
+  test("no HubSpot-managed or double-underscore property is sent", () => {
     for (const k of Object.keys(toContactProperties(payloadOf(validHomeValue))))
       assert.ok(!k.startsWith("hs_") && !k.includes("__"), "unexpected property " + k);
+  });
+
+  test("no consent property is added to the Contact write", () => {
+    const keys = Object.keys(toContactProperties(payloadOf(validHomeValue)));
+    for (const prefix of ["cst_sms_", "cst_ai_voice_", "cst_do_not_", "cst_reoptin_"])
+      assert.ok(!keys.some((key) => key.startsWith(prefix)), "unexpected consent property " + prefix);
+  });
+});
+
+
+/* ===================================================================== */
+describe("Latest inquiry intent mapping", () => {
+  const cases = [
+    ["home_value", "", "seller"],
+    ["buyer_inquiry", "", "buyer"],
+    ["contact", "Selling my home", "seller"],
+    ["contact", "Buying a home", "buyer"],
+    ["contact", "Both — selling and buying", "both"],
+    ["contact", "A home valuation", "seller"],
+    ["contact", "Something else", "general_other"],
+    ["contact", "Unrecognized topic", "unknown"],
+  ];
+
+  for (const [formType, topic, expected] of cases) {
+    test(`${formType} / ${topic || "no topic"} maps to ${expected}`, () => {
+      assert.equal(mapInquiryIntent(formType, topic), expected);
+    });
+  }
+
+  test("missing contact topic and unknown form type fall back to unknown", () => {
+    assert.equal(mapInquiryIntent("contact", ""), "unknown");
+    assert.equal(mapInquiryIntent("future_form", "Selling my home"), "unknown");
+  });
+
+  test("Contact create payload includes the derived latest inquiry intent", async () => {
+    const calls = stubFetch({ [SEARCH]: noHits, [CREATE]: { json: { id: "1" } } });
+    await createLead(payloadOf(validHomeValue));
+    assert.equal(calls.find((c) => c.key === CREATE).body.properties[INQUIRY_INTENT_PROPERTY],
+      "seller");
+  });
+
+  test("Contact update payload includes the derived latest inquiry intent", async () => {
+    const calls = stubFetch({ [SEARCH]: hit("77"), [patchKey("77")]: { json: { id: "77" } } });
+    await createLead(payloadOf({ ...validContact, topic: "Buying a home" }));
+    assert.equal(calls.find((c) => c.key === patchKey("77")).body.properties[INQUIRY_INTENT_PROPERTY],
+      "buyer");
   });
 });
 
@@ -293,6 +340,8 @@ describe("The form submission is the timeline activity", () => {
     const names = formCall(calls).body.fields.map((f) => f.name);
     assert.deepEqual([...names].sort(), [...FORM_FIELDS].sort());
     for (const n of names) assert.ok(FORM_FIELDS.includes(n), "undefined form field: " + n);
+    assert.ok(!names.includes(INQUIRY_INTENT_PROPERTY),
+      "the Contact-only intent property leaked into the HubSpot form submission");
   });
 
   test("email is always submitted", async () => {
