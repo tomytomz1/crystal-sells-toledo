@@ -4,6 +4,13 @@
   "outputDirectory": "public",
   "cleanUrls": true,
   "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/sell-house-without-realtor-toledo",
+      "destination": "/sell-house-without-agent-toledo",
+      "permanent": true
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
