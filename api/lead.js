@@ -23,6 +23,12 @@ import {
 } from "./_lib/turnstile.mjs";
 import { log, logError, safeShape } from "./_lib/log.mjs";
 
+/* Production evidence on 29 September 2026 showed a Neon scale-to-zero resume
+   consuming roughly the previous 3 s ledger budget before the INSERT could
+   complete. Keep this lead-path budget local: suppression webhooks retain their
+   existing default rather than inheriting a latency change from this fix. */
+const LEAD_CONSENT_LEDGER_TIMEOUT_MS = 8000;
+
 /** 96 bits of CSPRNG entropy, prefixed so it is recognisable in a CRM record. */
 function submissionId() {
   return "csv_" + randomBytes(12).toString("hex");
@@ -408,10 +414,17 @@ export default async function handler(req, res) {
        because no `cst_*` property was written. Evidence without
        permission is survivable; permission without evidence is the thing
        this whole gate exists to prevent. */
+    const ledgerStarted = Date.now();
     try {
-      await appendConsentEvents(payload.consent);
+      const ledgerResult = await appendConsentEvents(payload.consent, {
+        timeoutMs: LEAD_CONSENT_LEDGER_TIMEOUT_MS,
+      });
       payload.consent.durable = true;
-      log("lead.consent.ledger_appended", { submission_id: sid });
+      log("lead.consent.ledger_appended", {
+        submission_id: sid,
+        ledger_ms: Date.now() - ledgerStarted,
+        ledger_events: ledgerResult.events,
+      });
     } catch (ledgerErr) {
       /* The lead still goes to HubSpot, with its timeline evidence rows
          intact - dropping those would destroy the record that the visitor
@@ -439,6 +452,7 @@ export default async function handler(req, res) {
          failure below gets, and for the same reason. */
       log("lead.consent.ledger_failed", {
         submission_id: sid,
+        ledger_ms: Date.now() - ledgerStarted,
         ...ledgerLogShape(ledgerErr),
       });
     }
