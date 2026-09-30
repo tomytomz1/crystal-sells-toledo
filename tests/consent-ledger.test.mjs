@@ -486,6 +486,13 @@ describe("the append-order guard in tools/check.mjs", () => {
      disarming the guard. */
   const LEDGER_APPEND_CALL = "await appendConsentEvents(";
   const CRM_WRITE_CALL = "await createLead(";
+  /* The whole append statement in api/lead.js, matched literally so the two
+     mutations below move or delete exactly the real call. A change to its
+     shape must fail here rather than let a mutation silently miss. */
+  const APPEND_STMT =
+    "const ledgerResult = await appendConsentEvents(payload.consent, {\n" +
+    "        timeoutMs: LEAD_CONSENT_LEDGER_TIMEOUT_MS,\n" +
+    "      });";
 
   let dir, root;
 
@@ -543,7 +550,6 @@ describe("the append-order guard in tools/check.mjs", () => {
      the import and passed. */
   test("an append moved after the CRM write is refused", () => {
     const src = pristine();
-    const APPEND_STMT = "await appendConsentEvents(payload.consent);";
     const CREATE_STMT = "const result = await createLead(payload);";
     assert.ok(src.includes(APPEND_STMT), "the append statement changed shape");
     assert.ok(src.includes(CREATE_STMT), "the CRM write statement changed shape");
@@ -565,7 +571,7 @@ describe("the append-order guard in tools/check.mjs", () => {
      call while leaving the import behind. */
   test("deleting the append call while keeping the import is refused", () => {
     const src = pristine();
-    const removed = src.replace("await appendConsentEvents(payload.consent);", "/* removed */");
+    const removed = src.replace(APPEND_STMT, "/* removed */");
     assert.ok(removed.includes("appendConsentEvents"), "the import should still be present");
     assert.ok(!removed.includes(LEDGER_APPEND_CALL), "the call should be gone");
 
