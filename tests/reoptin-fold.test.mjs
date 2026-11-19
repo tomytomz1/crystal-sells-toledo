@@ -55,6 +55,14 @@ const REOPTIN = "consent_ledger_reoptin";
    should be read again rather than silently following. */
 const WINDOW = 14 * 24 * 60 * 60;
 
+// Anchor all scenario dates to one UTC day so the 14-day window stays meaningful.
+const scenarioDay = new Date();
+function daysBeforeScenario(days) {
+  const date = new Date(scenarioDay);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
 let dir;
 
 function sql(statement) {
@@ -242,12 +250,12 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("STOP -> fresh website consent -> readiness names the consent", () => {
     const p = "+15555554001";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM1:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", key: "website:sub1:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM1:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, key: "website:sub1:sms:consent_selected" });
 
     const r = readiness(p);
     assert.equal(r.key, "website:sub1:sms:consent_selected");
-    assert.match(r.smsAt, /2026-09-18 09:00:00/);
+    assert.equal(r.smsAt.slice(0, 19), `${daysBeforeScenario(5)} 09:00:00`);
     assert.equal(r.allAt, "-");
     assert.equal(r.version, "CST_SMS_CONSENT_2026_09_V1");
     assert.equal(r.formType, "home_value");
@@ -261,11 +269,11 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("the later append-only clearance is what unblocks, and only it", () => {
     const p = "+15555554002";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM2:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", key: "website:sub2:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM2:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, key: "website:sub2:sms:consent_selected" });
     assert.deepEqual(blockedLanes(p), ["sms"]);
 
-    laneClear({ phone: p, at: "2026-09-21T10:00:00Z", key: "twilio:SM3:sms:unsuppressed" });
+    laneClear({ phone: p, at: `${daysBeforeScenario(2)}T10:00:00Z`, key: "twilio:SM3:sms:unsuppressed" });
 
     /* Gate 8's own question now answers "nothing blocks this number". */
     assert.deepEqual(blockedLanes(p), []);
@@ -284,12 +292,12 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("a STOP after a clearance blocks again", () => {
     const p = "+15555554003";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM4:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-19T12:00:00Z", key: "website:sub3:sms:consent_selected" });
-    laneClear({ phone: p, at: "2026-09-20T10:00:00Z", key: "twilio:SM5:sms:unsuppressed" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM4:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(4)}T12:00:00Z`, key: "website:sub3:sms:consent_selected" });
+    laneClear({ phone: p, at: `${daysBeforeScenario(3)}T10:00:00Z`, key: "twilio:SM5:sms:unsuppressed" });
     assert.deepEqual(blockedLanes(p), []);
 
-    stop({ phone: p, at: "2026-09-22T08:00:00Z", key: "twilio:SM6:sms:suppressed" });
+    stop({ phone: p, at: `${daysBeforeScenario(1)}T08:00:00Z`, key: "twilio:SM6:sms:suppressed" });
     assert.deepEqual(blockedLanes(p), ["sms"]);
     /* AND THE OLD CONSENT NO LONGER QUALIFIES. It pre-dates the new refusal,
        so the number cannot be re-cleared by the submission that cleared it
@@ -313,15 +321,15 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
      Both are measured here rather than argued. */
   test("a STOP racing the clearance still blocks — by event time", () => {
     const p = "+15555554050";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM50:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-19T12:00:00Z", key: "website:sub50:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM50:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(4)}T12:00:00Z`, key: "website:sub50:sms:consent_selected" });
     /* The clearance, as the webhook would write it: occurred_at is the
        START's receipt time, recorded_at is when the INSERT lands. */
-    laneClear({ phone: p, at: "2026-09-20T10:00:00Z", recorded: "2026-09-20T10:00:02Z",
+    laneClear({ phone: p, at: `${daysBeforeScenario(3)}T10:00:00Z`, recorded: `${daysBeforeScenario(3)}T10:00:02Z`,
                 key: "twilio:SM51:sms:unsuppressed" });
     /* A STOP received a second after the START, recorded a second before the
        clearance's INSERT landed. */
-    stop({ phone: p, at: "2026-09-20T10:00:01Z", recorded: "2026-09-20T10:00:01Z",
+    stop({ phone: p, at: `${daysBeforeScenario(3)}T10:00:01Z`, recorded: `${daysBeforeScenario(3)}T10:00:01Z`,
            key: "twilio:SM52:sms:suppressed" });
     assert.deepEqual(blockedLanes(p), ["sms"],
       "a STOP that arrived after the START was cleared by it");
@@ -329,12 +337,12 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("a STOP racing the clearance still blocks — by ingest time", () => {
     const p = "+15555554051";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM53:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-19T12:00:00Z", key: "website:sub51:sms:consent_selected" });
-    laneClear({ phone: p, at: "2026-09-20T10:00:00Z", recorded: "2026-09-20T10:00:02Z",
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM53:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(4)}T12:00:00Z`, key: "website:sub51:sms:consent_selected" });
+    laneClear({ phone: p, at: `${daysBeforeScenario(3)}T10:00:00Z`, recorded: `${daysBeforeScenario(3)}T10:00:02Z`,
                 key: "twilio:SM54:sms:unsuppressed" });
     /* Sent BEFORE the START, delivered after the clearance landed. */
-    stop({ phone: p, at: "2026-09-20T09:59:00Z", recorded: "2026-09-20T10:00:05Z",
+    stop({ phone: p, at: `${daysBeforeScenario(3)}T09:59:00Z`, recorded: `${daysBeforeScenario(3)}T10:00:05Z`,
            key: "twilio:SM55:sms:suppressed" });
     assert.deepEqual(blockedLanes(p), ["sms"],
       "a delayed STOP was discarded by a clearance recorded before it arrived");
@@ -346,18 +354,18 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("a consent made BEFORE the STOP is not a re-opt-in", () => {
     const p = "+15555554010";
-    consent({ phone: p, at: "2026-09-10T12:00:00Z", key: "website:sub10:sms:consent_selected" });
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM10:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(13)}T12:00:00Z`, key: "website:sub10:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM10:sms:suppressed" });
     const r = readiness(p);
-    assert.match(r.smsAt, /2026-09-18/);
+    assert.equal(r.smsAt.slice(0, 10), daysBeforeScenario(5));
     assert.equal(r.key, "-", "a submission made before the refusal was read as a re-opt-in");
   });
 
   /* THE TIE. db/003 resolves its ties toward more blocking; so must this. */
   test("a consent at the EXACT instant of the STOP does not supersede it", () => {
     const p = "+15555554011";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM11:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-18T09:00:00Z", key: "website:sub11:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM11:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "website:sub11:sms:consent_selected" });
     assert.equal(readiness(p).key, "-", "an exact timestamp tie cleared the block");
   });
 
@@ -366,10 +374,10 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
      time alone would silently discard a real, later-arriving opt-out. */
   test("a STOP recorded after a consent still outranks it, whatever its event time", () => {
     const p = "+15555554012";
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", recorded: "2026-09-20T12:00:01Z",
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, recorded: `${daysBeforeScenario(3)}T12:00:01Z`,
               key: "website:sub12:sms:consent_selected" });
     /* Event time EARLIER than the consent; ingest time LATER. */
-    stop({ phone: p, at: "2026-09-19T09:00:00Z", recorded: "2026-09-21T09:00:00Z",
+    stop({ phone: p, at: `${daysBeforeScenario(4)}T09:00:00Z`, recorded: `${daysBeforeScenario(2)}T09:00:00Z`,
            key: "twilio:SM12:sms:suppressed" });
     assert.deepEqual(blockedLanes(p), ["sms"]);
     assert.equal(readiness(p).key, "-",
@@ -396,7 +404,7 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("a null or negative window matches nothing", () => {
     const p = "+15555554014";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM14:sms:suppressed" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM14:sms:suppressed" });
     eventRelative({ phone: p, atExpr: "now()", channel: "sms", type: "consent_selected",
                     source: "website", key: "website:sub14:sms:consent_selected",
                     version: "v1", submission: "sub14" });
@@ -422,17 +430,17 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("consent_not_selected — the record of NOT ticking — is never a grant", () => {
     const p = "+15555554020";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM20:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", type: "consent_not_selected",
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM20:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, type: "consent_not_selected",
               key: "website:sub20:sms:consent_not_selected" });
     assert.equal(readiness(p).key, "-");
   });
 
   test("only a website submission can evidence a disclosure", () => {
     const p = "+15555554021";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM21:sms:suppressed" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM21:sms:suppressed" });
     for (const source of ["twilio", "operator", "retell"])
-      event({ phone: p, at: "2026-09-20T12:00:00Z", channel: "sms",
+      event({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, channel: "sms",
               type: "consent_selected", source,
               key: `${source}:sub21:sms:consent_selected`, version: "v1" });
     assert.equal(readiness(p).key, "-");
@@ -441,15 +449,15 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
   /* TEST 8 — SMS AND AI VOICE ARE COMPLETELY SEPARATE. */
   test("a voice consent does not answer for the SMS lane, or the reverse", () => {
     const p = "+15555554022";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM22:sms:suppressed" });
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", channel: "ai_voice",
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM22:sms:suppressed" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, channel: "ai_voice",
            key: "twilio:SM22:ai_voice:suppressed" });
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", channel: "ai_voice",
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, channel: "ai_voice",
               key: "website:sub22:ai_voice:consent_selected" });
 
     const sms = readiness(p, { channel: "sms" });
-    assert.match(sms.smsAt, /2026-09-18/);
-    assert.match(sms.voiceAt, /2026-09-18/);
+    assert.equal(sms.smsAt.slice(0, 10), daysBeforeScenario(5));
+    assert.equal(sms.voiceAt.slice(0, 10), daysBeforeScenario(5));
     assert.equal(sms.key, "-", "a voice consent qualified for the SMS lane");
 
     /* The voice lane's own answer exists — the function is lane-generic —
@@ -462,8 +470,8 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
   test("another number's consent is invisible here", () => {
     const p = "+15555554023";
     const other = "+15555554024";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM23:sms:suppressed" });
-    consent({ phone: other, at: "2026-09-20T12:00:00Z",
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM23:sms:suppressed" });
+    consent({ phone: other, at: `${daysBeforeScenario(3)}T12:00:00Z`,
               key: "website:sub23:sms:consent_selected" });
     assert.equal(readiness(p).key, "-");
     /* And the other number is not blocked at all. */
@@ -472,12 +480,12 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("the newest qualifying consent is the one named", () => {
     const p = "+15555554025";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM25:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-19T12:00:00Z", key: "website:subA:sms:consent_selected" });
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", key: "website:subB:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM25:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(4)}T12:00:00Z`, key: "website:subA:sms:consent_selected" });
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, key: "website:subB:sms:consent_selected" });
     const r = readiness(p);
     assert.equal(r.key, "website:subB:sms:consent_selected");
-    assert.match(r.at, /2026-09-20/);
+    assert.equal(r.at.slice(0, 10), daysBeforeScenario(3));
   });
 
   /* ===================================================================
@@ -486,9 +494,9 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("a global do-not-contact is reported so the caller can refuse", () => {
     const p = "+15555554030";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", channel: "all",
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, channel: "all",
            key: "twilio:SM30:all:suppressed" });
-    consent({ phone: p, at: "2026-09-20T12:00:00Z", key: "website:sub30:sms:consent_selected" });
+    consent({ phone: p, at: `${daysBeforeScenario(3)}T12:00:00Z`, key: "website:sub30:sms:consent_selected" });
     const r = readiness(p);
     /* THE FUNCTION REPORTS, THE APPLICATION DECIDES. db/004 is lane-generic
        and says what is true: the `all` lane is blocked, and this consent
@@ -499,17 +507,17 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
        what matters HERE is that the fact reaches the caller at all, because
        a function that returned only the lane it was asked about would hide
        it. */
-    assert.match(r.allAt, /2026-09-18/, "the global lane was hidden from the caller");
+    assert.equal(r.allAt.slice(0, 10), daysBeforeScenario(5), "the global lane was hidden from the caller");
     assert.equal(r.key, "website:sub30:sms:consent_selected");
     assert.deepEqual(blockedLanes(p), ["all"]);
   });
 
   test("an SMS consent cannot step over a LATER global refusal", () => {
     const p = "+15555554031";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM31:sms:suppressed" });
-    consent({ phone: p, at: "2026-09-19T12:00:00Z", key: "website:sub31:sms:consent_selected" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM31:sms:suppressed" });
+    consent({ phone: p, at: `${daysBeforeScenario(4)}T12:00:00Z`, key: "website:sub31:sms:consent_selected" });
     assert.equal(readiness(p).key, "website:sub31:sms:consent_selected");
-    stop({ phone: p, at: "2026-09-20T09:00:00Z", channel: "all",
+    stop({ phone: p, at: `${daysBeforeScenario(3)}T09:00:00Z`, channel: "all",
            key: "twilio:SM31b:all:suppressed" });
     assert.equal(readiness(p).key, "-",
       "a consent predating a global do-not-contact still qualified");
@@ -521,11 +529,11 @@ describe("db/004 — re-opt-in readiness, against a real PostgreSQL", { skip }, 
 
   test("the same clearance written twice inserts once", () => {
     const p = "+15555554040";
-    stop({ phone: p, at: "2026-09-18T09:00:00Z", key: "twilio:SM40:sms:suppressed" });
+    stop({ phone: p, at: `${daysBeforeScenario(5)}T09:00:00Z`, key: "twilio:SM40:sms:suppressed" });
     const insert = `INSERT INTO communication_consent_events
         (occurred_at, channel, event_type, phone_e164, source, source_event_id,
          dedupe_key, reason_code, metadata, schema_version)
-      VALUES ('2026-09-21T10:00:00Z','sms','unsuppressed','${p}','twilio','SM41',
+      VALUES ('${daysBeforeScenario(2)}T10:00:00Z','sms','unsuppressed','${p}','twilio','SM41',
               'twilio:SM41:sms:unsuppressed','consumer_request',
               '{"reoptin_confirmation":"twilio_start"}'::jsonb, 1)
       ON CONFLICT DO NOTHING;`;
