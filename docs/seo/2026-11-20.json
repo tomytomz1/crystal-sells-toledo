@@ -1,0 +1,565 @@
+{
+  "generated": "2026-11-23T22:28:25.951Z",
+  "range": {
+    "start": "2026-10-24",
+    "end": "2026-11-20",
+    "days": 28
+  },
+  "sources": {
+    "searchConsole": "queried",
+    "analytics": "queried"
+  },
+  "searchConsole": {
+    "site": "sc-domain:crystalsellstoledo.com",
+    "totals": {
+      "clicks": 2,
+      "impressions": 235,
+      "ctr": 0.00851063829787234,
+      "position": 22.080851063829787
+    },
+    "queries": [
+      {
+        "query": "avoiding closing costs when selling in toledo",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 7.25
+      },
+      {
+        "query": "best way to sell a house as is in toledo",
+        "clicks": 0,
+        "impressions": 9,
+        "ctr": 0,
+        "position": 10.555555555555555
+      },
+      {
+        "query": "crystal toledo",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 9
+      },
+      {
+        "query": "do you need a realtor to sell a house in ohio",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 39.5
+      },
+      {
+        "query": "free house appraisal near me",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 4
+      },
+      {
+        "query": "home sellers agents toledo oh",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 79.66666666666667
+      },
+      {
+        "query": "how to sell a house that needs repairs toledo",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 72
+      },
+      {
+        "query": "how to sell my home fast toledo ohio",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 15.5
+      },
+      {
+        "query": "how to sell rental property toledo ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 39
+      },
+      {
+        "query": "list n sell",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 10
+      },
+      {
+        "query": "sell a house quickly without agent toledo ohio",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 8.142857142857142
+      },
+      {
+        "query": "sell damaged house toledo ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 12
+      },
+      {
+        "query": "sell house as is toledo oh",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 11.571428571428571
+      },
+      {
+        "query": "sell house as is toledo with tenants",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 34.333333333333336
+      },
+      {
+        "query": "sell house needing repairs toledo",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 35
+      },
+      {
+        "query": "sell house without agent cincinnati",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 28
+      },
+      {
+        "query": "sell house without realtor ohio",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 61.333333333333336
+      },
+      {
+        "query": "sell house without repairs toledo",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 61.5
+      },
+      {
+        "query": "sell my house as is toledo oh",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 32
+      },
+      {
+        "query": "sell my house as is toledo ohio",
+        "clicks": 0,
+        "impressions": 37,
+        "ctr": 0,
+        "position": 18.08108108108108
+      },
+      {
+        "query": "sell my house toledo",
+        "clicks": 0,
+        "impressions": 13,
+        "ctr": 0,
+        "position": 36.84615384615385
+      },
+      {
+        "query": "sell my house toledo ohio",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 25.666666666666668
+      },
+      {
+        "query": "sell my house without a realtor toledo",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 57.333333333333336
+      },
+      {
+        "query": "sell my house without agent in ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 32
+      },
+      {
+        "query": "sell my house without agent ohio",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 36.666666666666664
+      },
+      {
+        "query": "sell my house without realtor in toledo ohio",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 31.25
+      },
+      {
+        "query": "sell my house without realtor ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 48
+      },
+      {
+        "query": "sell my property fast toledo ohio",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 61
+      },
+      {
+        "query": "sell vacant property toledo ohio",
+        "clicks": 0,
+        "impressions": 2,
+        "ctr": 0,
+        "position": 50
+      },
+      {
+        "query": "sellers agents toledo oh",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 88.5
+      },
+      {
+        "query": "selling a house in toledo oh",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 12.5
+      },
+      {
+        "query": "selling a house that wont pass inspection in toledo",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 54.75
+      },
+      {
+        "query": "toledo fsbo listing service",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 10
+      },
+      {
+        "query": "toledo home sellers",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 71.5
+      }
+    ],
+    "pages": [
+      {
+        "page": "https://crystalsellstoledo.com/",
+        "clicks": 2,
+        "impressions": 52,
+        "ctr": 0.038461538461538464,
+        "position": 6.3076923076923075
+      },
+      {
+        "page": "https://crystalsellstoledo.com/43551-seller-review",
+        "clicks": 0,
+        "impressions": 8,
+        "ctr": 0,
+        "position": 20.125
+      },
+      {
+        "page": "https://crystalsellstoledo.com/home-value",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 8.833333333333332
+      },
+      {
+        "page": "https://crystalsellstoledo.com/privacy",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 6.333333333333333
+      },
+      {
+        "page": "https://crystalsellstoledo.com/sell",
+        "clicks": 0,
+        "impressions": 44,
+        "ctr": 0,
+        "position": 46.5
+      },
+      {
+        "page": "https://crystalsellstoledo.com/sell-house-without-agent-toledo",
+        "clicks": 0,
+        "impressions": 147,
+        "ctr": 0,
+        "position": 21.8843537414966
+      }
+    ],
+    "daily": [
+      {
+        "date": "2026-10-24",
+        "clicks": 0,
+        "impressions": 9,
+        "ctr": 0,
+        "position": 33.666666666666664
+      },
+      {
+        "date": "2026-10-25",
+        "clicks": 0,
+        "impressions": 8,
+        "ctr": 0,
+        "position": 29.125
+      },
+      {
+        "date": "2026-10-26",
+        "clicks": 0,
+        "impressions": 12,
+        "ctr": 0,
+        "position": 18.083333333333332
+      },
+      {
+        "date": "2026-10-27",
+        "clicks": 0,
+        "impressions": 5,
+        "ctr": 0,
+        "position": 15
+      },
+      {
+        "date": "2026-10-28",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 15
+      },
+      {
+        "date": "2026-10-29",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 15
+      },
+      {
+        "date": "2026-10-30",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 22.333333333333332
+      },
+      {
+        "date": "2026-10-31",
+        "clicks": 0,
+        "impressions": 1,
+        "ctr": 0,
+        "position": 25
+      },
+      {
+        "date": "2026-11-01",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 24.857142857142858
+      },
+      {
+        "date": "2026-11-02",
+        "clicks": 0,
+        "impressions": 8,
+        "ctr": 0,
+        "position": 37.75
+      },
+      {
+        "date": "2026-11-03",
+        "clicks": 0,
+        "impressions": 24,
+        "ctr": 0,
+        "position": 45.75
+      },
+      {
+        "date": "2026-11-04",
+        "clicks": 0,
+        "impressions": 10,
+        "ctr": 0,
+        "position": 8.1
+      },
+      {
+        "date": "2026-11-05",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 9
+      },
+      {
+        "date": "2026-11-06",
+        "clicks": 0,
+        "impressions": 4,
+        "ctr": 0,
+        "position": 12.75
+      },
+      {
+        "date": "2026-11-07",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 16.166666666666664
+      },
+      {
+        "date": "2026-11-08",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 31
+      },
+      {
+        "date": "2026-11-09",
+        "clicks": 0,
+        "impressions": 11,
+        "ctr": 0,
+        "position": 38.54545454545455
+      },
+      {
+        "date": "2026-11-10",
+        "clicks": 0,
+        "impressions": 6,
+        "ctr": 0,
+        "position": 11.166666666666666
+      },
+      {
+        "date": "2026-11-11",
+        "clicks": 0,
+        "impressions": 7,
+        "ctr": 0,
+        "position": 11.857142857142858
+      },
+      {
+        "date": "2026-11-12",
+        "clicks": 0,
+        "impressions": 10,
+        "ctr": 0,
+        "position": 5.4
+      },
+      {
+        "date": "2026-11-13",
+        "clicks": 0,
+        "impressions": 11,
+        "ctr": 0,
+        "position": 8.181818181818182
+      },
+      {
+        "date": "2026-11-14",
+        "clicks": 0,
+        "impressions": 10,
+        "ctr": 0,
+        "position": 16
+      },
+      {
+        "date": "2026-11-15",
+        "clicks": 1,
+        "impressions": 9,
+        "ctr": 0.1111111111111111,
+        "position": 15
+      },
+      {
+        "date": "2026-11-16",
+        "clicks": 0,
+        "impressions": 12,
+        "ctr": 0,
+        "position": 24.5
+      },
+      {
+        "date": "2026-11-17",
+        "clicks": 0,
+        "impressions": 20,
+        "ctr": 0,
+        "position": 29.3
+      },
+      {
+        "date": "2026-11-18",
+        "clicks": 0,
+        "impressions": 12,
+        "ctr": 0,
+        "position": 10.75
+      },
+      {
+        "date": "2026-11-19",
+        "clicks": 1,
+        "impressions": 11,
+        "ctr": 0.09090909090909091,
+        "position": 8.272727272727273
+      },
+      {
+        "date": "2026-11-20",
+        "clicks": 0,
+        "impressions": 3,
+        "ctr": 0,
+        "position": 11.666666666666666
+      }
+    ],
+    "anonymisedImpressions": 86
+  },
+  "analytics": {
+    "property": "552286907",
+    "totals": {
+      "sessions": 21,
+      "users": 20,
+      "keyEvents": 0
+    },
+    "channels": [
+      {
+        "channel": "Direct",
+        "sessions": 14,
+        "users": 14,
+        "keyEvents": 0
+      },
+      {
+        "channel": "Organic Search",
+        "sessions": 5,
+        "users": 4,
+        "keyEvents": 0
+      },
+      {
+        "channel": "Organic Social",
+        "sessions": 1,
+        "users": 1,
+        "keyEvents": 0
+      },
+      {
+        "channel": "Referral",
+        "sessions": 1,
+        "users": 1,
+        "keyEvents": 0
+      }
+    ],
+    "landingPages": [
+      {
+        "page": "/",
+        "sessions": 15,
+        "keyEvents": 0
+      },
+      {
+        "page": "/about",
+        "sessions": 2,
+        "keyEvents": 0
+      },
+      {
+        "page": "/contact",
+        "sessions": 2,
+        "keyEvents": 0
+      },
+      {
+        "page": "/privacy",
+        "sessions": 1,
+        "keyEvents": 0
+      },
+      {
+        "page": "/sell",
+        "sessions": 1,
+        "keyEvents": 0
+      }
+    ]
+  }
+}
